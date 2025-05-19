@@ -1,108 +1,82 @@
 package main
 
+/*
+ * NZBrefreshX or NZBreX
+ *
+ *    Code based on:
+ *     github.com/Tensai75/nzbrefresh#commit:cc2a8b7  (MIT License)
+ *
+ * Includes Code:
+ *     github.com/go-while/go-cpu-mem-profiler        (MIT License)
+ *
+ * Foreign Includes:
+ *     github.com/Tensai75/nzbparser#commit:a1e0d80   (MIT License)
+ *     github.com/Tensai75/cmpb#commit:16fb79f        (MIT License)
+ *     github.com/fatih/color#commit:4c0661           (MIT License)
+ *     github.com/go-yenc/yenc ( gopkg.in/yenc.v0 )   (MIT License)
+ *
+ */
+
 import (
-	"bytes"
-	"context"
-	"encoding/csv"
-	"encoding/json"
+	"flag"
 	"fmt"
+	"github.com/Tensai75/cmpb"
+	"github.com/fatih/color"
+	"github.com/go-while/go-cpu-mem-profiler"
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
+	"syscall"
 	"time"
-
-	"github.com/Tensai75/cmpb"
-	"github.com/Tensai75/nntp"
-	"github.com/Tensai75/nntpPool"
-	"github.com/Tensai75/nzbparser"
-	"github.com/fatih/color"
-)
-
-type (
-	Provider struct {
-		Name                  string
-		Host                  string
-		Port                  uint32
-		SSL                   bool
-		SkipSslCheck          bool
-		Username              string
-		Password              string
-		MaxConns              uint32
-		ConnWaitTime          time.Duration
-		IdleTimeout           time.Duration
-		HealthCheck           bool
-		MaxTooManyConnsErrors uint32
-		MaxConnErrors         uint32
-
-		pool         nntpPool.ConnectionPool
-		capabilities struct {
-			ihave bool
-			post  bool
-		}
-		articles struct {
-			checked   atomic.Uint64
-			available atomic.Uint64
-			missing   atomic.Uint64
-			refreshed atomic.Uint64
-		}
-	}
-
-	Config struct {
-		providers []Provider
-	}
-)
-
-type (
-	segmentChanItem struct {
-		segment  nzbparser.NzbSegment
-		fileName string
-	}
-	providerStatistic map[string]uint64
-	fileStatistic     struct {
-		available     providerStatistic
-		totalSegments uint64
-	}
-	filesStatistic map[string]*fileStatistic
 )
 
 var (
-	appName      = "NZBRefresh"
-	appVersion   = ""           // Github tag
-	nzbfile      *nzbparser.Nzb // the parsed NZB file structure
-	providerList []Provider     // the parsed provider list structure
+	Prof         *prof.Profiler
+	cfg          = &Config{opt: &CFG{}}
+	appName      = "NZBreX"
+	appVersion   = "-"       // Github tag or built date
+	nzbgroups    []string    // informative
+	providerList []*Provider // the parsed provider list structure
 
-	ihaveProviders []*Provider // Providers with IHAVE capability
-	postProviders  []*Provider // Providers with POST capability
-
-	err           error
-	maxConns      uint32
-	maxConnsLock  sync.Mutex
-	segmentChan   chan segmentChanItem
-	segmentChanWG sync.WaitGroup
-	sendArticleWG sync.WaitGroup
-
-	preparationStartTime  time.Time
+	globalmux         sync.RWMutex
+	stop_chan         chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
+	memlim            *MemLimiter
+	cache             *Cache
+	cacheON           bool
+	segmentList       []*segmentChanItem
+	segmentChansCheck map[string]chan *segmentChanItem
+	segmentChansDowns map[string]chan *segmentChanItem
+	segmentChansReups map[string]chan *segmentChanItem
+	memDL map[string]chan *segmentChanItem // with -checkfirst queues items here
+	memUP map[string]chan *segmentChanItem // TODO: process uploads after downloads (possible only with cacheON)
+	Counter               *Counter_uint64
+	postProviders         int    // counts Providers with IHAVE/POST/TAKETHIS capability
 	segmentCheckStartTime time.Time
-	segmentBar            *cmpb.Bar
-	uploadBar             *cmpb.Bar
-	uploadBarStarted      bool
-	uploadBarMutex        sync.Mutex
-	progressBars          = cmpb.NewWithParam(&cmpb.Param{
-		Interval:     200 * time.Microsecond,
+	segmentCheckEndTime   time.Time
+	segmentCheckTook      time.Duration
+
+	segmentBar   *cmpb.Bar
+	upBar        *cmpb.Bar
+	dlBar        *cmpb.Bar
+	upBarStarted bool
+	dlBarStarted bool
+	BarMutex     sync.Mutex
+	progressBars = cmpb.NewWithParam(&cmpb.Param{
+		Interval:     5000 * time.Millisecond,
 		Out:          color.Output,
 		ScrollUp:     cmpb.AnsiScrollUp,
-		PrePad:       0,
-		KeyWidth:     18,
-		MsgWidth:     5,
-		PreBarWidth:  15,
+		PrePad:       1,
+		KeyWidth:     8,
+		MsgWidth:     8,
+		PreBarWidth:  12,
 		BarWidth:     42,
-		PostBarWidth: 25,
+		PostBarWidth: 4,
 		Post:         "...",
 		KeyDiv:       ':',
 		LBracket:     '[',
@@ -111,539 +85,354 @@ var (
 		Full:         '=',
 		Curr:         '>',
 	})
-	fileStat     = make(filesStatistic)
-	fileStatLock sync.Mutex
+
+	//fileStat     = make(filesStatistic)
+	//fileStatLock sync.Mutex
+	D = "3" // prints stats numbers zero (0003) padded or whitespace padded (  3). default to: 000
 )
 
-func init() {
-	parseArguments()
-	fmt.Println(args.Version())
-
-	if args.Debug {
-		logFileName := strings.TrimSuffix(filepath.Base(args.NZBFile), filepath.Ext(filepath.Base(args.NZBFile))) + ".log"
-		f, err := os.Create(logFileName)
-		if err != nil {
-			exit(fmt.Errorf("unable to open debug log file: %v", err))
-		}
-		log.SetOutput(f)
-	} else {
-		log.SetOutput(io.Discard)
+func dumpGoroutines() {
+	f, err := os.Create("goroutines.prof")
+	if err != nil {
+		fmt.Println("Could not create file:", err)
+		return
 	}
+	defer f.Close()
 
-	log.Print("preparing...")
-	preparationStartTime = time.Now()
-	// parse the argument
-
-	// load the NZB file
-	if nzbfile, err = loadNzbFile(args.NZBFile); err != nil {
-		exit(fmt.Errorf("unable to load NZB file '%s': %v'", args.NZBFile, err))
-	}
-
-	// load the provider list
-	if providerList, err = loadProviderList(args.Provider); err != nil {
-		exit(fmt.Errorf("unable to load provider list: %v", err))
-	}
-
-	go func() {
-		for {
-			select {
-			case v := <-nntpPool.LogChan:
-				log.Printf("NNTPPool: %v", v)
-			// case d := <-nntpPool.DebugChan:
-			// log.Printf("NNTPPool: %v", d)
-			case w := <-nntpPool.WarnChan:
-				log.Printf("NNTPPool Error: %v", w)
-			}
-		}
-	}()
-
-	// setup the nntp connection pool for each provider
-	var providerWG sync.WaitGroup
-	for n := range providerList {
-		n := n
-		providerWG.Add(1)
-		go func(provider *Provider) {
-			defer providerWG.Done()
-			if pool, err := nntpPool.New(&nntpPool.Config{
-				Name:                  provider.Name,
-				Host:                  provider.Host,
-				Port:                  provider.Port,
-				SSL:                   provider.SSL,
-				SkipSSLCheck:          provider.SkipSslCheck,
-				User:                  provider.Username,
-				Pass:                  provider.Password,
-				MaxConns:              provider.MaxConns,
-				ConnWaitTime:          time.Duration(provider.ConnWaitTime) * time.Second,
-				IdleTimeout:           time.Duration(provider.IdleTimeout) * time.Second,
-				HealthCheck:           provider.HealthCheck,
-				MaxTooManyConnsErrors: provider.MaxTooManyConnsErrors,
-				MaxConnErrors:         provider.MaxConnErrors,
-			}, 0); err != nil {
-				exit(fmt.Errorf("unable to create the connection pool for provider '%s': %v", providerList[n].Name, err))
-			} else {
-				provider.pool = pool
-			}
-
-			// calculate the max connections
-			maxConnsLock.Lock()
-			if maxConns < provider.MaxConns {
-				maxConns = provider.MaxConns
-			}
-			maxConnsLock.Unlock()
-
-			// check the ihave and post capabilities of the provider
-			if ihave, post, err := checkCapabilities(&providerList[n]); err != nil {
-				exit(fmt.Errorf("unable to check capabilities of provider '%s': %v", providerList[n].Name, err))
-			} else {
-				providerList[n].capabilities.ihave = ihave
-				providerList[n].capabilities.post = post
-				log.Printf("capabilities of '%s': IHAVE: %v | POST: %v", providerList[n].Name, ihave, post)
-			}
-		}(&providerList[n])
-	}
-	providerWG.Wait()
-
-	// check if we have at least one provider with IHAVE or POST capability
-	for n := range providerList {
-		if providerList[n].capabilities.ihave {
-			ihaveProviders = append(ihaveProviders, &providerList[n])
-		}
-		if providerList[n].capabilities.post {
-			postProviders = append(postProviders, &providerList[n])
-		}
-	}
-	if len(ihaveProviders) == 0 && len(postProviders) == 0 {
-		log.Print("no provider has IHAVE or POST capability")
-	}
-
-	// make the channels
-	segmentChan = make(chan segmentChanItem, 8*maxConns)
-
-	// run the go routines
-	for i := uint32(0); i < 4*maxConns; i++ {
-		go processSegment()
-	}
-
-	log.Printf("preparation took %v", time.Since(preparationStartTime))
+	pprof.Lookup("goroutine").WriteTo(f, 2)
+	fmt.Println("Goroutines dumped to goroutines.prof")
 }
 
+func init() {
+	stop_chan = make(chan struct{}, 1)
+	// Set up signal handler
+	go func() {
+		// 'kill -SIGUSR1 $(pidof nzbrex)' to dump running goroutines
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGUSR1)
+		<-sigs
+		dumpGoroutines()
+	}()
+	Counter = NewCounter()
+	Prof = prof.NewProf()
+} // end func init
+
 func main() {
+	colors := new(cmpb.BarColors)
+	var err error
+	var version bool
+	var runProf bool
+	var testproc bool
 
-	startString := fmt.Sprintf("starting segment check of %v segments", nzbfile.TotalSegments)
-	if args.CheckOnly {
-		startString = startString + " (check only, no re-upload)"
+	flag.BoolVar(&version, "version", false, "prints app version")
+	flag.BoolVar(&testproc, "testproc", false, "testing watchdir processor code")
+	// essentials
+	flag.StringVar(&cfg.opt.NZBfilepath, "nzb", "test.nzb", "/path/file.nzb")
+	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
+	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
+	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
+	flag.BoolVar(&cfg.opt.Verify, "verify", false, "[true|false] waits and tries to verify/recheck all reups (default: false) !not implemented: TODO!")
+	// cache and mem
+	flag.IntVar(&cfg.opt.MemMax, "mem", 0, "limit memory usage to N segments in RAM ( 0 defaults to number of total provider connections*2 or what you set but usually there is no need for more. if your 'MEM' is full: your upload is just slow. giving more mem will NOT help!)")
+	flag.StringVar(&cfg.opt.Cachedir, "cd", "", "/path/to/cache/dir")
+	flag.BoolVar(&cfg.opt.CheckCacheOnBoot, "cc", false, "[true|false] checks nzb vs cache on boot (default: false)")
+	flag.IntVar(&cfg.opt.CRW, "crw", 100, "sets number of Cache Reader and Writer routines to equal amount")
+	// header and yenc
+	flag.BoolVar(&cfg.opt.CleanHeaders, "cleanhdr", true, "[true|false] removes unwanted headers. only change this if you know why! (default: true) ")
+	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false)")
+	// debug output flags
+	flag.BoolVar(&runProf, "prof", false, "starts cpu+mem profiler: waits 20sec and runs 120sec")
+	flag.BoolVar(&cfg.opt.Verbose, "verbose", true, "[true|false] a little more output than nothing (default: false)")
+	flag.BoolVar(&cfg.opt.Discard, "discard", false, "[true|false] reduce console output to minimum (default: false)")
+	flag.Int64Var(&cfg.opt.LogPrintEvery, "print", 5, "prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished")
+	flag.BoolVar(&cfg.opt.Log, "log", false, "[true|false] logs to file (default: false)")
+	flag.BoolVar(&cfg.opt.BUG, "bug", false, "[true|false] full debug (default: false)")
+	flag.BoolVar(&cfg.opt.Debug, "debug", false, "[true|false] part debug (default: false)")
+	flag.BoolVar(&cfg.opt.DebugCache, "debugcache", false, "[true|false] (default: false)")
+	// rate limiter
+	flag.IntVar(&cfg.opt.SloMoC, "slomoc", 0, "SloMo'C' limiter sleeps N milliseconds before checking")
+	flag.IntVar(&cfg.opt.SloMoD, "slomod", 0, "SloMo'D' limiter sleeps N milliseconds before downloading")
+	flag.IntVar(&cfg.opt.SloMoU, "slomou", 0, "SloMo'U' limiter sleeps N milliseconds before uploading")
+	// no need to change this
+	flag.IntVar(&cfg.opt.MaxArtSize, "maxartsize", 1*1024*1024, "limits article size to 1M (mostly articles have ~700K only)")
+
+	// cosmetics: segmentBar needs fixing: only when everything else works!
+	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
+	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
+	//flag.StringVar(&configfile, "configfile", "config.json", "use this config file") // FIXME TODO
+	flag.Parse()
+	if version {
+		fmt.Printf("%s version: [%s]\n", appName, appVersion)
+		os.Exit(0)
 	}
-	fmt.Println(strings.ToUpper(startString[:1]) + startString[1:])
-	log.Print(startString)
-	segmentCheckStartTime = time.Now()
+	if runProf {
+		go Prof.PprofWeb("[::]:61234")
+		log.Printf("Started PprofWeb @ Port :61234")
+		go func() {
+			time.Sleep(time.Second * 20)
+			log.Printf("Prof start capturing cpu/mem profiles")
+			if _, err := Prof.StartCPUProfile(); err != nil {
+				log.Printf("ERROR Prof.StartCPUProfile err='%v'", err)
+				return
+			}
+			time.Sleep(time.Second * 120)
+			Prof.StopCPUProfile()
+			log.Printf("Prof stop capturing cpu/mem profiles")
+		}()
+		go func() {
+			if err := Prof.StartMemProfile(120*time.Second, 20*time.Second); err != nil {
+				log.Printf("ERROR Prof.StartMemProfile err='%v'", err)
+			}
+		}()
+	} // end bootProf
 
-	// segment check progressbar
-	segmentBar = progressBars.NewBar("Checking segments", nzbfile.TotalSegments)
-	segmentBar.SetPreBar(cmpb.CalcSteps)
-	segmentBar.SetPostBar(cmpb.CalcTime)
+	// experimental test of processor/sessions
 
-	// start progressbar
-	progressBars.Start()
+	if testproc {
+		processor := &PROCESSOR{}
+		nzbdir := "nzbs"
+		var refreshEvery int64 = 15 // seconds
+		if DirExists(nzbdir) {
+			if err := processor.NewProcessor(nzbdir, refreshEvery); err != nil {
+				log.Printf("Error NewProcessor err='%v'", err)
+				os.Exit(1)
+			}
+			time.Sleep(3 * time.Second)
+			log.Printf("that's it! you hit an infinite wait! nothing more will happen!")
+			log.Printf("put new files in the folder and see them coming up...")
+			log.Printf("connecting this to the rest of the source ... ")
+			select {} // infinite wait!
+		} else {
+			log.Printf("watchDir not found: '%s'", nzbdir)
+		}
+	}
+
+
+	if cfg.opt.Debug {
+		log.Printf("loadedConfig flag.Parse cfg.opt='%#v'", cfg.opt)
+	}
+
+	cacheON = (cfg.opt.Cachedir != "" && cfg.opt.CRW > 0)
+
+	if cfg.opt.Bar && cfg.opt.Colors {
+		colors.Post, colors.KeyDiv, colors.LBracket, colors.RBracket =
+			color.HiCyanString, color.HiCyanString, color.HiCyanString, color.HiCyanString
+		colors.Key = color.HiWhiteString
+		colors.Msg, colors.Empty = color.HiYellowString, color.HiYellowString
+		colors.Full = color.HiGreenString
+		colors.Curr = color.GreenString
+		colors.PreBar, colors.PostBar = color.HiYellowString, color.HiMagentaString
+	}
+
+	// setup debug modes
+	if cfg.opt.Debug || cfg.opt.BUG {
+		if !cfg.opt.Debug {
+			cfg.opt.Debug = true
+		}
+		if !cfg.opt.Verbose {
+			cfg.opt.Verbose = true
+		}
+		if !cfg.opt.DebugCache {
+			cfg.opt.DebugCache = true
+		}
+		if cfg.opt.Log {
+			logFileName := strings.TrimSuffix(filepath.Base(cfg.opt.NZBfilepath), filepath.Ext(filepath.Base(cfg.opt.NZBfilepath))) + ".log"
+			f, err := os.Create(logFileName)
+			if err != nil {
+				log.Printf("unable to open debug log file: %v", err)
+				os.Exit(1)
+			}
+			log.SetOutput(f) //DEBUG
+		}
+	} else {
+		if cfg.opt.Discard {
+			log.SetOutput(io.Discard) // DEBUG
+		}
+	} // end debugs
+
+	preparationStartTime := time.Now()
+	if cfg.opt.Debug {
+		log.Printf("Loading NZB: '%s'", cfg.opt.NZBfilepath)
+	}
+	nzbfile, err := loadNzbFile(cfg.opt.NZBfilepath)
+	if err != nil {
+		log.Printf("unable to load NZB file '%s': %v'", cfg.opt.NZBfilepath, err)
+		os.Exit(1)
+	}
+	nzbhashname := SHA256str(filepath.Base(cfg.opt.NZBfilepath))
+	if len(nzbfile.Files) <= 0 {
+		log.Printf("error in NZB file '%s': nzbfile.Files=0'", cfg.opt.NZBfilepath)
+		os.Exit(1)
+	}
 
 	// loop through all file tags within the NZB file
 	for _, file := range nzbfile.Files {
-		fileStatLock.Lock()
-		fileStat[file.Filename] = new(fileStatistic)
-		fileStat[file.Filename].available = make(providerStatistic)
-		fileStat[file.Filename].totalSegments = uint64(file.TotalSegments)
-		fileStatLock.Unlock()
 		// loop through all segment tags within each file tag
+		if cfg.opt.Debug {
+			for _, agroup := range file.Groups {
+				if agroup != "" && !slices.Contains(nzbgroups, agroup) {
+					nzbgroups = append(nzbgroups, agroup)
+				}
+			}
+			log.Printf("NewsGroups: %v", nzbgroups)
+		}
+		// filling segmentList
 		for _, segment := range file.Segments {
-			segmentChanWG.Add(1)
-			segmentChan <- segmentChanItem{segment, file.Filename}
+			if cfg.opt.BUG {
+				log.Printf("reading nzb: Id='%s' file='%s'", segment.Id, file.Filename)
+			}
+			// if you add more variables to 'segmentChanItem struct': compiler always fails here!
+			item := &segmentChanItem{
+				segment,
+				make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)),
+				sync.RWMutex{}, nil, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), file.Number, 0, 0, 0, 0, 0, &nzbhashname}
+			segmentList = append(segmentList, item)
 		}
 	}
-	segmentChanWG.Wait()
-	segmentBar.SetMessage("done")
-	sendArticleWG.Wait()
-	if uploadBarStarted {
-		uploadBar.SetMessage("done")
-	}
-	progressBars.Wait()
-	log.Printf("segment check took %v | %v ms/segment", time.Since(segmentCheckStartTime), float32(time.Since(segmentCheckStartTime).Milliseconds())/float32(nzbfile.Segments))
-	for n := range providerList {
-		result := fmt.Sprintf("Results for '%s': checked: %v | available: %v | missing: %v | refreshed: %v | %v connections used",
-			providerList[n].Name,
-			providerList[n].articles.checked.Load(),
-			providerList[n].articles.available.Load(),
-			providerList[n].articles.missing.Load(),
-			providerList[n].articles.refreshed.Load(),
-			providerList[n].pool.MaxConns(),
-		)
-		fmt.Println(result)
-		log.Print(result)
-	}
-	for n := range providerList {
-		go providerList[n].pool.Close()
-	}
-	runtime := fmt.Sprintf("Total runtime %v | %v ms/segment", time.Since(preparationStartTime), float32(time.Since(preparationStartTime).Milliseconds())/float32(nzbfile.Segments))
-	fmt.Println(runtime)
-	log.Print(runtime)
-	writeCsvFile()
-}
+	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
+	artsize := mibsize / float64(len(segmentList)) * 1000
+	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/art )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
 
-func loadNzbFile(path string) (*nzbparser.Nzb, error) {
-	if b, err := os.Open(path); err != nil {
-		return nil, err
-	} else {
-		defer b.Close()
-		if nzbfile, err := nzbparser.Parse(b); err != nil {
-			return nil, err
-		} else {
-			return nzbfile, nil
-		}
+	// cosmetics
+	if cfg.opt.Bar {
+		cfg.opt.Verbose = false
 	}
-}
+	// left-padding for log output
+	digStr := fmt.Sprintf("%d", len(segmentList))
+	D = fmt.Sprintf("%d", len(digStr))
 
-func loadProviderList(path string) ([]Provider, error) {
-	if file, err := os.ReadFile(path); err != nil {
-		return nil, err
-	} else {
-		cfg := Config{}
-		if err := json.Unmarshal(file, &cfg.providers); err != nil {
-			return nil, err
-		}
-		return cfg.providers, nil
+	// load the provider list
+	if err := loadProviderList(cfg.opt.ProvFile); err != nil {
+		log.Printf("unable to load providerfile '%s' list: %v", cfg.opt.ProvFile, err)
+		os.Exit(1)
 	}
-}
-
-func checkCapabilities(provider *Provider) (bool, bool, error) {
-	if conn, err := provider.pool.Get(context.TODO()); err != nil {
-		return false, false, err
-	} else {
-		defer provider.pool.Put(conn)
-		var ihave, post bool
-		if capabilities, err := conn.Capabilities(); err == nil {
-			for _, capability := range capabilities {
-				if strings.ToLower(capability) == "ihave" {
-					ihave = true
-				}
-				if strings.ToLower(capability) == "post" {
-					post = true
-				}
-			}
-		} else {
-			// nntp server is not RFC 3977 compliant
-			// check post capability
-			article := new(nntp.Article)
-			if err := conn.Post(article); err != nil {
-				if err.Error()[0:3] != "440" {
-					post = true
-				}
-			} else {
-				post = true
-			}
-			// check ihave capability
-			if err := conn.IHave(article); err != nil {
-				if err.Error()[0:3] != "500" {
-					ihave = true
-				}
-			} else {
-				ihave = true
-			}
-		}
-		return ihave, post, nil
-	}
-}
-
-func processSegment() {
-	for segmentChanItem := range segmentChan {
-		segment := segmentChanItem.segment
-		fileName := segmentChanItem.fileName
-		func() {
-			defer func() {
-				segmentChanWG.Done()
-				segmentBar.Increment()
-			}()
-			// positiv provider list (providers who have the article)
-			var availableOn []*Provider
-			var availableOnLock sync.Mutex
-			// negative provider list (providers who don't have the article)
-			var missingOn []*Provider
-			var missingOnLock sync.Mutex
-			// segment check waitgroup
-			var segmentCheckWG sync.WaitGroup
-			// loop through each provider in the provider list
-			for n := range providerList {
-				n := n
-				segmentCheckWG.Add(1)
-				go func() {
-					defer segmentCheckWG.Done()
-					// check if message is available on the provider
-					if isAvailable, err := checkMessageID(&providerList[n], segment.Id); err != nil {
-						// error handling
-						log.Print(fmt.Errorf("unable to check article <%s> on provider '%s': %v", segment.Id, providerList[n].Name, err))
-						// TODO: What do we do with such errors??
-					} else {
-						providerList[n].articles.checked.Add(1)
-						if isAvailable {
-							providerList[n].articles.available.Add(1)
-							fileStatLock.Lock()
-							fileStat[fileName].available[providerList[n].Name]++
-							fileStatLock.Unlock()
-							// if yes add the provider to the positiv list
-							availableOnLock.Lock()
-							availableOn = append(availableOn, &providerList[n])
-							availableOnLock.Unlock()
-						} else {
-							providerList[n].articles.missing.Add(1)
-							// if yes add the provider to the positiv list
-							missingOnLock.Lock()
-							missingOn = append(missingOn, &providerList[n])
-							missingOnLock.Unlock()
-						}
-					}
-				}()
-			}
-			segmentCheckWG.Wait()
-			// if negativ list contains entries at least one provider is missing the article
-			if !args.CheckOnly && len(missingOn) > 0 {
-				log.Printf("article <%s> is missing on at least one provider", segment.Id)
-				// check if positiv list contains entries
-				// without at least on provider having the article we cannot fix the others
-				if len(availableOn) > 0 {
-					uploadBarMutex.Lock()
-					if uploadBarStarted {
-						uploadBar.IncrementTotal()
-					} else {
-						uploadBar = progressBars.NewBar("Uploading articles", 1)
-						uploadBar.SetPreBar(cmpb.CalcSteps)
-						uploadBar.SetPostBar(cmpb.CalcTime)
-						uploadBarStarted = true
-					}
-					uploadBarMutex.Unlock()
-					// load article
-					if article, err := loadArticle(availableOn, segment.Id); err != nil {
-						log.Print(err)
-						uploadBar.Increment()
-					} else {
-						// reupload article
-						sendArticleWG.Add(1)
-						go func() {
-							// reupload article
-							if err := reuploadArticle(missingOn, article, segment.Id); err != nil {
-								// on error, try re-uploading on one of the providers having the article
-								if err := reuploadArticle(availableOn, article, segment.Id); err != nil {
-									log.Print(err)
-								}
-							}
-							uploadBar.Increment()
-							sendArticleWG.Done()
-						}()
-					}
-				} else {
-					// error handling if article is missing on all providers
-					log.Print(fmt.Errorf("article <%s> is missing on all providers", segment.Id))
-				}
-			}
-		}()
-	}
-}
-
-func checkMessageID(provider *Provider, messageID string) (bool, error) {
-	if conn, err := provider.pool.Get(context.TODO()); err != nil {
-		return false, err
-	} else {
-		defer provider.pool.Put(conn)
-		if _, _, err := conn.Stat("<" + messageID + ">"); err == nil {
-			// if article is availabel return true
-			return true, nil
-		} else {
-			if err.Error()[0:3] == "430" {
-				// upon error "430 No Such Article" return false
-				return false, nil
-			} else {
-				// upon any other error return error
-				return false, err
-			}
-		}
-	}
-}
-
-func loadArticle(providerList []*Provider, messageID string) (*nntp.Article, error) {
+	totalMaxConns := 0
 	for _, provider := range providerList {
-		// try to load the article from the provider
-		log.Printf("loading article <%s> from provider '%s'", messageID, provider.Name)
-		if article, err := getArticleFromProvider(provider, messageID); err != nil {
-			// if the article cannot be loaded continue with the next provider on the list
-			log.Print(fmt.Errorf("unable to load article <%s> from provider '%s': %v", messageID, provider.Name, err))
+		totalMaxConns += provider.MaxConns
+	}
+
+	if cfg.opt.MemMax <= 0 {
+		cfg.opt.MemMax = totalMaxConns
+	}
+	memlim = NewMemLimiter(cfg.opt.MemMax)
+
+	if cfg.opt.Debug {
+		log.Printf("Loaded providerList: %d ... preparation took %v ms cfg.opt.MemMax=%d", len(providerList), time.Since(preparationStartTime).Milliseconds(), cfg.opt.MemMax)
+	}
+
+	var waitWorker sync.WaitGroup
+	var workerWGconnEstablish sync.WaitGroup
+	var waitDivider sync.WaitGroup
+	var waitDividerDone sync.WaitGroup
+
+	// boot cache routines
+	if cacheON {
+		cache = NewCache(
+			cfg.opt.Cachedir,
+			cfg.opt.CRW,
+			cfg.opt.CheckOnly,
+			cfg.opt.MaxArtSize,
+			cfg.opt.DebugCache)
+
+		if cache == nil {
+			log.Printf("ERROR Cache failed... is nil!")
+			os.Exit(1)
+		}
+		if !cache.MkSubDir(nzbhashname) {
+			os.Exit(1)
+		}
+	}
+
+	if cfg.opt.Bar {
+		// segment check progressbar
+		segmentBar = progressBars.NewBar("STAT", len(segmentList))
+		segmentBar.SetPreBar(cmpb.CalcSteps)
+		segmentBar.SetPostBar(cmpb.CalcTime)
+		if cfg.opt.Colors {
+			progressBars.SetColors(colors)
+		}
+		// start progressbar
+		progressBars.Start()
+		//progressBars.Stop("STAT", "done")
+	}
+
+	// run the go routines
+	waitDivider.Add(1)
+	waitDividerDone.Add(1)
+	workerWGconnEstablish.Add(1)
+	GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, nzbfile.Bytes)
+
+	if cfg.opt.Debug {
+		log.Print("main: workerWGconnEstablish.Wait()")
+	}
+	workerWGconnEstablish.Wait()
+	if cfg.opt.Debug {
+		log.Print("main: workerWGconnEstablish.Wait() released: segmentCheckStartTime=now")
+	}
+
+	setTimerNow(&segmentCheckStartTime)
+	// booting work divider
+	go GoWorkDivider(&waitDivider, &waitDividerDone)
+	if cfg.opt.Debug {
+		log.Print("main: waitDividerDone.Wait()")
+	}
+	waitDividerDone.Wait()
+
+	if cfg.opt.Debug {
+		log.Print("main: waitDividerDone.Wait() released")
+	}
+
+	StopRoutines()
+
+	if cfg.opt.Debug {
+		log.Print("main: waitWorker.Wait()")
+	}
+	waitWorker.Wait()
+
+	if cfg.opt.Bar {
+		progressBars.Wait()
+	}
+
+	if cfg.opt.Debug {
+		log.Print("main: waitWorker.Wait() released")
+	}
+
+	//endTime := time.Now()
+	transferTook := time.Since(segmentCheckStartTime)
+	if cfg.opt.CheckFirst {
+		transferTook = time.Since(segmentCheckEndTime)
+	}
+	dlSpeed := int(float64(Counter.get("TOTAL_RXbytes")) / transferTook.Seconds() / 1024)
+	upSpeed := int(float64(Counter.get("TOTAL_TXbytes")) / transferTook.Seconds() / 1024)
+
+	totalruntime := fmt.Sprintf(" | QUIT |\n\n> NZB: '%s'\n> Total Runtime: %.0f sec (%v)", filepath.Base(cfg.opt.NZBfilepath), time.Since(preparationStartTime).Seconds(), time.Since(preparationStartTime))
+	segchecktook := fmt.Sprintf("\n> SegCheck: %.0f sec (%v) ~%.0f ms/seg", segmentCheckTook.Seconds(), segmentCheckTook, float32(segmentCheckTook.Milliseconds())/float32(nzbfile.Segments))
+	transfertook := fmt.Sprintf("\n> Transfer: %.0f sec (%v) ~%.0f ms/seg", transferTook.Seconds(), transferTook, float32(transferTook.Milliseconds())/float32(nzbfile.Segments))
+	avgUpDlspeed := fmt.Sprintf("\n> DL %d KiB/s  (Total: %.2f MiB)\n> UL %d KiB/s  (Total: %.2f MiB)", dlSpeed, float64(Counter.get("TOTAL_RXbytes"))/float64(1024)/float64(1024), upSpeed, float64(Counter.get("TOTAL_TXbytes"))/float64(1024)/float64(1024))
+	runtime_info := totalruntime + segchecktook + transfertook + avgUpDlspeed
+
+	result := ""
+
+	for id, _ := range providerList {
+		providerList[id].mux.RLock()
+
+		if !providerList[id].Enabled {
+			providerList[id].mux.RUnlock()
 			continue
-		} else {
-			return article, err
 		}
-	}
-	return nil, fmt.Errorf("unable to load article <%s> from any provider", messageID)
-}
+		result = result + fmt.Sprintf("\n> Results | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s'",
+			providerList[id].articles.checked,
+			providerList[id].articles.available,
+			providerList[id].articles.missing,
+			providerList[id].articles.downloaded,
+			providerList[id].articles.refreshed,
+			providerList[id].Name,
+		)
+		providerList[id].mux.RUnlock()
+	} // end for providerList
 
-func getArticleFromProvider(provider *Provider, messageID string) (*nntp.Article, error) {
-	if conn, err := provider.pool.Get(context.TODO()); err != nil {
-		return nil, err
-	} else {
-		defer provider.pool.Put(conn)
-		if article, err := conn.Article("<" + messageID + ">"); err != nil {
-			return nil, err
-		} else {
-			return copyArticle(article, []byte{})
-		}
-	}
-}
+	log.Print(runtime_info + "\n> ###" + result + "\n> ###\n\n:end")
+	//writeCsvFile()
 
-func reuploadArticle(providerList []*Provider, article *nntp.Article, segmentID string) error {
-	var body []byte
-	body, err := io.ReadAll(article.Body)
-	if err != nil {
-		return err
-	}
-	article.Body = bytes.NewReader(body)
-	for n, provider := range providerList {
-		if provider.capabilities.post {
-			if copiedArticle, err := copyArticle(article, body); err != nil {
-				return err
-			} else {
-				// send the article to the provider
-				log.Printf("re-uploading article <%s> to provider '%s' (%v. attempt)", segmentID, provider.Name, n+1)
-				if err := postArticleToProvider(provider, copiedArticle); err != nil {
-					// error handling if re-uploading the article was unsuccessfull
-					log.Print(fmt.Errorf("error re-uploading article <%s> to provider '%s': %v", segmentID, provider.Name, err))
-				} else {
-					provider.articles.refreshed.Add(1)
-					// handling of successfull send
-					log.Printf("article <%s> successfully sent to provider '%s'", segmentID, provider.Name)
-					// if post was successfull return
-					// other providers missing this article will get it from this provider
-					return nil
-				}
-			}
-		}
-	}
-	return fmt.Errorf("unable to re-upload article <%s> to any provider", segmentID)
-}
-
-func postArticleToProvider(provider *Provider, article *nntp.Article) error {
-	if conn, err := provider.pool.Get(context.TODO()); err != nil {
-		return err
-	} else {
-		defer provider.pool.Put(conn)
-		// for post, first clean the headers
-		cleanHeaders(article)
-		// post the article
-		if err := conn.Post(article); err != nil {
-			return err
-		} else {
-			return nil
-		}
-	}
-}
-
-func cleanHeaders(article *nntp.Article) {
-	// minimum headers required for post
-	headers := []string{
-		"From",
-		"Subject",
-		"Newsgroups",
-		"Message-Id",
-		"Date",
-		"Path",
-	}
-	for header := range article.Header {
-		if slices.Contains(headers, header) {
-			// clean Path header
-			if header == "Path" {
-				article.Header[header] = []string{"not-for-mail"}
-			}
-			// update Date header to now
-			if header == "Date" {
-				article.Header[header] = []string{time.Now().Format(time.RFC1123Z)}
-			}
-		} else {
-			delete(article.Header, header)
-		}
-	}
-}
-
-func copyArticle(article *nntp.Article, body []byte) (*nntp.Article, error) {
-	var err error
-	if len(body) == 0 {
-		body, err = io.ReadAll(article.Body)
-		if err != nil {
-			return nil, err
-		}
-	}
-	newArticle := nntp.Article{
-		Header: make(map[string][]string),
-	}
-	for header := range article.Header {
-		newArticle.Header[header] = append(newArticle.Header[header], article.Header[header]...)
-	}
-	newArticle.Body = bytes.NewReader(body)
-	return &newArticle, nil
-}
-
-func writeCsvFile() {
-	if args.Csv {
-		csvFileName := strings.TrimSuffix(filepath.Base(args.NZBFile), filepath.Ext(filepath.Base(args.NZBFile))) + ".csv"
-		f, err := os.Create(csvFileName)
-		if err != nil {
-			exit(fmt.Errorf("unable to open csv file: %v", err))
-		}
-		log.Println("writing csv file...")
-		fmt.Print("Writing csv file... ")
-		csvWriter := csv.NewWriter(f)
-		firstLine := true
-		// make sorted provider name slice
-		providers := make([]string, 0, len(providerList))
-		for n := range providerList {
-			providers = append(providers, providerList[n].Name)
-		}
-		sort.Strings(providers)
-		for fileName, file := range fileStat {
-			// write first line
-			if firstLine {
-				line := make([]string, len(providers)+2)
-				line[0] = "Filename"
-				line[1] = "Total segments"
-				for n, providerName := range providers {
-					line[n+2] = providerName
-				}
-				if err := csvWriter.Write(line); err != nil {
-					exit(fmt.Errorf("unable to write to the csv file: %v", err))
-				}
-				firstLine = false
-			}
-			// write line
-			line := make([]string, len(providers)+2)
-			line[0] = fileName
-			line[1] = fmt.Sprintf("%v", file.totalSegments)
-			for n, providerName := range providers {
-				if value, ok := file.available[providerName]; ok {
-					line[n+2] = fmt.Sprintf("%v", value)
-				} else {
-					line[n+2] = "0"
-				}
-			}
-			if err := csvWriter.Write(line); err != nil {
-				exit(fmt.Errorf("unable to write to the csv file: %v", err))
-			}
-		}
-		csvWriter.Flush()
-		if err := csvWriter.Error(); err != nil {
-			exit(fmt.Errorf("unable to write to the csv file: %v", err))
-		}
-		f.Close()
-		fmt.Print("done")
-	}
-}
-
-func exit(err error) {
-	if err != nil {
-		fmt.Printf("Fatal error: %v\n", err)
-		log.Fatal(err)
-	} else {
-		os.Exit(0)
-	}
-}
+	os.Exit(0)
+} // end func main
