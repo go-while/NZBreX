@@ -477,7 +477,7 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	if err != nil {
 		return fmt.Errorf("ERROR '%s' checkCapabilities ReadDotLines err='%v'", provider.Name, err)
 	}
-
+	setpostProviders := 0
 	//log.Printf("Read %d CAPAS from Provider %s", len(lines), provider.Name)
 	for _, capability := range lines {
 		//log.Printf("CAPAS @ %s: %s", provider.Name, capability)
@@ -486,22 +486,26 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 			provider.capabilities.check = true
 		case "ihave":
 			provider.capabilities.ihave = true
-			postProviders++
+			setpostProviders++
 		case "post":
 			provider.capabilities.post = true
-			postProviders++
+			setpostProviders++
 		case "takethis":
 			provider.capabilities.stream = true
-			postProviders++
+			setpostProviders++
 		case "streaming":
 			provider.capabilities.stream = true
-			postProviders++
+			setpostProviders++
 		}
 	}
 	if !msg2srv(connitem.conn, "QUIT") {
 		return fmt.Errorf("ERROR checkCapabilities QUIT")
 	}
-
+	if setpostProviders > 0 {
+		globalmux.Lock()
+		postProviders++ // counts only once
+		globalmux.Unlock()
+	}
 	// provider.NoUpload will be set to true if none capa is available
 	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)
 
