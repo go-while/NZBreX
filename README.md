@@ -150,7 +150,7 @@ Run in a cmd line with the following argument:
 
 `-debugcache` [true|false] (default: false)
 
-'-print int` prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished
+`-print int` prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished
 
 `-slomoc int`  SloMo'C' limiter sleeps N milliseconds before checking
 
