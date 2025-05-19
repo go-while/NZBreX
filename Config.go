@@ -15,7 +15,6 @@ const (
 )
 
 type (
-
 	Config struct {
 		providers []Provider
 		opt       *CFG
@@ -77,13 +76,13 @@ type (
 			stream bool
 		}
 		articles struct {
-			tocheck   uint64
-			checked   uint64
-			available uint64
+			tocheck    uint64
+			checked    uint64
+			available  uint64
 			downloaded uint64
-			missing   uint64
-			refreshed uint64
-			verified  uint64
+			missing    uint64
+			refreshed  uint64
+			verified   uint64
 		}
 	} // end Provider struct
 
@@ -104,17 +103,17 @@ type (
 		flagisUP    bool
 		flaginDLMEM bool
 		flaginUPMEM bool
-		checkedAt int
-		hashedId  string
-		cached    bool
-		readChan  chan int  // to notify, cache has loaded the file to item.lines
-		checkChan chan bool // to notify if item exists in cache
-		segnum    int
-		size      int
-		dlcnt     int
-		badcrc    int
-		fails     int
-		retryIn   int64
+		checkedAt   int
+		hashedId    string
+		cached      bool
+		readChan    chan int  // to notify, cache has loaded the file to item.lines
+		checkChan   chan bool // to notify if item exists in cache
+		segnum      int
+		size        int
+		dlcnt       int
+		badcrc      int
+		fails       int
+		retryIn     int64
 		nzbhashname *string
 	} // end segmentChanItem struct
 ) // end type

@@ -17,7 +17,7 @@ type Cache struct {
 	crw               int
 	cache_reader_chan chan *segmentChanItem
 	cache_writer_chan chan *segmentChanItem
-	cache_check_chan chan *segmentChanItem
+	cache_check_chan  chan *segmentChanItem
 	maxartsize        int
 	debug             bool
 }
@@ -75,7 +75,7 @@ func (c *Cache) MkSubDir(nzbhashname string) (exists bool) {
 
 func (c *Cache) CheckCache(item *segmentChanItem) (exists bool) {
 	c.cache_check_chan <- item // request
-	exists = <-item.checkChan   // infinite wait for request
+	exists = <-item.checkChan  // infinite wait for request
 	return
 } // end func c.CheckCache
 

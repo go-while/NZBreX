@@ -28,7 +28,7 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	}
 
 	code, err := CMD_STAT(provider, connitem, item)
-	checkedAt := 0
+	//checkedAt := 0 // segmentBar
 	switch code {
 	case 223:
 		// messageid found at provider
@@ -45,7 +45,7 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 		item.mux.Lock()
 		item.availableOn[provider.id] = true
 		item.checkedAt++
-		checkedAt = item.checkedAt // segmentBar
+		//checkedAt = item.checkedAt // segmentBar
 		item.mux.Unlock()
 
 	default:
@@ -71,15 +71,17 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 				item.dmcaOn[provider.id] = true
 			}
 			item.checkedAt++
-			checkedAt = item.checkedAt
+			//checkedAt = item.checkedAt // segmentBar
 			item.mux.Unlock()
 		}
 	} // end switch
 
-	if cfg.opt.Bar && checkedAt == len(providerList) {
-		segmentBar.Increment()
-		segmentBar.SetMessage(fmt.Sprintf("item:%d", item.segment.Number))
-	}
+	/*
+		if cfg.opt.Bar && checkedAt == len(providerList) {
+			segmentBar.Increment()
+			segmentBar.SetMessage(fmt.Sprintf("item:%d", item.segment.Number))
+		}
+	*/
 
 	if cfg.opt.Debug {
 		log.Printf("GoWorker (%d) CheckRoutine quit '%s'", wid, provider.Name)
@@ -152,8 +154,7 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 				time.Sleep(time.Second * 5)
 				segmentChansDowns[provider.Group] <- item
 
-			} else
-			if isdead {
+			} else if isdead {
 				go Counter.decr("dlQueueCnt")
 				go Counter.decr("TOTAL_dlQueueCnt")
 				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE failed':"+who, item)
@@ -352,13 +353,15 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 		//clearmem = true
 	}
 
-	if cfg.opt.Bar {
-		BarMutex.Lock()
-		if upBarStarted {
-			upBar.Increment()
+	/*
+		if cfg.opt.Bar {
+			BarMutex.Lock()
+			if upBarStarted {
+				upBar.Increment()
+			}
+			BarMutex.Unlock()
 		}
-		BarMutex.Unlock()
-	}
+	*/
 
 	if clearmem {
 		if cfg.opt.Debug {

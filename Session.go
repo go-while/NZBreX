@@ -23,16 +23,16 @@ type File struct {
 }
 
 type PROCESSOR struct {
-	cfg         *Config
-	mux         sync.RWMutex
-	sessIds     uint64               // counts up
-	sessMap     map[uint64]*SESSION  // map with sessions
-	nzbDir      string               // watch this dir for nzb files
-	seenFiles   map[string]bool      // map to keep track of already seen/added files
-	nzbFiles    []string             // watched and added from nzbDir
-	refresh     time.Duration        // update list of nzb dir files every N seconds
-	limitA      int                  // limits amount of open sessions
-	stop_chan   chan struct{}
+	cfg       *Config
+	mux       sync.RWMutex
+	sessIds   uint64              // counts up
+	sessMap   map[uint64]*SESSION // map with sessions
+	nzbDir    string              // watch this dir for nzb files
+	seenFiles map[string]bool     // map to keep track of already seen/added files
+	nzbFiles  []string            // watched and added from nzbDir
+	refresh   time.Duration       // update list of nzb dir files every N seconds
+	limitA    int                 // limits amount of open sessions
+	stop_chan chan struct{}
 } // end type PROCESSOR struct
 
 // SESSION holds a (loaded) nzb file
@@ -49,7 +49,7 @@ type SESSION struct {
 
 // processor := &PROCESSOR{}
 // if err := processor.NewProcessor(nzbdir); err != nil { /* handle error */ }
-func (p *PROCESSOR) NewProcessor(nzbDir string, refresh int64) (error) {
+func (p *PROCESSOR) NewProcessor(nzbDir string, refresh int64) error {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	if p.nzbDir != "" {
@@ -78,7 +78,6 @@ func (p *PROCESSOR) SetWatchDirRefresh(newValue time.Duration) {
 	p.refresh = newValue
 	p.mux.Unlock()
 } // end func SetWatchDirRefresh
-
 
 // private PROCESSOR functions
 
@@ -118,9 +117,9 @@ func (p *PROCESSOR) thread() {
 	// TODO: watch nzbdir, load nzbs and distribute work here
 	for {
 		select {
-			case nul := <-p.stop_chan:
-				p.stop_chan <- nul
-				return
+		case nul := <-p.stop_chan:
+			p.stop_chan <- nul
+			return
 		}
 	}
 	log.Printf("Quit PROCESSOR '%s'", p.nzbDir)

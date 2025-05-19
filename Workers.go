@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/Tensai75/cmpb"
+	//"github.com/Tensai75/cmpb"
 	"log"
 	"sync"
 	"time"
@@ -352,10 +352,10 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 	nextLogPrint := time.Now().Unix() + cfg.opt.LogPrintEvery
 	var lastRunTook time.Duration
 	var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry uint64
-// loops forever over the segmentList and checks if there is anything to do for an item
+	// loops forever over the segmentList and checks if there is anything to do for an item
 forever:
 	for {
-		time.Sleep(time.Duration((lastRunTook.Milliseconds()*2))+(2555 * time.Millisecond))
+		time.Sleep(time.Duration((lastRunTook.Milliseconds() * 2)) + (2555 * time.Millisecond))
 		globalmux.RLock()
 		allowDl = (!cfg.opt.CheckOnly)
 		allowUp = (!cfg.opt.CheckOnly && postProviders > 0) /* FIXME TODO #b8bd287b */
@@ -607,45 +607,49 @@ forever:
 			segmentCheckTook = took
 			globalmux.Unlock()
 			segcheckdone = true
-			if cfg.opt.Bar {
-				segmentBar.SetMessage("done")
-			}
+			/*
+				if cfg.opt.Bar {
+					segmentBar.SetMessage("done") // segmentBar
+				}
+			*/
 			if cfg.opt.Verbose {
 				log.Printf(" | [DV] | Segment Check Done: took='%.1f sec'", took.Seconds())
 			}
 		}
 
-		if cfg.opt.Bar && !cfg.opt.CheckOnly && segcheckdone && TdlQ > 0 {
-			//log.Printf("dlBarStarted? TdlQ=%d", TdlQ)
+		/*
+			if cfg.opt.Bar && !cfg.opt.CheckOnly && segcheckdone && TdlQ > 0 {
+				//log.Printf("dlBarStarted? TdlQ=%d", TdlQ)
 
-			BarMutex.Lock()
-			if !dlBarStarted {
-				dlBarStarted = true
-				dlBar = progressBars.NewBar("DOWN", int(TdlQ))
-				dlBar.SetPreBar(cmpb.CalcSteps)
-				dlBar.SetPostBar(cmpb.CalcTime)
-			} else {
-				dlBar.UpdateTotal(int(TdlQ))
+				BarMutex.Lock()
+				if !dlBarStarted {
+					dlBarStarted = true
+					dlBar = progressBars.NewBar("DOWN", int(TdlQ))
+					dlBar.SetPreBar(cmpb.CalcSteps)
+					dlBar.SetPostBar(cmpb.CalcTime)
+				} else {
+					dlBar.UpdateTotal(int(TdlQ))
+				}
+				BarMutex.Unlock()
+				//segmentBar.SetMessage("done: start DL now")
 			}
-			BarMutex.Unlock()
-			//segmentBar.SetMessage("done: start DL now")
-		}
 
-		if cfg.opt.Bar && !cfg.opt.CheckOnly && segcheckdone && TupQ > 0 {
-			//log.Printf("upBarStarted? TupQ=%d", TupQ)
+			if cfg.opt.Bar && !cfg.opt.CheckOnly && segcheckdone && TupQ > 0 {
+				//log.Printf("upBarStarted? TupQ=%d", TupQ)
 
-			BarMutex.Lock()
-			if !upBarStarted {
-				upBarStarted = true
-				upBar = progressBars.NewBar("REUP", int(TupQ))
-				upBar.SetPreBar(cmpb.CalcSteps)
-				upBar.SetPostBar(cmpb.CalcTime)
-			} else {
-				upBar.UpdateTotal(int(TupQ))
+				BarMutex.Lock()
+				if !upBarStarted {
+					upBarStarted = true
+					upBar = progressBars.NewBar("REUP", int(TupQ))
+					upBar.SetPreBar(cmpb.CalcSteps)
+					upBar.SetPostBar(cmpb.CalcTime)
+				} else {
+					upBar.UpdateTotal(int(TupQ))
+				}
+				BarMutex.Unlock()
+				//segmentBar.SetMessage("done: start UP now")
 			}
-			BarMutex.Unlock()
-			//segmentBar.SetMessage("done: start UP now")
-		}
+		*/
 
 		// continue as long as any of this triggers because stuff is still in queues and processing
 		//if (checked != todo || (TupQ > 0 && TupQ != isup) || (TdlQ > 0 && TdlQ != isdl) || inup > 0 || indl > 0) {

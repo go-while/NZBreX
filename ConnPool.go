@@ -15,8 +15,8 @@ import (
 
 type (
 	ConnItem struct {
-		conn      net.Conn
-		srvtp     *textproto.Conn
+		conn   net.Conn
+		srvtp  *textproto.Conn
 		writer *bufio.Writer
 	}
 	ProviderConns struct {

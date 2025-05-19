@@ -90,7 +90,6 @@ func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 	}
 } // end func GoSpeedMeter
 
-
 func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, error) {
 	if connitem.srvtp == nil {
 		return 0, fmt.Errorf("ERROR CMD_STAT srvtp=nil")
@@ -344,11 +343,11 @@ readlines:
 				article = append(article, line)
 			}
 			/*
-			article = append(article, "Message-Id: "+"<"+item.segment.Id+">")
-			if len(messageIds) == 0 {
-				log.Printf("WARN readArticleDotLines '%s' cleanHdr appends 'Message-Id: <%s>'", provider.Name, item.segment.Id)
 				article = append(article, "Message-Id: "+"<"+item.segment.Id+">")
-			}
+				if len(messageIds) == 0 {
+					log.Printf("WARN readArticleDotLines '%s' cleanHdr appends 'Message-Id: <%s>'", provider.Name, item.segment.Id)
+					article = append(article, "Message-Id: "+"<"+item.segment.Id+">")
+				}
 			*/
 			article = append(article, "Path: not-for-mail")
 		}
@@ -366,21 +365,21 @@ readlines:
 
 			if cfg.opt.CleanHeaders {
 				/*
-				if strings.HasPrefix(line, "Message-Id: ") {
-					if len(messageIds) > 0 {
-						ignoreNextContinuedLine = true
+					if strings.HasPrefix(line, "Message-Id: ") {
+						if len(messageIds) > 0 {
+							ignoreNextContinuedLine = true
+							continue readlines
+						}
+
+						msgidSlice := strings.Split(line, " ")[1:]
+						msgid := strings.Join(msgidSlice, "")
+						messageIds = append(messageIds, msgid)
+						if msgid != "<"+item.segment.Id+">" {
+							ignoreNextContinuedLine = true
+							log.Printf("WARN readArticleDotLines cleanHdr getMsgId seg.Id='%s' msgId='%s' p='%s'", item.segment.Id, msgid, provider.Name)
+						}
 						continue readlines
 					}
-
-					msgidSlice := strings.Split(line, " ")[1:]
-					msgid := strings.Join(msgidSlice, "")
-					messageIds = append(messageIds, msgid)
-					if msgid != "<"+item.segment.Id+">" {
-						ignoreNextContinuedLine = true
-						log.Printf("WARN readArticleDotLines cleanHdr getMsgId seg.Id='%s' msgId='%s' p='%s'", item.segment.Id, msgid, provider.Name)
-					}
-					continue readlines
-				}
 				*/
 
 				// ignore headers from cleanHeader slice

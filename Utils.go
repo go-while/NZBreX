@@ -1,14 +1,14 @@
 package main
 
 import (
+	"compress/gzip"
 	"fmt"
 	"github.com/Tensai75/nzbparser"
-	"log"
 	"io"
+	"log"
 	"os"
-	"time"
 	"strings"
-	"compress/gzip"
+	"time"
 	//"encoding/csv"
 	"encoding/json"
 	//"sort"

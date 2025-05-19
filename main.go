@@ -20,8 +20,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/Tensai75/cmpb"
-	"github.com/fatih/color"
+	//"github.com/Tensai75/cmpb"
+	//"github.com/fatih/color"
 	"github.com/go-while/go-cpu-mem-profiler"
 	"io"
 	"log"
@@ -44,47 +44,48 @@ var (
 	nzbgroups    []string    // informative
 	providerList []*Provider // the parsed provider list structure
 
-	globalmux         sync.RWMutex
-	stop_chan         chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
-	memlim            *MemLimiter
-	cache             *Cache
-	cacheON           bool
-	segmentList       []*segmentChanItem
-	segmentChansCheck map[string]chan *segmentChanItem
-	segmentChansDowns map[string]chan *segmentChanItem
-	segmentChansReups map[string]chan *segmentChanItem
-	memDL map[string]chan *segmentChanItem // with -checkfirst queues items here
-	memUP map[string]chan *segmentChanItem // TODO: process uploads after downloads (possible only with cacheON)
+	globalmux             sync.RWMutex
+	stop_chan             chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
+	memlim                *MemLimiter
+	cache                 *Cache
+	cacheON               bool
+	segmentList           []*segmentChanItem
+	segmentChansCheck     map[string]chan *segmentChanItem
+	segmentChansDowns     map[string]chan *segmentChanItem
+	segmentChansReups     map[string]chan *segmentChanItem
+	memDL                 map[string]chan *segmentChanItem // with -checkfirst queues items here
+	memUP                 map[string]chan *segmentChanItem // TODO: process uploads after downloads (possible only with cacheON)
 	Counter               *Counter_uint64
-	postProviders         int    // counts Providers with IHAVE/POST/TAKETHIS capability
+	postProviders         int // counts Providers with IHAVE/POST/TAKETHIS capability
 	segmentCheckStartTime time.Time
 	segmentCheckEndTime   time.Time
 	segmentCheckTook      time.Duration
-
-	segmentBar   *cmpb.Bar
-	upBar        *cmpb.Bar
-	dlBar        *cmpb.Bar
-	upBarStarted bool
-	dlBarStarted bool
-	BarMutex     sync.Mutex
-	progressBars = cmpb.NewWithParam(&cmpb.Param{
-		Interval:     5000 * time.Millisecond,
-		Out:          color.Output,
-		ScrollUp:     cmpb.AnsiScrollUp,
-		PrePad:       1,
-		KeyWidth:     8,
-		MsgWidth:     8,
-		PreBarWidth:  12,
-		BarWidth:     42,
-		PostBarWidth: 4,
-		Post:         "...",
-		KeyDiv:       ':',
-		LBracket:     '[',
-		RBracket:     ']',
-		Empty:        '-',
-		Full:         '=',
-		Curr:         '>',
-	})
+	/*
+		segmentBar   *cmpb.Bar
+		upBar        *cmpb.Bar
+		dlBar        *cmpb.Bar
+		upBarStarted bool
+		dlBarStarted bool
+		BarMutex     sync.Mutex
+		progressBars = cmpb.NewWithParam(&cmpb.Param{
+			Interval:     5000 * time.Millisecond,
+			Out:          color.Output,
+			ScrollUp:     cmpb.AnsiScrollUp,
+			PrePad:       1,
+			KeyWidth:     8,
+			MsgWidth:     8,
+			PreBarWidth:  12,
+			BarWidth:     42,
+			PostBarWidth: 4,
+			Post:         "...",
+			KeyDiv:       ':',
+			LBracket:     '[',
+			RBracket:     ']',
+			Empty:        '-',
+			Full:         '=',
+			Curr:         '>',
+		})
+	*/
 
 	//fileStat     = make(filesStatistic)
 	//fileStatLock sync.Mutex
@@ -118,7 +119,7 @@ func init() {
 } // end func init
 
 func main() {
-	colors := new(cmpb.BarColors)
+	//colors := new(cmpb.BarColors)
 	var err error
 	var version bool
 	var runProf bool
@@ -207,22 +208,23 @@ func main() {
 		}
 	}
 
-
 	if cfg.opt.Debug {
 		log.Printf("loadedConfig flag.Parse cfg.opt='%#v'", cfg.opt)
 	}
 
 	cacheON = (cfg.opt.Cachedir != "" && cfg.opt.CRW > 0)
 
-	if cfg.opt.Bar && cfg.opt.Colors {
-		colors.Post, colors.KeyDiv, colors.LBracket, colors.RBracket =
-			color.HiCyanString, color.HiCyanString, color.HiCyanString, color.HiCyanString
-		colors.Key = color.HiWhiteString
-		colors.Msg, colors.Empty = color.HiYellowString, color.HiYellowString
-		colors.Full = color.HiGreenString
-		colors.Curr = color.GreenString
-		colors.PreBar, colors.PostBar = color.HiYellowString, color.HiMagentaString
-	}
+	/*
+		if cfg.opt.Bar && cfg.opt.Colors {
+			colors.Post, colors.KeyDiv, colors.LBracket, colors.RBracket =
+				color.HiCyanString, color.HiCyanString, color.HiCyanString, color.HiCyanString
+			colors.Key = color.HiWhiteString
+			colors.Msg, colors.Empty = color.HiYellowString, color.HiYellowString
+			colors.Full = color.HiGreenString
+			colors.Curr = color.GreenString
+			colors.PreBar, colors.PostBar = color.HiYellowString, color.HiMagentaString
+		}
+	*/
 
 	// setup debug modes
 	if cfg.opt.Debug || cfg.opt.BUG {
@@ -343,18 +345,20 @@ func main() {
 		}
 	}
 
-	if cfg.opt.Bar {
-		// segment check progressbar
-		segmentBar = progressBars.NewBar("STAT", len(segmentList))
-		segmentBar.SetPreBar(cmpb.CalcSteps)
-		segmentBar.SetPostBar(cmpb.CalcTime)
-		if cfg.opt.Colors {
-			progressBars.SetColors(colors)
+	/*
+		if cfg.opt.Bar {
+			// segment check progressbar
+			segmentBar = progressBars.NewBar("STAT", len(segmentList))
+			segmentBar.SetPreBar(cmpb.CalcSteps)
+			segmentBar.SetPostBar(cmpb.CalcTime)
+			if cfg.opt.Colors {
+				progressBars.SetColors(colors)
+			}
+			// start progressbar
+			progressBars.Start()
+			//progressBars.Stop("STAT", "done")
 		}
-		// start progressbar
-		progressBars.Start()
-		//progressBars.Stop("STAT", "done")
-	}
+	*/
 
 	// run the go routines
 	waitDivider.Add(1)
@@ -389,9 +393,11 @@ func main() {
 	}
 	waitWorker.Wait()
 
-	if cfg.opt.Bar {
-		progressBars.Wait()
-	}
+	/*
+		if cfg.opt.Bar {
+			progressBars.Wait()
+		}
+	*/
 
 	if cfg.opt.Debug {
 		log.Print("main: waitWorker.Wait() released")
