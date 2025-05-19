@@ -509,13 +509,13 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	// provider.NoUpload will be set to true if none capa is available
 	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)
 
-	if cfg.opt.Debug || (!provider.capabilities.ihave && provider.capabilities.post /*&& !provider.capabilities.check && !provider.capabilities.stream*/) {
-		log.Printf("Capabilities: [ IHAVE: %s | POST: %s | CHECK: %s | STREAM: %s ] @ '%s'",
+	if cfg.opt.Verbose {
+		log.Printf("Capabilities: [ IHAVE: %s | POST: %s | CHECK: %s | STREAM: %s ] @ '%s' NoUpload=%t",
 			yesno(provider.capabilities.ihave),
 			yesno(provider.capabilities.post),
 			yesno(provider.capabilities.check),
 			yesno(provider.capabilities.stream),
-			provider.Name)
+			provider.Name, provider.NoUpload)
 	}
 	// done
 	return nil
