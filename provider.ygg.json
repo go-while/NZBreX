@@ -1,0 +1,22 @@
+[
+    {
+      "Enabled": true,
+      "Name": "UL-TEST",
+      "Host": "205:66fe:5432:52d0:9235:e7a9:9447:1eb4",
+      "Port": 11119,
+      "PreferIHAVE": true,
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    },
+    {
+      "Enabled": true,
+      "NoUpload": true,
+      "Name": "DL-TEST",
+      "Host": "205:66fe:5432:52d0:9235:e7a9:9447:1eb4",
+      "Port": 119,
+      "Username": "anonymous",
+      "Password": "anonymous",
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    }
+]
