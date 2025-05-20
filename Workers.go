@@ -592,7 +592,7 @@ forever:
 			}
 
 			logstring = fmt.Sprintf("%s%s%s%s%s%s%s%s%s%s%s%s%s", log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99)
-			if cfg.opt.Verbose && logstring != "" && nextLogPrint < time.Now().Unix() && cfg.opt.LogPrintEvery >= 0 {
+			if cfg.opt.Verbose && cfg.opt.LogPrintEvery >= 0 && logstring != ""  && nextLogPrint < time.Now().Unix() {
 				nextLogPrint = time.Now().Unix() + cfg.opt.LogPrintEvery
 				log.Print(logstring)
 			}
@@ -716,9 +716,10 @@ forever:
 		}
 	} // end forever
 
-	if cfg.opt.Verbose && logstring != "" && cfg.opt.LogPrintEvery >= 0 {
+	if logstring != "" { // always prints final logstring
 		log.Print(logstring)
-	} else if cfg.opt.Verbose {
+	}
+	if cfg.opt.Debug {
 		log.Printf("%s\n   WorkDivider quit: closeCase='%s'", logstring, closeCase)
 	}
 } // end func WorkDivider
