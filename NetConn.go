@@ -264,9 +264,7 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		provider.mux.Lock()
 		provider.capabilities.post = false
 		provider.mux.Unlock()
-		globalmux.Lock()
-		postProviders-- /* FIXME TODO #b8bd287b postProviders */
-		globalmux.Unlock()
+		Counter.decr("postProviders")
 		log.Printf("ERROR code=%d in CMD_POST @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
 		return code, 0, nil
 	default:
@@ -502,9 +500,7 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 		return fmt.Errorf("ERROR checkCapabilities QUIT")
 	}
 	if setpostProviders > 0 {
-		globalmux.Lock()
-		postProviders++ // counts only once
-		globalmux.Unlock()
+		Counter.incr("postProviders")
 	}
 	// provider.NoUpload will be set to true if none capa is available
 	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)

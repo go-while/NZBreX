@@ -245,15 +245,11 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 		}
 	} // end OpenFile
 
-	globalmux.RLock()
-	pP := postProviders /* FIXME TODO? #b8bd287b dynamic capabilities */
-	globalmux.RUnlock()
-
 	item.mux.Lock()
 	item.cached = true
 	item.flaginDLMEM = false
 	item.flaginDL = false
-	if pP == 0 || cfg.opt.UploadLater { // FIXME TODO: globals!
+	if Counter.get("postProviders") == 0 || cfg.opt.UploadLater {
 		item.lines = []string{} // free memory
 	}
 	item.mux.Unlock()

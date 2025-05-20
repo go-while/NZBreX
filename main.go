@@ -56,7 +56,6 @@ var (
 	memDL                 map[string]chan *segmentChanItem // with -checkfirst queues items here
 	memUP                 map[string]chan *segmentChanItem // TODO: process uploads after downloads (possible only with cacheON)
 	Counter               *Counter_uint64
-	postProviders         int // counts Providers with IHAVE/POST/TAKETHIS capability
 	segmentCheckStartTime time.Time
 	segmentCheckEndTime   time.Time
 	segmentCheckTook      time.Duration

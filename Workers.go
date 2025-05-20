@@ -107,12 +107,10 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 	workerWGconnEstablish.Done() // releases 1 set before calling GoBootWorkers
 	workerWGconnEstablish.Wait() // waits for the others to release when connections are established
 	// check if we have at least one provider with IHAVE or POST capability
-	globalmux.Lock()
-	if postProviders == 0 && !cfg.opt.CheckOnly {
+	if Counter.get("postProviders") == 0 && !cfg.opt.CheckOnly {
 		cfg.opt.CheckOnly = true
 		log.Print("WARN: no provider has IHAVE or POST capability: force CheckOnly")
 	}
-	globalmux.Unlock()
 	if cfg.opt.Debug {
 		log.Printf("OK all Workers connected")
 	}
@@ -358,7 +356,7 @@ forever:
 		time.Sleep(time.Duration((lastRunTook.Milliseconds() * 2)) + (2555 * time.Millisecond))
 		globalmux.RLock()
 		allowDl = (!cfg.opt.CheckOnly)
-		allowUp = (!cfg.opt.CheckOnly && postProviders > 0) /* FIXME TODO #b8bd287b */
+		allowUp = (!cfg.opt.CheckOnly && Counter.get("postProviders") > 0)
 		globalmux.RUnlock()
 
 		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -671,7 +669,7 @@ forever:
 		globalmux.RLock()
 		closeCase0 := (done == todo)
 		closeCase1 := (cfg.opt.CheckOnly)
-		closeCase2 := (cacheON && (postProviders == 0 && TupQ == 0 && cached == todo)) /* FIXME TODO #b8bd287b postProviders */
+		closeCase2 := (cacheON && (Counter.get("postProviders") == 0 && TupQ == 0 && cached == todo))
 		closeCase3 := (cacheON && (dead+cached == todo && dead+isup == todo))
 		closeCase4 := (isup == todo)
 		closeCase5 := (dead+isup == todo)

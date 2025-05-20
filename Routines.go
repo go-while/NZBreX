@@ -334,11 +334,9 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 		item.mux.Unlock()
 		// TODO: need better check if we have other providers
 		// with posting capabilities and queue item to one of them
-		globalmux.RLock()
-		if postProviders == 1 { /* FIXME TODO? #b8bd287b dynamic capabilities */
+		if Counter.get("postProviders") == 1 {
 			clearmem = true
 		}
-		globalmux.RUnlock()
 
 	} else if retry {
 
