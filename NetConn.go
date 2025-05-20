@@ -36,10 +36,15 @@ var (
 
 func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 	defer waitWorker.Done()
-	if cfg.opt.LogPrintEvery < 5 {
-		cfg.opt.LogPrintEvery = 5
+	if cfg.opt.LogPrintEvery < 0 {
+		// don't start speedmeter if LogPrintEvery < 0   (set to -1 to disable)
+		return
 	}
-	cron := time.After(time.Duration(cfg.opt.LogPrintEvery) * time.Second)
+	LogPrintEvery := cfg.opt.LogPrintEvery
+	if LogPrintEvery < 5 {
+		LogPrintEvery = 5 // defaults to min 5sec
+	}
+	cron := time.After(time.Duration(LogPrintEvery) * time.Second)
 
 	var logStr, logStr_RX, logStr_TX string
 	var TOTAL_TXbytes, TOTAL_RXbytes uint64
@@ -60,18 +65,18 @@ func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 			tmp_rxb, tmp_txb := Counter.getReset("TMP_RXbytes"), Counter.getReset("TMP_TXbytes")
 			logStr, logStr_RX, logStr_TX = "", "", ""
 			if tmp_rxb > 0 {
-				rx_speed := int64(tmp_rxb) / cfg.opt.LogPrintEvery / 1024
+				rx_speed := int64(tmp_rxb) / LogPrintEvery / 1024
 				TOTAL_RXbytes += tmp_rxb
 				dlPerc := int(float64(TOTAL_RXbytes) / float64(byteSize) * 100)
 				logStr_RX = fmt.Sprintf(" |  DL  [%3d%%]   SPEED: %5d KiB/s | (Total: %.2f MB)", dlPerc, rx_speed, float64(Counter.get("TOTAL_RXbytes")/1024/1024))
 			}
 			if tmp_txb > 0 {
-				tx_speed := int64(tmp_txb) / cfg.opt.LogPrintEvery / 1024
+				tx_speed := int64(tmp_txb) / LogPrintEvery / 1024
 				TOTAL_TXbytes += tmp_txb
 				upPerc := int(float64(TOTAL_TXbytes) / float64(byteSize) * 100)
 				logStr_TX = fmt.Sprintf(" |  UL  [%3d%%]   SPEED: %5d KiB/s | (Total: %.2f MB)", upPerc, tx_speed, float64(Counter.get("TOTAL_TXbytes")/1024/1024))
 			}
-			cron = time.After(time.Second * time.Duration(cfg.opt.LogPrintEvery))
+			cron = time.After(time.Second * time.Duration(LogPrintEvery))
 			if logStr_RX != "" && cfg.opt.Verbose {
 				//logStr = logStr + logStr_RX
 				log.Print(logStr_RX)
