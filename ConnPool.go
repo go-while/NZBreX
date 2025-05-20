@@ -91,6 +91,7 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	}
 
 	if err != nil || conn == nil {
+		conn.Close()
 		log.Printf("error Dial rserver=%s wants_ssl=%t err='%v' retry in 3s", c.rserver, provider.SSL, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -102,55 +103,56 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	code, msg, err := srvtp.ReadCodeLine(20)
 
 	if code < 200 || code > 201 {
+		conn.Close()
 		log.Printf("ERROR connect code=%d msg='%s' err='%v' retry in 3s", code, msg, err)
 		time.Sleep(3 * time.Second)
 		retry++
 		return c.connect(wid, provider, retry)
 	}
 
-	switch c.wants_auth {
-
-	case false:
+	if !c.wants_auth {
 		return &ConnItem{srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
+	}
 
-	case true:
-		id, err := srvtp.Cmd("AUTHINFO USER %s", provider.Username)
-		if err != nil {
-			log.Printf("rserver=%s AUTH1 FAILED err='%v' retry in 3s", c.rserver, err)
-			time.Sleep(3 * time.Second)
-			retry++
-			return c.connect(wid, provider, retry)
-		}
-		srvtp.StartResponse(id)
-		code, _, err = srvtp.ReadCodeLine(381)
-		srvtp.EndResponse(id)
-		if err != nil || code != 381 {
+	// send auth sequence
+	id, err := srvtp.Cmd("AUTHINFO USER %s", provider.Username)
+	if err != nil {
+		conn.Close()
+		log.Printf("rserver=%s AUTH1 FAILED err='%v' retry in 3s", c.rserver, err)
+		time.Sleep(3 * time.Second)
+		retry++
+		return c.connect(wid, provider, retry)
+	}
+	srvtp.StartResponse(id)
+	code, _, err = srvtp.ReadCodeLine(381)
+	srvtp.EndResponse(id)
+	if err != nil || code != 381 {
+		conn.Close()
+		log.Printf("rserver=%s AUTH2 FAILED code != 381 err='%v' retry in 3s", c.rserver, err)
+		time.Sleep(3 * time.Second)
+		retry++
+		return c.connect(wid, provider, retry)
+	}
 
-			log.Printf("rserver=%s AUTH2 FAILED code != 381 err='%v' retry in 3s", c.rserver, err)
-			time.Sleep(3 * time.Second)
-			retry++
-			return c.connect(wid, provider, retry)
+	id, err = srvtp.Cmd("AUTHINFO PASS %s", provider.Password)
+	if err != nil {
+		conn.Close()
+		log.Printf("rserver=%s AUTH3 FAILED err='%v' retry in 3s", c.rserver, err)
+		time.Sleep(3 * time.Second)
+		retry++
+		return c.connect(wid, provider, retry)
+	}
+	srvtp.StartResponse(id)
+	code, _, err = srvtp.ReadCodeLine(281)
+	srvtp.EndResponse(id)
+	if err != nil {
+		conn.Close()
+		log.Printf("rserver=%s AUTH4 FAILED err='%v' retry in 3s", c.rserver, err)
+		time.Sleep(3 * time.Second)
+		retry++
+		return c.connect(wid, provider, retry)
+	}
 
-		} else {
-
-			id, err := srvtp.Cmd("AUTHINFO PASS %s", provider.Password)
-			if err != nil {
-				log.Printf("rserver=%s AUTH3 FAILED err='%v' retry in 3s", c.rserver, err)
-				time.Sleep(3 * time.Second)
-				retry++
-				return c.connect(wid, provider, retry)
-			}
-			srvtp.StartResponse(id)
-			code, _, err = srvtp.ReadCodeLine(281)
-			srvtp.EndResponse(id)
-			if err != nil {
-				log.Printf("rserver=%s AUTH4 FAILED err='%v' retry in 3s", c.rserver, err)
-				time.Sleep(3 * time.Second)
-				retry++
-				return c.connect(wid, provider, retry)
-			}
-		}
-	} // end switch wants_auth
 	return &ConnItem{srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
 } // end func connect
 
