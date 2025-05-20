@@ -236,20 +236,22 @@ func main() {
 		if !cfg.opt.DebugCache {
 			cfg.opt.DebugCache = true
 		}
-		if cfg.opt.Log {
-			logFileName := strings.TrimSuffix(filepath.Base(cfg.opt.NZBfilepath), filepath.Ext(filepath.Base(cfg.opt.NZBfilepath))) + ".log"
-			f, err := os.Create(logFileName)
-			if err != nil {
-				log.Printf("unable to open debug log file: %v", err)
-				os.Exit(1)
-			}
-			log.SetOutput(f) //DEBUG
-		}
 	} else {
 		if cfg.opt.Discard {
 			log.SetOutput(io.Discard) // DEBUG
 		}
 	} // end debugs
+
+	if cfg.opt.Log {
+		logFileName := strings.TrimSuffix(filepath.Base(cfg.opt.NZBfilepath), filepath.Ext(filepath.Base(cfg.opt.NZBfilepath))) + ".log"
+		f, err := os.Create(logFileName)
+		if err != nil {
+			log.Printf("unable to open log file: %v", err)
+			os.Exit(1)
+		}
+		log.Printf("Writing log to: '%s'", logFileName)
+		log.SetOutput(f) //DEBUG
+	}
 
 	preparationStartTime := time.Now()
 	if cfg.opt.Debug {
