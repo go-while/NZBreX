@@ -293,7 +293,7 @@ func main() {
 		}
 	}
 	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
-	artsize := mibsize / float64(len(segmentList)) * 1000
+	artsize := mibsize / float64(len(segmentList)) * 1024
 	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
 
 	// cosmetics
