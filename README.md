@@ -166,6 +166,8 @@ Run in a cmd line with the following argument:
 
 `-mem int` limit memory usage to N segments in RAM ( 0 defaults to number of total provider connections*2 or what you set but usually there is no need for more. if your 'MEM' is full: your upload is just slow. giving more mem will NOT help!)
 
+`-chansize int` sets internal size of channels to queue items for check,down,reup. default should be fine.
+
 `-prof` starts cpu+mem profiler: waits 20sec and runs 120sec
 
 `-webprof` start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' or 'IP4_ADDR:PORT' or '[IP6_ADDR]:PORT'

@@ -15,6 +15,9 @@ const (
 	CR   = "\r"
 	LF   = "\n"
 	CRLF = CR + LF
+	DefaultCacheRW = 100
+	DefaultChanSize = 1000
+	DefaultLogPrintEvery int64 = 5
 )
 
 type (
@@ -31,6 +34,7 @@ type (
 		CheckCacheOnBoot bool
 		CRW              int
 		MemMax           int
+		ChanSize         int
 		CheckOnly        bool
 		CheckFirst       bool
 		UploadLater      bool

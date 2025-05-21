@@ -15,9 +15,9 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 		log.Print("Error in GoBootWorkers: already booted?!")
 		return
 	}
-	segmentChansCheck = make(map[string]chan *segmentChanItem, len(providerList))
-	segmentChansDowns = make(map[string]chan *segmentChanItem, len(providerList))
-	segmentChansReups = make(map[string]chan *segmentChanItem, len(providerList))
+	segmentChansCheck = make(map[string]chan *segmentChanItem)
+	segmentChansDowns = make(map[string]chan *segmentChanItem)
+	segmentChansReups = make(map[string]chan *segmentChanItem)
 	waitWorker.Add(1)
 	globalmux.Unlock()
 
@@ -55,17 +55,35 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 			//log.Printf("Mapping Provider '%s' to group '%s'", provider.Name, provider.Group)
 
 			globalmux.Lock()
+			if cfg.opt.ChanSize > 0 {
+				if len(segmentList) < cfg.opt.ChanSize {
+					cfg.opt.ChanSize = len(segmentList)
+				}
+			} else {
+				cfg.opt.ChanSize = DefaultChanSize
+			}
 			if segmentChansCheck[provider.Group] == nil {
 				// create channels once if not exists
-				segmentChansCheck[provider.Group] = make(chan *segmentChanItem, len(segmentList))
-				segmentChansDowns[provider.Group] = make(chan *segmentChanItem, len(segmentList))
-				segmentChansReups[provider.Group] = make(chan *segmentChanItem, len(segmentList))
-				segmentChanCheck := segmentChansCheck[provider.Group]
+				segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				//segmentChanCheck := segmentChansCheck[provider.Group]
 				// fill check channel for provider group with pointers
-
-				for _, item := range segmentList {
-					segmentChanCheck <- item
-				}
+				go func(segmentChanCheck chan *segmentChanItem){
+					start := time.Now()
+					for _, item := range segmentList {
+						segmentChanCheck <- item
+					}
+					for {
+						time.Sleep(time.Second)
+						if len(segmentChanCheck) == 0 {
+							break
+						}
+					}
+					if cfg.opt.Verbose {
+						log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(segmentList), provider.Group, time.Since(start).Seconds())
+					}
+				}(segmentChansCheck[provider.Group])
 
 			}
 			globalmux.Unlock()
@@ -142,7 +160,11 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 					segmentChanCheck <- nil // refill the nil so others will die too
 					break forGoCheckRoutine
 				}
-				//log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
+				item.mux.Unlock()
+				if cfg.opt.Debug {
+					log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				}
 				if err := GoCheckRoutine(wid, provider, item); err != nil { // re-queue
 					log.Printf("ERROR in GoCheckRoutine err='%v'", err)
 					//time.Sleep(5 * time.Second)
@@ -167,7 +189,11 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 					segmentChanDowns <- nil // refill the nil so others will die too
 					break forGoDownsRoutine
 				}
-				//log.Printf("WorkerDown: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
+				item.mux.Unlock()
+				if cfg.opt.Debug {
+					log.Printf("WorkerDown: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				}
 				if err := GoDownsRoutine(wid, provider, item); err != nil {
 					log.Printf("ERROR in GoDownsRoutine err='%v'", err)
 					//time.Sleep(5 * time.Second)
@@ -192,7 +218,11 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 					segmentChanReups <- nil // refill the nil so others will die too
 					break forGoReupsRoutine
 				}
-				//log.Printf("WorkerReup: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
+				item.mux.Unlock()
+				if cfg.opt.Debug {
+					log.Printf("WorkerReup: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				}
 				if err := GoReupsRoutine(wid, provider, item); err != nil {
 					log.Printf("ERROR in GoReupsRoutine err='%v'", err)
 					//time.Sleep(5 * time.Second)
@@ -223,30 +253,44 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool) {
 	matchThis := (len(item.lines) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
 
 	if matchThis {
-		for pid, _ := range item.availableOn {
+		for pid, avail := range item.availableOn {
+			if !avail {
+				continue
+			}
 			if cfg.opt.Debug {
 				log.Printf(" | [DV] push chan <- down seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
 			}
-			item.flaginDL = true
-			if cfg.opt.CheckFirst {
-				// catch items and release the quaken later
-				item.flaginDLMEM = true
-			}
-			item.mux.Unlock()
-
-			Counter.incr("dlQueueCnt")
-			Counter.incr("TOTAL_dlQueueCnt")
-
 			/* push download request only to 1.
 			 * this one should get it and update availableOn/missingOn list
 			 */
 			if cfg.opt.CheckFirst {
-				memDL[providerList[pid].Group] <- item
+				select {
+					case memDL[providerList[pid].Group] <- item:
+						pushed = true
+					default:
+						// chan is full
+				}
 			} else {
-				segmentChansDowns[providerList[pid].Group] <- item
+				select {
+					case segmentChansDowns[providerList[pid].Group] <- item:
+						pushed = true
+					default:
+						// chan is full
+				}
 			}
-			pushed = true
-			return
+			if pushed {
+				item.flaginDL = true
+				if cfg.opt.CheckFirst {
+					// catch items and release the quaken later
+					item.flaginDLMEM = true
+				}
+			}
+			item.mux.Unlock()
+			if pushed {
+				Counter.incr("dlQueueCnt")
+				Counter.incr("TOTAL_dlQueueCnt")
+			}
+			return // return after 1st push!
 		} // end for providerDl
 	} // end if allowDl
 	item.mux.Unlock()
@@ -264,7 +308,10 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 	if matchThis {
 		// looks like we have fetched the segment and did not upload the item yet
 	providerUp:
-		for pid, _ := range item.missingOn {
+		for pid, miss := range item.missingOn {
+			if !miss {
+				continue providerUp
+			}
 			//providerList[pid].mux.RLock()
 			flagNoUp := (providerList[pid].NoUpload || (!providerList[pid].capabilities.ihave && !providerList[pid].capabilities.post))
 			//providerList[pid].mux.RUnlock()
@@ -287,26 +334,40 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 			if cfg.opt.Debug {
 				log.Printf(" | [DV] push chan <- reup seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
 			}
-			item.flaginUP = true
-			if cfg.opt.UploadLater && cacheON {
-				// catch items and release the quaken later
-				item.flaginDLMEM = true
-			}
-			item.mux.Unlock()
-
-			Counter.incr("upQueueCnt")
-			Counter.incr("TOTAL_upQueueCnt")
 
 			/* push upload request only to 1.
 			this one should up it and usenet should distribute it within minutes
 			*/
 			if cfg.opt.UploadLater && cacheON {
-				memUP[providerList[pid].Group] <- item
+				select {
+					case memUP[providerList[pid].Group] <- item:
+						// pass
+						pushed = true
+					default:
+						// chan is full
+				}
 			} else {
-				segmentChansReups[providerList[pid].Group] <- item
+				select {
+					case segmentChansReups[providerList[pid].Group] <- item:
+						// pass
+						pushed = true
+					default:
+						// chan is full
+				}
 			}
-			pushed = true
-			return
+			if pushed {
+				item.flaginUP = true
+				if cfg.opt.UploadLater && cacheON {
+					// catch items and release the quaken later
+					item.flaginDLMEM = true
+				}
+			}
+			item.mux.Unlock()
+			if pushed {
+				Counter.incr("upQueueCnt")
+				Counter.incr("TOTAL_upQueueCnt")
+			}
+			return // return after 1st push!
 		} // end for providerUp
 	}
 	item.mux.Unlock()
@@ -334,16 +395,20 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 	var logstring, log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99 string
 
 	if cfg.opt.CheckFirst {
-		memDL = make(map[string]chan *segmentChanItem, len(providerList))
+		memDL = make(map[string]chan *segmentChanItem)
 		for _, provider := range providerList {
-			memDL[provider.Group] = make(chan *segmentChanItem, len(segmentList))
+			if memDL[provider.Group] == nil {
+				memDL[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+			}
 		}
 	} // end if cfg.opt.CheckFirst
 
 	if cfg.opt.UploadLater {
-		memUP = make(map[string]chan *segmentChanItem, len(providerList))
+		memUP = make(map[string]chan *segmentChanItem)
 		for _, provider := range providerList {
-			memUP[provider.Group] = make(chan *segmentChanItem, len(segmentList))
+			if memUP[provider.Group] == nil {
+				memUP[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+			}
 		}
 	} // end if cfg.opt.UploadLater
 
