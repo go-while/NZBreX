@@ -132,7 +132,6 @@ func main() {
 	}
 
 	// experimental test of processor/sessions
-
 	if testproc {
 		processor := &PROCESSOR{}
 		nzbdir := "nzbs"
@@ -240,6 +239,14 @@ func main() {
 	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
 	artsize := mibsize / float64(len(segmentList)) * 1024
 	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
+
+	if headers, err := ReadHeadersFromFile(cfg.opt.CleanHeadersFile); headers != nil {
+		cleanHeader = headers
+		log.Printf("Loaded %d headers from '%s' ==> cleanHeader='%#v'", len(headers), cfg.opt.CleanHeadersFile, cleanHeader)
+	} else if err != nil {
+		log.Printf("ERROR loading headers failed file='%s' err='%v'", cfg.opt.CleanHeadersFile, err)
+		os.Exit(1)
+	}
 
 	// cosmetics
 	if cfg.opt.Bar {

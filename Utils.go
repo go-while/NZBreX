@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"flag"
 	"fmt"
@@ -261,6 +262,7 @@ func ParseFlags() {
 	flag.IntVar(&cfg.opt.CRW, "crw", 100, "sets number of Cache Reader and Writer routines to equal amount")
 	// header and yenc
 	flag.BoolVar(&cfg.opt.CleanHeaders, "cleanhdr", true, "[true|false] removes unwanted headers. only change this if you know why! (default: true) ")
+	flag.StringVar(&cfg.opt.CleanHeadersFile, "cleanhdrfile", "", "loads unwanted headers to cleanup from /path/to/cleanHeaders.txt")
 	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false)")
 	// debug output flags
 	flag.BoolVar(&runProf, "prof", false, "starts profiler @mem: waits 20sec and runs 120 sec @cpu: waits 20 sec and captures to end")
@@ -310,6 +312,34 @@ func RunProf() {
 		}
 	}()
 } // end fun RunProf
+
+func ReadHeadersFromFile(path string) ([]string, error) {
+	if path == "" {
+		// ignore silenty because flag is empty / not set
+		return nil, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) > 0 {
+			lines = append(lines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return lines, nil
+} // end func ReadHeadersFromFile
 
 // cosmetics
 func yesno(input bool) string {

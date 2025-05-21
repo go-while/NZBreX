@@ -158,13 +158,17 @@ Run in a cmd line with the following argument:
 
 `-slomou int`  SloMo'U' limiter sleeps N milliseconds before uploading
 
-`-cleanhdr` [true|false] removes unwanted headers (default: true) only change this if you know why! (default true)
+`-cleanhdr` [true|false] removes unwanted headers. only change this if you know why! (default: true)
+
+`-cleanhdrfile` loads unwanted headers to cleanup from cleanHeaders.txt
 
 `-maxartsize int` limits article size (mostly articles have ~700K only) (default 1048576)
 
 `-mem int` limit memory usage to N segments in RAM ( 0 defaults to number of total provider connections*2 or what you set but usually there is no need for more. if your 'MEM' is full: your upload is just slow. giving more mem will NOT help!)
 
 `-prof` starts cpu+mem profiler: waits 20sec and runs 120sec
+
+`-webprof` start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' or 'IP4_ADDR:PORT' or '[IP6_ADDR]:PORT'
 
 `-version` prints app version
 
@@ -261,7 +265,6 @@ NZBreX in **-verbose** mode prints some statistics while running:
 - #0010: any bugs? fix all todos in code!
 - #0020: better console output
 - #0030: verify of uploaded articles
-- #0040: load cleanHeaders.txt into cleanHeader = []string{}
 - #0050: config.json does not work
 - #0060: streaming (CHECK/TAKETHIS)
 - #0070: watchDir (processor/sessions)

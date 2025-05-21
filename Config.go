@@ -38,6 +38,7 @@ type (
 		LogPrintEvery    int64
 		Discard          bool
 		CleanHeaders     bool
+		CleanHeadersFile string
 		BUG              bool // shows it all
 		Debug            bool
 		DebugCache       bool
