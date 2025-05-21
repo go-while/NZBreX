@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 	//"encoding/csv"
@@ -262,7 +263,8 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.CleanHeaders, "cleanhdr", true, "[true|false] removes unwanted headers. only change this if you know why! (default: true) ")
 	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false)")
 	// debug output flags
-	flag.BoolVar(&runProf, "prof", false, "starts cpu+mem profiler: waits 20sec and runs 120sec")
+	flag.BoolVar(&runProf, "prof", false, "starts profiler @mem: waits 20sec and runs 120 sec @cpu: waits 20 sec and captures to end")
+	flag.StringVar(&webProf, "webprof", "", "start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' or 'IP4_ADDR:PORT' or '[IP6_ADDR]:PORT'")
 	flag.BoolVar(&cfg.opt.Verbose, "verbose", true, "[true|false] a little more output than nothing (default: false)")
 	flag.BoolVar(&cfg.opt.Discard, "discard", false, "[true|false] reduce console output to minimum (default: false)")
 	flag.Int64Var(&cfg.opt.LogPrintEvery, "print", 5, "prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished")
@@ -284,22 +286,23 @@ func ParseFlags() {
 	flag.Parse()
 } // end func ParseFlags
 
-func RunProf(runProf bool) {
-	if !runProf {
-		return
+func RunProf() {
+	if webProf != "" {
+		go Prof.PprofWeb(webProf)
 	}
-	go Prof.PprofWeb("[::]:61234")
 	log.Printf("Started PprofWeb @ Port :61234")
 	go func() {
-		time.Sleep(time.Second * 20)
-		log.Printf("Prof start capturing cpu/mem profiles")
+		time.Sleep(time.Second * 15)
+		runtime.GC()
+		time.Sleep(time.Second * 5)
+		//log.Printf("Prof start capturing cpu profile")
 		if _, err := Prof.StartCPUProfile(); err != nil {
 			log.Printf("ERROR Prof.StartCPUProfile err='%v'", err)
 			return
 		}
-		time.Sleep(time.Second * 120)
-		Prof.StopCPUProfile()
-		log.Printf("Prof stop capturing cpu/mem profiles")
+		//time.Sleep(time.Second * 120)
+		//Prof.StopCPUProfile()
+		//log.Printf("Prof stop capturing cpu/mem profiles")
 	}()
 	go func() {
 		if err := Prof.StartMemProfile(120*time.Second, 20*time.Second); err != nil {

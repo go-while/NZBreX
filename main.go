@@ -86,10 +86,11 @@ var (
 
 	//fileStat     = make(filesStatistic)
 	//fileStatLock sync.Mutex
-	D        = "3" // prints stats numbers zero (0003) padded or whitespace padded (  3). default to: 000
-	version  bool  // flag
-	runProf  bool  // flag
-	testproc bool  // flag
+	D        = "3"  // prints stats numbers zero (0003) padded or whitespace padded (  3). default to: 000
+	version  bool   // flag
+	runProf  bool   // flag
+	webProf  string // flag
+	testproc bool   // flag
 )
 
 func dumpGoroutines() {
@@ -126,7 +127,13 @@ func main() {
 		fmt.Printf("%s version: [%s]\n", appName, appVersion)
 		os.Exit(0)
 	}
-	RunProf(runProf)
+	if runProf {
+		RunProf()
+		defer func() {
+			log.Printf("Prof stop capturing cpu profile")
+			Prof.StopCPUProfile()
+		}()
+	}
 
 	// experimental test of processor/sessions
 
