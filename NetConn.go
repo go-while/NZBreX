@@ -13,27 +13,6 @@ import (
 	"time"
 )
 
-var (
-	needHeaders = []string{
-		"Date:",
-		"From:",
-		"Subject:",
-		"Newsgroups:",
-		"Message-Id:",
-	}
-	cleanHeader = []string{
-		"X-",
-		"Date:",
-		"Nntp-",
-		"Path:",
-		"Xref:",
-		"Cancel-",
-		"Injection-",
-		"User-Agent:",
-		"Organization:",
-	}
-)
-
 func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 	defer waitWorker.Done()
 	if cfg.opt.LogPrintEvery < 0 {

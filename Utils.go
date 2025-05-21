@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"compress/gzip"
 	"flag"
 	"fmt"
@@ -312,34 +311,6 @@ func RunProf() {
 		}
 	}()
 } // end fun RunProf
-
-func ReadHeadersFromFile(path string) ([]string, error) {
-	if path == "" {
-		// ignore silenty because flag is empty / not set
-		return nil, nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) > 0 {
-			lines = append(lines, line)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return lines, nil
-} // end func ReadHeadersFromFile
 
 // cosmetics
 func yesno(input bool) string {
