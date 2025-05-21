@@ -18,7 +18,6 @@ package main
  */
 
 import (
-	"flag"
 	"fmt"
 	//"github.com/Tensai75/cmpb"
 	//"github.com/fatih/color"
@@ -37,13 +36,12 @@ import (
 )
 
 var (
-	Prof         *prof.Profiler
-	cfg          = &Config{opt: &CFG{}}
-	appName      = "NZBreX"
-	appVersion   = "-"       // Github tag or built date
-	nzbgroups    []string    // informative
-	providerList []*Provider // the parsed provider list structure
-
+	appName               = "NZBreX"
+	appVersion            = "-"       // Github tag or built date
+	nzbgroups             []string    // informative
+	providerList          []*Provider // the parsed provider list structure
+	Prof                  *prof.Profiler
+	cfg                   = &Config{opt: &CFG{}}
 	globalmux             sync.RWMutex
 	stop_chan             chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
 	memlim                *MemLimiter
@@ -88,7 +86,10 @@ var (
 
 	//fileStat     = make(filesStatistic)
 	//fileStatLock sync.Mutex
-	D = "3" // prints stats numbers zero (0003) padded or whitespace padded (  3). default to: 000
+	D        = "3" // prints stats numbers zero (0003) padded or whitespace padded (  3). default to: 000
+	version  bool  // flag
+	runProf  bool  // flag
+	testproc bool  // flag
 )
 
 func dumpGoroutines() {
@@ -120,71 +121,12 @@ func init() {
 func main() {
 	//colors := new(cmpb.BarColors)
 	var err error
-	var version bool
-	var runProf bool
-	var testproc bool
-
-	flag.BoolVar(&version, "version", false, "prints app version")
-	flag.BoolVar(&testproc, "testproc", false, "testing watchdir processor code")
-	// essentials
-	flag.StringVar(&cfg.opt.NZBfilepath, "nzb", "test.nzb", "/path/file.nzb")
-	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
-	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
-	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
-	flag.BoolVar(&cfg.opt.Verify, "verify", false, "[true|false] waits and tries to verify/recheck all reups (default: false) !not implemented: TODO!")
-	// cache and mem
-	flag.IntVar(&cfg.opt.MemMax, "mem", 0, "limit memory usage to N segments in RAM ( 0 defaults to number of total provider connections*2 or what you set but usually there is no need for more. if your 'MEM' is full: your upload is just slow. giving more mem will NOT help!)")
-	flag.StringVar(&cfg.opt.Cachedir, "cd", "", "/path/to/cache/dir")
-	flag.BoolVar(&cfg.opt.CheckCacheOnBoot, "cc", false, "[true|false] checks nzb vs cache on boot (default: false)")
-	flag.IntVar(&cfg.opt.CRW, "crw", 100, "sets number of Cache Reader and Writer routines to equal amount")
-	// header and yenc
-	flag.BoolVar(&cfg.opt.CleanHeaders, "cleanhdr", true, "[true|false] removes unwanted headers. only change this if you know why! (default: true) ")
-	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false)")
-	// debug output flags
-	flag.BoolVar(&runProf, "prof", false, "starts cpu+mem profiler: waits 20sec and runs 120sec")
-	flag.BoolVar(&cfg.opt.Verbose, "verbose", true, "[true|false] a little more output than nothing (default: false)")
-	flag.BoolVar(&cfg.opt.Discard, "discard", false, "[true|false] reduce console output to minimum (default: false)")
-	flag.Int64Var(&cfg.opt.LogPrintEvery, "print", 5, "prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished")
-	flag.BoolVar(&cfg.opt.Log, "log", false, "[true|false] logs to file (default: false)")
-	flag.BoolVar(&cfg.opt.BUG, "bug", false, "[true|false] full debug (default: false)")
-	flag.BoolVar(&cfg.opt.Debug, "debug", false, "[true|false] part debug (default: false)")
-	flag.BoolVar(&cfg.opt.DebugCache, "debugcache", false, "[true|false] (default: false)")
-	// rate limiter
-	flag.IntVar(&cfg.opt.SloMoC, "slomoc", 0, "SloMo'C' limiter sleeps N milliseconds before checking")
-	flag.IntVar(&cfg.opt.SloMoD, "slomod", 0, "SloMo'D' limiter sleeps N milliseconds before downloading")
-	flag.IntVar(&cfg.opt.SloMoU, "slomou", 0, "SloMo'U' limiter sleeps N milliseconds before uploading")
-	// no need to change this
-	flag.IntVar(&cfg.opt.MaxArtSize, "maxartsize", 1*1024*1024, "limits article size to 1M (mostly articles have ~700K only)")
-
-	// cosmetics: segmentBar needs fixing: only when everything else works!
-	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
-	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
-	//flag.StringVar(&configfile, "configfile", "config.json", "use this config file") // FIXME TODO
-	flag.Parse()
+	ParseFlags()
 	if version {
 		fmt.Printf("%s version: [%s]\n", appName, appVersion)
 		os.Exit(0)
 	}
-	if runProf {
-		go Prof.PprofWeb("[::]:61234")
-		log.Printf("Started PprofWeb @ Port :61234")
-		go func() {
-			time.Sleep(time.Second * 20)
-			log.Printf("Prof start capturing cpu/mem profiles")
-			if _, err := Prof.StartCPUProfile(); err != nil {
-				log.Printf("ERROR Prof.StartCPUProfile err='%v'", err)
-				return
-			}
-			time.Sleep(time.Second * 120)
-			Prof.StopCPUProfile()
-			log.Printf("Prof stop capturing cpu/mem profiles")
-		}()
-		go func() {
-			if err := Prof.StartMemProfile(120*time.Second, 20*time.Second); err != nil {
-				log.Printf("ERROR Prof.StartMemProfile err='%v'", err)
-			}
-		}()
-	} // end bootProf
+	RunProf(runProf)
 
 	// experimental test of processor/sessions
 
@@ -466,7 +408,7 @@ func main() {
 		} // end for providerList
 	}
 
-	log.Print(runtime_info + "\n> ###" + result + "\n> ###\n\n:end")
+	log.Print(runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end")
 	//writeCsvFile()
 
 	os.Exit(0)
