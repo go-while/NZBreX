@@ -24,7 +24,7 @@ type MemLimiter struct {
 	mem_max int
 	waiting int
 	memchan chan struct{}
-	memdata map[string]bool // [seg.Id]bool
+	memdata map[*segmentChanItem]bool
 	mux     sync.RWMutex
 }
 
@@ -34,7 +34,7 @@ func NewMemLimiter(value int) *MemLimiter {
 	}
 	memlim := &MemLimiter{
 		memchan: make(chan struct{}, value),
-		memdata: make(map[string]bool, value),
+		memdata: make(map[*segmentChanItem]bool, value),
 		mem_max: value,
 	}
 	for i := 1; i <= value; i++ {
@@ -56,8 +56,8 @@ func (m *MemLimiter) Usage() (int, int) {
 
 func (m *MemLimiter) ViewData() (data []string) {
 	m.mux.RLock()
-	for segId, _ := range m.memdata {
-		data = append(data, segId)
+	for item, _ := range m.memdata {
+		data = append(data, item.segment.Id)
 	}
 	m.mux.RUnlock()
 	return
@@ -77,8 +77,8 @@ func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 
 	for {
 		m.mux.Lock()
-		if !m.memdata[item.segment.Id] {
-			m.memdata[item.segment.Id] = true // flag as in mem
+		if !m.memdata[item] {
+			m.memdata[item] = true // flag as in mem
 			m.mux.Unlock()
 			break
 		}
@@ -105,7 +105,7 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	}
 	m.memchan <- struct{}{} // return mem slot into chan
 	m.mux.Lock()
-	delete(m.memdata, item.segment.Id)
+	delete(m.memdata, item)
 	m.mux.Unlock()
 	if cfg.opt.Debug {
 		Counter.decr("WAIT_MemReturn")
