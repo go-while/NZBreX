@@ -24,7 +24,7 @@ type MemLimiter struct {
 	mem_max int
 	waiting int
 	memchan chan struct{}
-	memdata []*segmentChanItem
+	memdata map[string]bool // [seg.Id]bool
 	mux     sync.RWMutex
 }
 
@@ -34,7 +34,7 @@ func NewMemLimiter(value int) *MemLimiter {
 	}
 	memlim := &MemLimiter{
 		memchan: make(chan struct{}, value),
-		//memdata: make(map[string]bool, value),
+		memdata: make(map[string]bool, value),
 		mem_max: value,
 	}
 	for i := 1; i <= value; i++ {
@@ -56,8 +56,8 @@ func (m *MemLimiter) Usage() (int, int) {
 
 func (m *MemLimiter) ViewData() (data []string) {
 	m.mux.RLock()
-	for _, inmem := range m.memdata {
-		data = append(data, inmem.segment.Id)
+	for segId, _ := range m.memdata {
+		data = append(data, segId)
 	}
 	m.mux.RUnlock()
 	return
@@ -70,41 +70,32 @@ func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 
 	m.mux.Lock()
 	m.waiting++
+	if cfg.opt.Debug && m.waiting > 0 {
+		log.Printf("MemCheckWait WAIT avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, m.waiting, who)
+	}
 	m.mux.Unlock()
-	/*
-		if m.waiting > 0 {
-			log.Printf("MemCheckWait WAIT avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, m.waiting, who)
-		}
-	*/
 
-	waitHere := false
 	for {
-		m.mux.RLock()
-		for _, inmem := range m.memdata {
-			if inmem.segment.Id == item.segment.Id {
-				// segment is alread locked inmem?!
-				waitHere = true
-				break
-			}
-		} // end for inmem
-		m.mux.RUnlock()
-		if !waitHere {
+		m.mux.Lock()
+		if !m.memdata[item.segment.Id] {
+			m.memdata[item.segment.Id] = true // flag as in mem
+			m.mux.Unlock()
 			break
 		}
+		m.mux.Unlock()
 		time.Sleep(time.Second)
 		log.Printf("WAIT! already inmem seg.Id='%s'", item.segment.Id)
-		waitHere = false // reset for next run
 	} // end for waithere
 
-	<-m.memchan // gets a slot from chan
+	<-m.memchan // infinite wait to get a slot from chan
 
 	m.mux.Lock()
 	m.waiting--
-	m.memdata = append(m.memdata, item)
+	m.mux.Unlock()
+
 	if cfg.opt.Debug {
 		log.Printf("NewMemLock seg.Id='%s'", item.segment.Id)
 	}
-	m.mux.Unlock()
 	//log.Printf("MemCheckWait SLOT chan=%d/%d", len(m.memchan), m.mem_max)
 } // end func memlim.MemCheckWait
 
@@ -112,20 +103,10 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	if cfg.opt.Debug {
 		Counter.incr("WAIT_MemReturn")
 	}
+	m.memchan <- struct{}{} // return mem slot into chan
 	m.mux.Lock()
-	var newdata []*segmentChanItem
-	for _, inmem := range m.memdata {
-		if inmem.segment.Id != item.segment.Id {
-			newdata = append(newdata, inmem)
-		} else {
-			if cfg.opt.Debug {
-				log.Printf("MemRet clear seg.Id='%s inmen='%s'", item.segment.Id, inmem.segment.Id)
-			}
-		}
-	}
-	m.memdata = newdata
+	delete(m.memdata, item.segment.Id)
 	m.mux.Unlock()
-	m.memchan <- struct{}{}
 	if cfg.opt.Debug {
 		Counter.decr("WAIT_MemReturn")
 		Counter.incr("TOTAL_MemReturned")
