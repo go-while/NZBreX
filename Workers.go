@@ -382,7 +382,7 @@ forever:
 			}
 			if item.flagisUP {
 				isup++
-				done++
+				//done++
 			}
 
 			doContinue := false
@@ -406,7 +406,7 @@ forever:
 			}
 
 			if len(item.missingOn) == 0 && len(item.availableOn) == providersCnt {
-				// segment is on all providers =)
+				// segment is on all providers or should be ... we add provider to to item.availableOn after re-upload
 				allOk++
 				done++
 				doContinue = true

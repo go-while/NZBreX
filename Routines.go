@@ -32,21 +32,24 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	switch code {
 	case 223:
 		// messageid found at provider
-		go func(provider *Provider) {
-			provider.mux.Lock() // mutex #939d articles.checked/available++
-			provider.articles.checked++
-			provider.articles.available++
-			provider.mux.Unlock() // mutex #939d articles.checked/available++
-		}(provider)
+		item.mux.Lock()
+		for id, prov := range providerList {
+			if prov.Group != provider.Group {
+				continue
+			}
+			item.availableOn[id] = true
+			delete(item.missingOn, id)
+			item.checkedAt++
+			//checkedAt += item.checkedAt // segmentBar
+		}
+		item.mux.Unlock()
+		provider.mux.Lock() // mutex #939d articles.checked/available++
+		provider.articles.checked++
+		provider.articles.available++
+		provider.mux.Unlock() // mutex #939d articles.checked/available++
 		//fileStatLock.Lock()
 		//fileStat[item.num].available[provider.Name]++
 		//fileStatLock.Unlock()
-
-		item.mux.Lock()
-		item.availableOn[provider.id] = true
-		item.checkedAt++
-		//checkedAt = item.checkedAt // segmentBar
-		item.mux.Unlock()
 
 	default:
 		if code == 0 || err != nil {
@@ -59,20 +62,23 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 
 		} else {
 			// messageid NOT found at provider
-			go func(provider *Provider) {
-				provider.mux.Lock() // mutex #24b0 articles.checked/missing++
-				provider.articles.checked++
-				provider.articles.missing++
-				provider.mux.Unlock() // mutex #24b0 articles.checked/missing++
-			}(provider)
 			item.mux.Lock()
-			item.missingOn[provider.id] = true
-			if code == 451 {
-				item.dmcaOn[provider.id] = true
+			for id, prov := range providerList {
+				if prov.Group != provider.Group {
+					continue
+				}
+				item.missingOn[id] = true
+				if code == 451 {
+					item.dmcaOn[id] = true
+				}
+				item.checkedAt++
+				//checkedAt += item.checkedAt // segmentBar
 			}
-			item.checkedAt++
-			//checkedAt = item.checkedAt // segmentBar
 			item.mux.Unlock()
+			provider.mux.Lock() // mutex #24b0 articles.checked/missing++
+			provider.articles.checked++
+			provider.articles.missing++
+			provider.mux.Unlock() // mutex #24b0 articles.checked/missing++
 		}
 	} // end switch
 
@@ -123,12 +129,19 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	switch code {
 	case 220:
 		Counter.decr("dlQueueCnt")
+		Counter.add("TMP_RXbytes", uint64(item.size))
+		Counter.add("TOTAL_RXbytes", uint64(item.size))
 		item.mux.Lock()
+		for id, prov := range providerList {
+			if prov.Group != provider.Group {
+				continue
+			}
+			item.availableOn[id] = true
+			delete(item.missingOn, id)
+		}
 		item.flagisDL = true
 		item.flaginDL = false
 		item.mux.Unlock()
-		go Counter.add("TMP_RXbytes", uint64(item.size))
-		go Counter.add("TOTAL_RXbytes", uint64(item.size))
 		provider.mux.Lock()
 		provider.articles.downloaded++
 		provider.mux.Unlock()
@@ -155,37 +168,35 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 				segmentChansDowns[provider.Group] <- item
 
 			} else if isdead {
-				go Counter.decr("dlQueueCnt")
-				go Counter.decr("TOTAL_dlQueueCnt")
+				Counter.decr("dlQueueCnt")
+				Counter.decr("TOTAL_dlQueueCnt")
 				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE failed':"+who, item)
 			}
 			return err
 
 		} else {
-
 			// downloading article failed from provider
-			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
-
 			item.mux.Lock()
-			item.flaginDL = false
-
-			// modify availableON and missingON lists
-			item.missingOn[provider.id] = true
-			// remove our provider from availableON list
-			delete(item.availableOn, provider.id)
-			item.mux.Unlock()
-
-			provider.mux.Lock()
-			provider.articles.missing++
-			provider.mux.Unlock()
-
-			item.mux.RLock()
-			isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList)
-			item.mux.RUnlock()
-			if isdead {
-				go Counter.decr("dlQueueCnt")
-				go Counter.decr("TOTAL_dlQueueCnt")
+			for id, prov := range providerList {
+				if prov.Group != provider.Group {
+					continue
+				}
+				// modify availableON and missingON lists
+				item.missingOn[id] = true
+				// remove our provider from availableON list
+				delete(item.availableOn, id)
 			}
+			isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList)
+			item.flaginDL = false
+			item.mux.Unlock()
+			provider.mux.Lock() // mutex #24b0 articles.checked/missing++
+			provider.articles.missing++
+			provider.mux.Unlock() // mutex #24b0 articles.checked/missing++
+			if isdead {
+				Counter.decr("dlQueueCnt")
+				Counter.decr("TOTAL_dlQueueCnt")
+			}
+			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
 		}
 	} // end switch code
 	if cfg.opt.Debug {
@@ -238,8 +249,8 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 
 	if doPOST {
 		code, _, err := CMD_POST(provider, connitem, item)
-		go Counter.add("TMP_TXbytes", uint64(item.size))
-		go Counter.add("TOTAL_TXbytes", uint64(item.size))
+		Counter.add("TMP_TXbytes", uint64(item.size))
+		Counter.add("TOTAL_TXbytes", uint64(item.size))
 
 		switch code {
 
@@ -267,8 +278,8 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 
 	} else if doIHAVE {
 		code, _, err := CMD_IHAVE(provider, connitem, item)
-		go Counter.add("TMP_TXbytes", uint64(item.size))
-		go Counter.add("TOTAL_TXbytes", uint64(item.size))
+		Counter.add("TMP_TXbytes", uint64(item.size))
+		Counter.add("TOTAL_TXbytes", uint64(item.size))
 		switch code {
 
 		case 235:
@@ -310,41 +321,59 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	if uploaded {
 
 		// react to finished upload
-		Counter.decr("upQueueCnt")
-
-		go func(provider *Provider) {
-			provider.mux.Lock() // mutex #87c9 articles.refreshed++
-			provider.articles.refreshed++
-			provider.mux.Unlock() // mutex #87c9 articles.refreshed++
-		}(provider)
-
 		item.mux.Lock()
+		for id, prov := range providerList {
+			if prov.Group != provider.Group {
+				continue
+			}
+			item.availableOn[id] = true
+			delete(item.missingOn, id)
+
+		}
 		item.flaginUP = false
 		item.flagisUP = true
 		item.mux.Unlock()
+		provider.mux.Lock() // mutex #87c9 articles.refreshed++
+		provider.articles.refreshed++
+		provider.mux.Unlock() // mutex #87c9 articles.refreshed++
 		clearmem = true
+		Counter.decr("upQueueCnt")
 
 	} else if unwanted {
 
 		// item is unwanted at provider, set flag.
 		log.Printf("Flag Unwanted seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		moreProvider := false
 		item.mux.Lock()
+		for id, prov := range providerList {
+			if prov.Group != provider.Group {
+				if prov.capabilities.post || prov.capabilities.ihave {
+					if item.missingOn[id] && !item.unwantedOn[id] {
+						moreProvider = true
+					}
+				}
+				continue
+			}
+			item.unwantedOn[id] = true
+		}
 		item.flaginUP = false
-		item.unwantedOn[provider.id] = true
 		item.mux.Unlock()
+
 		// TODO: need better check if we have other providers
 		// with posting capabilities and queue item to one of them
-		if Counter.get("postProviders") == 1 {
+		if !moreProvider {
 			clearmem = true
+			Counter.decr("upQueueCnt")
+			Counter.decr("TOTAL_upQueueCnt")
 		}
 
 	} else if retry {
 
 		log.Printf("Flag Retry seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		item.mux.Lock()
-		item.flaginUP = false
 		item.retryIn = time.Now().Unix() + 15
 		item.retryOn[provider.id] = true
+		item.flaginUP = false
 		item.mux.Unlock()
 		Counter.decr("upQueueCnt")
 		Counter.decr("TOTAL_upQueueCnt")

@@ -294,7 +294,7 @@ func main() {
 	}
 	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
 	artsize := mibsize / float64(len(segmentList)) * 1000
-	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/art )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
+	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
 
 	// cosmetics
 	if cfg.opt.Bar {
@@ -412,31 +412,59 @@ func main() {
 	dlSpeed := int(float64(Counter.get("TOTAL_RXbytes")) / transferTook.Seconds() / 1024)
 	upSpeed := int(float64(Counter.get("TOTAL_TXbytes")) / transferTook.Seconds() / 1024)
 
-	totalruntime := fmt.Sprintf(" | QUIT |\n\n> NZB: '%s'\n> Total Runtime: %.0f sec (%v)", filepath.Base(cfg.opt.NZBfilepath), time.Since(preparationStartTime).Seconds(), time.Since(preparationStartTime))
+	totalruntime := fmt.Sprintf(" | QUIT |\n\n> NZB: '%s' (%d segments)\n> Total Runtime: %.0f sec (%v)", filepath.Base(cfg.opt.NZBfilepath), len(segmentList), time.Since(preparationStartTime).Seconds(), time.Since(preparationStartTime))
 	segchecktook := fmt.Sprintf("\n> SegCheck: %.0f sec (%v) ~%.0f ms/seg", segmentCheckTook.Seconds(), segmentCheckTook, float32(segmentCheckTook.Milliseconds())/float32(nzbfile.Segments))
 	transfertook := fmt.Sprintf("\n> Transfer: %.0f sec (%v) ~%.0f ms/seg", transferTook.Seconds(), transferTook, float32(transferTook.Milliseconds())/float32(nzbfile.Segments))
 	avgUpDlspeed := fmt.Sprintf("\n> DL %d KiB/s  (Total: %.2f MiB)\n> UL %d KiB/s  (Total: %.2f MiB)", dlSpeed, float64(Counter.get("TOTAL_RXbytes"))/float64(1024)/float64(1024), upSpeed, float64(Counter.get("TOTAL_TXbytes"))/float64(1024)/float64(1024))
 	runtime_info := totalruntime + segchecktook + transfertook + avgUpDlspeed
-
 	result := ""
 
-	for id, _ := range providerList {
-		providerList[id].mux.RLock()
+	provGroups := make(map[string][]int)
+	for id, provider := range providerList {
+		provGroups[provider.Group] = append(provGroups[provider.Group], id)
+	}
 
-		if !providerList[id].Enabled {
-			providerList[id].mux.RUnlock()
-			continue
+	if len(provGroups) > 1 {
+		for group, ids := range provGroups {
+			var pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed uint64
+			result = result + fmt.Sprintf("\n\n> Results | Group: '%s'", group)
+			for _, id := range ids {
+				providerList[id].mux.RLock()
+				result = result + fmt.Sprintf("\n> Results | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' | Group: '%s'",
+					providerList[id].articles.checked,
+					providerList[id].articles.available,
+					providerList[id].articles.missing,
+					providerList[id].articles.downloaded,
+					providerList[id].articles.refreshed,
+					providerList[id].Name,
+					providerList[id].Group,
+				)
+				pGchecked += providerList[id].articles.checked
+				pGavailable += providerList[id].articles.available
+				pGmissing += providerList[id].articles.missing
+				pGdownloaded += providerList[id].articles.downloaded
+				pGrefreshed += providerList[id].articles.refreshed
+				providerList[id].mux.RUnlock()
+			} // end for id in range ids
+			result = result + fmt.Sprintf("\n> ^Totals | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | Group: '%s'",
+				pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed, group,
+			)
 		}
-		result = result + fmt.Sprintf("\n> Results | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s'",
-			providerList[id].articles.checked,
-			providerList[id].articles.available,
-			providerList[id].articles.missing,
-			providerList[id].articles.downloaded,
-			providerList[id].articles.refreshed,
-			providerList[id].Name,
-		)
-		providerList[id].mux.RUnlock()
-	} // end for providerList
+	} else {
+		for id, _ := range providerList {
+			providerList[id].mux.RLock()
+			result = result + fmt.Sprintf("\n> Results | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' | Group: '%s'",
+				providerList[id].articles.checked,
+				providerList[id].articles.available,
+				providerList[id].articles.missing,
+				providerList[id].articles.downloaded,
+				providerList[id].articles.refreshed,
+				providerList[id].Name,
+				providerList[id].Group,
+			)
+			providerList[id].mux.RUnlock()
+		} // end for providerList
+	}
 
 	log.Print(runtime_info + "\n> ###" + result + "\n> ###\n\n:end")
 	//writeCsvFile()
