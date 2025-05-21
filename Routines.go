@@ -40,8 +40,9 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 			item.availableOn[id] = true
 			delete(item.missingOn, id)
 			item.checkedAt++
-			//checkedAt += item.checkedAt // segmentBar
+
 		}
+		//checkedAt += item.checkedAt // segmentBar
 		item.mux.Unlock()
 		provider.mux.Lock() // mutex #939d articles.checked/available++
 		provider.articles.checked++
@@ -72,8 +73,8 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 					item.dmcaOn[id] = true
 				}
 				item.checkedAt++
-				//checkedAt += item.checkedAt // segmentBar
 			}
+			//checkedAt += item.checkedAt // segmentBar
 			item.mux.Unlock()
 			provider.mux.Lock() // mutex #24b0 articles.checked/missing++
 			provider.articles.checked++
