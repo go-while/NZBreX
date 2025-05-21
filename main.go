@@ -206,7 +206,7 @@ func main() {
 		log.Printf("unable to load NZB file '%s': %v'", cfg.opt.NZBfilepath, err)
 		os.Exit(1)
 	}
-	nzbhashname := SHA256str(filepath.Base(cfg.opt.NZBfilepath))
+	nzbhashname := SHA256str(filepath.Base(cfg.opt.NZBfilepath)) // fixme TODO processor/sessions
 	if len(nzbfile.Files) <= 0 {
 		log.Printf("error in NZB file '%s': nzbfile.Files=0'", cfg.opt.NZBfilepath)
 		os.Exit(1)
@@ -229,10 +229,11 @@ func main() {
 				log.Printf("reading nzb: Id='%s' file='%s'", segment.Id, file.Filename)
 			}
 			// if you add more variables to 'segmentChanItem struct': compiler always fails here!
+			// we could supply neatly named vars but then we will forget one if updating the struct and app will crash...
 			item := &segmentChanItem{
 				segment,
 				make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)),
-				sync.RWMutex{}, nil, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), file.Number, 0, 0, 0, 0, 0, &nzbhashname}
+				sync.RWMutex{}, nil, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), file.Number, 0, 0, 0, 0, 0, &nzbhashname} // fixme TODO processor/sessions
 			segmentList = append(segmentList, item)
 		}
 	}
@@ -258,7 +259,7 @@ func main() {
 
 	// load the provider list
 	if err := loadProviderList(cfg.opt.ProvFile); err != nil {
-		log.Printf("unable to load providerfile '%s' list: %v", cfg.opt.ProvFile, err)
+		log.Printf("ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
 		os.Exit(1)
 	}
 	totalMaxConns := 0
@@ -293,7 +294,7 @@ func main() {
 			log.Printf("ERROR Cache failed... is nil!")
 			os.Exit(1)
 		}
-		if !cache.MkSubDir(nzbhashname) {
+		if !cache.MkSubDir(nzbhashname) { // fixme TODO processor/sessions
 			os.Exit(1)
 		}
 	}

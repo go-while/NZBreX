@@ -115,11 +115,12 @@ func (p *PROCESSOR) newssid() uint64 {
 
 func (p *PROCESSOR) thread() {
 	// TODO: watch nzbdir, load nzbs and distribute work here
+forever:
 	for {
 		select {
 		case nul := <-p.stop_chan:
 			p.stop_chan <- nul
-			return
+			break forever
 		}
 	}
 	log.Printf("Quit PROCESSOR '%s'", p.nzbDir)
@@ -151,11 +152,12 @@ func (p *PROCESSOR) refreshDir() {
 func (p *PROCESSOR) watchDir() {
 	tAchan := time.After(1 * time.Second)
 	log.Printf("Starting watchDir: '%s'", p.nzbDir)
+forever:
 	for {
 		select {
 		case nul := <-p.stop_chan:
 			p.stop_chan <- nul
-			return
+			break forever
 
 		case <-tAchan:
 			//log.Printf("watchDir checking '%s'", p.nzbDir)

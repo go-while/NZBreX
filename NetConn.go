@@ -48,7 +48,7 @@ func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 
 	var logStr, logStr_RX, logStr_TX string
 	var TOTAL_TXbytes, TOTAL_RXbytes uint64
-
+forever:
 	for {
 		select {
 		case quit := <-stop_chan:
@@ -59,7 +59,7 @@ func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 			if cfg.opt.Debug {
 				log.Print("GoSpeedMeter returns")
 			}
-			return
+			break forever
 
 		case <-cron:
 			tmp_rxb, tmp_txb := Counter.getReset("TMP_RXbytes"), Counter.getReset("TMP_TXbytes")
