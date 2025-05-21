@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"strings"
 	"bufio"
 	"crypto/tls"
 	"fmt"
@@ -91,7 +93,12 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	}
 
 	if err != nil || conn == nil {
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
+		if isNetworkUnreachable(err) {
+			return nil, fmt.Errorf("ERROR connect Unreachable network '%s' @ '%s'", provider.Host, provider.Name)
+		}
 		log.Printf("error Dial rserver=%s wants_ssl=%t err='%v' retry in 3s", c.rserver, provider.SSL, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -103,7 +110,9 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	code, msg, err := srvtp.ReadCodeLine(20)
 
 	if code < 200 || code > 201 {
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 		log.Printf("ERROR connect code=%d msg='%s' err='%v' retry in 3s", code, msg, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -117,7 +126,9 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	// send auth sequence
 	id, err := srvtp.Cmd("AUTHINFO USER %s", provider.Username)
 	if err != nil {
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 		log.Printf("rserver=%s AUTH1 FAILED err='%v' retry in 3s", c.rserver, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -127,7 +138,9 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	code, _, err = srvtp.ReadCodeLine(381)
 	srvtp.EndResponse(id)
 	if err != nil || code != 381 {
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 		log.Printf("rserver=%s AUTH2 FAILED code != 381 err='%v' retry in 3s", c.rserver, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -136,7 +149,9 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 
 	id, err = srvtp.Cmd("AUTHINFO PASS %s", provider.Password)
 	if err != nil {
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 		log.Printf("rserver=%s AUTH3 FAILED err='%v' retry in 3s", c.rserver, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -146,7 +161,9 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry uint32) (*Con
 	code, _, err = srvtp.ReadCodeLine(281)
 	srvtp.EndResponse(id)
 	if err != nil {
-		conn.Close()
+		if conn != nil {
+			conn.Close()
+		}
 		log.Printf("rserver=%s AUTH4 FAILED err='%v' retry in 3s", c.rserver, err)
 		time.Sleep(3 * time.Second)
 		retry++
@@ -203,8 +220,10 @@ func (c *ProviderConns) ParkConn(provider *Provider, connitem *ConnItem) {
 func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem) {
 	if cfg.opt.Debug {
 		Counter.incr("TOTAL_DisConns")
+	}+
+	if connitem.conn != nil {
+		connitem.conn.Close()
 	}
-	connitem.conn.Close()
 	c.mux.Lock()
 	c.openConns--
 	if cfg.opt.Debug {
@@ -212,3 +231,17 @@ func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem) {
 	}
 	c.mux.Unlock()
 } // end func CloseConn
+
+func isNetworkUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var opErr *net.OpError
+	if ok := errors.As(err, &opErr); ok {
+		// This string check is still needed because "network is unreachable" is platform-specific
+		return strings.Contains(opErr.Err.Error(), "network is unreachable")
+	}
+
+	return false
+} // end func isNetworkUnreachable (written by AI: GPT-4o)
