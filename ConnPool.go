@@ -1,14 +1,14 @@
 package main
 
 import (
-	"errors"
-	"strings"
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/textproto"
+	"strings"
 	"sync"
 	"time"
 )
