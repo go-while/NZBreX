@@ -35,6 +35,14 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 		log.Printf("Cached: %d/%d", cached, len(segmentList))
 	}
 
+	if cfg.opt.ChanSize > 0 {
+		if len(segmentList) < cfg.opt.ChanSize {
+			cfg.opt.ChanSize = len(segmentList)
+		}
+	} else {
+		cfg.opt.ChanSize = DefaultChanSize
+	}
+
 	for _, provider := range providerList {
 		//log.Printf("BootWorkers list=%d provider='%#v' ", len(providerList), provider)
 		if !provider.Enabled || provider.MaxConns <= 0 {
@@ -55,19 +63,11 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 			//log.Printf("Mapping Provider '%s' to group '%s'", provider.Name, provider.Group)
 
 			globalmux.Lock()
-			if cfg.opt.ChanSize > 0 {
-				if len(segmentList) < cfg.opt.ChanSize {
-					cfg.opt.ChanSize = len(segmentList)
-				}
-			} else {
-				cfg.opt.ChanSize = DefaultChanSize
-			}
 			if segmentChansCheck[provider.Group] == nil {
 				// create channels once if not exists
 				segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				//segmentChanCheck := segmentChansCheck[provider.Group]
 				// fill check channel for provider group with pointers
 				go func(segmentChanCheck chan *segmentChanItem){
 					start := time.Now()
