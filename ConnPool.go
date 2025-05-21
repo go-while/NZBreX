@@ -220,7 +220,7 @@ func (c *ProviderConns) ParkConn(provider *Provider, connitem *ConnItem) {
 func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem) {
 	if cfg.opt.Debug {
 		Counter.incr("TOTAL_DisConns")
-	}+
+	}
 	if connitem.conn != nil {
 		connitem.conn.Close()
 	}
