@@ -69,10 +69,10 @@ func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 	}
 
 	m.mux.Lock()
-	m.waiting++
 	if cfg.opt.Debug && m.waiting > 0 {
 		log.Printf("MemCheckWait WAIT avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, m.waiting, who)
 	}
+	m.waiting++
 	m.mux.Unlock()
 
 	for {
