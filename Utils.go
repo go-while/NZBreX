@@ -182,6 +182,20 @@ func getTimeSince(timer time.Time) time.Duration {
 	return duration
 }
 
+func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps float64) {
+	if durationSeconds <= 0 {
+		return 0, 0
+	}
+
+	// KiB/s: binary (1024)
+	kibPerSec = bytes / durationSeconds / 1024
+
+	// Mbps: decimal (1000)
+	mbps = float64(bytes) * 8 / float64(durationSeconds) / 1_000_000
+
+	return kibPerSec, mbps
+} // end func ConvertSpeed (written by AI: GPT-4o)
+
 func SHA256str(astr string) string {
 	// string hash func works only with cacheON!
 	// only used to create hashs of segment.Id
@@ -239,3 +253,4 @@ func yesno(input bool) string {
 	}
 	return "?"
 } // end func yesno
+
