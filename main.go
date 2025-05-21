@@ -129,10 +129,6 @@ func main() {
 	}
 	if runProf {
 		RunProf()
-		defer func() {
-			log.Printf("Prof stop capturing cpu profile")
-			Prof.StopCPUProfile()
-		}()
 	}
 
 	// experimental test of processor/sessions
@@ -417,6 +413,10 @@ func main() {
 
 	log.Print(runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end")
 	//writeCsvFile()
-
+	if runProf {
+		log.Printf("Prof stop capturing cpu profile")
+		Prof.StopCPUProfile()
+		//time.Sleep(time.Second)
+	}
 	os.Exit(0)
 } // end func main
