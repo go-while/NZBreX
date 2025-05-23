@@ -1,13 +1,16 @@
 package main
 
 import (
-	"bytes"
+	//"bytes"
+	//"bufio"
+	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 	"fmt"
-	"gopkg.in/yenc.v0"
 	"io"
 	"log"
 	"net"
 	"net/textproto"
+	//"os"
+	//"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -286,10 +289,10 @@ func readArticleDotLines(provider *Provider, item *segmentChanItem, srvtp *textp
 	rxb, i := 0, 0
 	var parseHeader bool = true // initial
 	var ignoreNextContinuedLine bool
-	var head []string
 	var article []string
 	//var messageIds []string
 	var ydec []byte
+	var ydat []*string
 	var badcrc bool
 
 readlines:
@@ -320,10 +323,6 @@ readlines:
 			now := time.Now().Format(time.RFC1123Z)
 			datestr := fmt.Sprintf("Date: %s", now)
 			article = append(article, datestr)
-			// add read headers to item
-			for _, line := range head {
-				article = append(article, line)
-			}
 			/*
 				article = append(article, "Message-Id: "+"<"+item.segment.Id+">")
 				if len(messageIds) == 0 {
@@ -335,7 +334,6 @@ readlines:
 		}
 
 		if parseHeader {
-
 			isSpacedLine := (len(line) > 0 && (line[0] == ' ' || line[0] == '\t'))
 
 			if !isSpacedLine && ignoreNextContinuedLine {
@@ -369,27 +367,35 @@ readlines:
 					if strings.HasPrefix(line, key) {
 						ignoreNextContinuedLine = true
 						if cfg.opt.Debug {
-							log.Printf("cleanHeader: seg.ID='%s' ignore key='%s' ", item.segment.Id, key)
+							log.Printf("cleanHeader: seg.ID='%s' ignore key='%s'", item.segment.Id, key)
 						}
 						// will not append this and ignore any following continued spaced line(s)
 						continue readlines
 					}
 				}
 			}
-			head = append(head, line)
+			//head = append(head, line)
+			article = append(article, line)
 		} // end parseHeader
 
-		// found final dot in line, break here and not append it to cache
+		// found final dot in line, break here
 		if len(line) == 1 && line == "." {
 			break
 		}
+
 		if !parseHeader {
 			i++ // counts body lines
 			article = append(article, line)
 			if cfg.opt.YencCRC {
-				ydec = append(ydec, line+CRLF...)
+				switch cfg.opt.YencTest {
+					case 1:
+						// case 1 needs double the memory
+						ydec = append(ydec, line+CRLF...) // as []byte
+					case 2:
+						// case 2 should need less memory
+						ydat = append(ydat, &line) // as []*string
+				}
 			}
-
 		}
 		if cfg.opt.BUG {
 			log.Printf("readArticleDotLines: line=%d rxb=%d lines=%d", i, rxb, len(item.lines))
@@ -400,23 +406,49 @@ readlines:
 	}
 
 	if cfg.opt.YencCRC {
-		r := bytes.NewReader(ydec)
-		decoder, err := yenc.Decode(r, yenc.DecodeWithPrefixData())
-		if err != nil {
-			log.Printf("ERROR yenc.Decode seg.Id='%s' @ '%s' input=%d err='%v'", item.segment.Id, provider.Name, len(ydec), err)
-			badcrc = true
-		} else {
-			if cfg.opt.Debug {
-				log.Printf("seg.Id='%s' yenc.Decoder='%#v", item.segment.Id, decoder)
-			}
+		getCoreLimiter()
+		defer returnCoreLimiter()
+		var yPart *yenc.Part
+		var err error
+		switch cfg.opt.YencTest {
+
+			case 1:
+				decoder := yenc.NewDecoder(nil, ydec, nil, 1)
+				if yPart, err = decoder.Decode(); err != nil { // chrisfarms/yenc
+					log.Printf("ERROR yenc.Decode mode=1 seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", item.segment.Id, provider.Name, len(ydec), err)
+					badcrc = true
+				} else {
+					if cfg.opt.Debug {
+						log.Printf("YencCRC OK mode=1 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
+					}
+				}
+			case 2:
+				decoder := yenc.NewDecoder(nil, nil, ydat, 1)
+				if yPart, err = decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
+					log.Printf("ERROR yenc.Decode mode=2 seg.Id='%s' @ '%s' ydat=(%d lines) err='%v'", item.segment.Id, provider.Name, len(ydat), err)
+					badcrc = true
+				} else {
+					if cfg.opt.Debug {
+						log.Printf("YencCRC OK mode=2 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
+					}
+				}
+		} // end switch yencTest
+
+		if badcrc {
+			item.mux.Lock()
+			item.badcrc++
+			item.mux.Unlock()
+			errlog := fmt.Sprintf("ERROR CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+			log.Print(errlog)
+			return fmt.Errorf(errlog)
 		}
-	}
-	if badcrc {
-		item.mux.Lock()
-		item.badcrc++
-		item.mux.Unlock()
-		return fmt.Errorf("ERROR CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
-	}
+
+		if cfg.opt.YencWrite && cacheON && yPart != nil {
+			cache.WriteYenc(item, yPart)
+		}
+
+	} // end if cfg.opt.YencCRC
+
 	item.mux.Lock()
 	item.size = rxb
 	item.lines = article

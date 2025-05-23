@@ -18,6 +18,7 @@ const (
 	DefaultCacheRW = 100
 	DefaultChanSize = 1000
 	DefaultLogPrintEvery int64 = 5
+	DefaultBufferSize = 256 * 1024
 )
 
 type (
@@ -28,6 +29,7 @@ type (
 
 	//
 	CFG struct {
+		YencCpu          int
 		NZBfilepath      string
 		ProvFile         string
 		Cachedir         string
@@ -40,6 +42,8 @@ type (
 		UploadLater      bool
 		Verify           bool
 		YencCRC          bool
+		YencTest         int
+		YencWrite        bool
 		Csv              bool
 		Log              bool
 		LogPrintEvery    int64
@@ -96,7 +100,8 @@ type (
 
 	//
 	segmentChanItem struct {
-		segment     nzbparser.NzbSegment
+		segment     *nzbparser.NzbSegment
+		file        *nzbparser.NzbFile
 		missingOn   map[int]bool // [provider.id]bool
 		availableOn map[int]bool // [provider.id]bool
 		unwantedOn  map[int]bool // [provider.id]bool
@@ -111,12 +116,13 @@ type (
 		flagisUP    bool
 		flaginDLMEM bool
 		flaginUPMEM bool
+		flaginYenc  bool
+		flagisYenc  bool
 		checkedAt   int
 		hashedId    string
 		cached      bool
 		readChan    chan int  // to notify, cache has loaded the file to item.lines
 		checkChan   chan bool // to notify if item exists in cache
-		segnum      int
 		size        int
 		dlcnt       int
 		badcrc      int
@@ -146,6 +152,7 @@ var (
 	}
 )
 
+// TODO!
 func loadConfigFile(path string) (*CFG, error) {
 	if file, err := os.ReadFile(path); err != nil {
 		return nil, err

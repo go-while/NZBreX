@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"bufio"
 	"compress/gzip"
 	"flag"
 	"fmt"
@@ -17,6 +19,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 )
+
+func getCoreLimiter() {
+	<- core_chan
+}
+
+func returnCoreLimiter() {
+	core_chan <- struct{}{}
+}
 
 /*
 nzbfile=&nzbparser.Nzb{Comment:"", Meta:map[string]string{},
@@ -38,21 +48,6 @@ nzbfile=&nzbparser.Nzb{Comment:"", Meta:map[string]string{},
 		TotalSegments:568, Bytes:429739466}
 	}, TotalFiles:1, Segments:581, TotalSegments:568, Bytes:429739466}
 	*
-*/
-
-/*
-func loadNzbFile(path string) (*nzbparser.Nzb, error) {
-	if b, err := os.Open(path); err != nil {
-		return nil, err
-	} else {
-		defer b.Close()
-		if nzbfile, err := nzbparser.Parse(b); err != nil {
-			return nil, err
-		} else {
-			return nzbfile, nil
-		}
-	}
-} // end func loadNzbFile
 */
 
 func loadNzbFile(path string) (*nzbparser.Nzb, error) {
@@ -113,6 +108,91 @@ func loadProviderList(path string) error {
 	}
 	return nil
 } // end func loadProviderList
+
+func AppendFileBytes(data []byte, dstPath string) error {
+	// Open destination file in append mode, create if not exists
+	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+	// Create a buffer and copy in chunks
+	buf := make([]byte, DefaultBufferSize)
+	rdr := bufio.NewReader(bytes.NewReader(data))
+	for {
+		n, readErr := rdr.Read(buf)
+		if n > 0 {
+			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+	return nil
+} // end func AppendFileBytes
+
+func AppendFile(srcPath, dstPath string) error {
+	// Open source file for reading
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Open destination file in append mode, create if not exists
+	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	// Create a buffer and copy in chunks
+	buf := make([]byte, DefaultBufferSize)
+	for {
+		n, readErr := srcFile.Read(buf)
+		if n > 0 {
+			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+	if err := os.Remove(srcPath); err != nil {
+		//log.Printf("Error Yenc AppendFile Remove err='%v'", err)
+		return err
+	}
+	return nil
+} // end func AppendFile (written by AI! GPT-4o)
+
+func SHA256SumFile(path string) (string, error) {
+	// Open the file for reading
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// Create a SHA-256 hash object
+	hash := sha256.New()
+
+	// Copy the file into the hash function
+	if _, err := io.Copy(hash, f); err != nil {
+		return "", err
+	}
+
+	// Return the hex-encoded checksum
+	return strings.ToLower(hex.EncodeToString(hash.Sum(nil))), nil
+} // end func SHA256SumFile (written by AI! GPT-4o)
 
 /*
 func writeCsvFile() {
@@ -264,7 +344,10 @@ func ParseFlags() {
 	// header and yenc
 	flag.BoolVar(&cfg.opt.CleanHeaders, "cleanhdr", true, "[true|false] removes unwanted headers. only change this if you know why! (default: true) ")
 	flag.StringVar(&cfg.opt.CleanHeadersFile, "cleanhdrfile", "", "loads unwanted headers to cleanup from /path/to/cleanHeaders.txt")
-	//flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false) !TODO: external source code needs review!")
+	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false) !TODO: external source code needs review!")
+	flag.IntVar(&cfg.opt.YencTest, "yenctest", 2, "select mode 1 (bytes) or 2 (lines) to use in -crc32. (experimental/testing) mode 2 should use less mem.")
+	flag.IntVar(&cfg.opt.YencCpu, "yenccpu", 4, fmt.Sprintf("limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
+	flag.BoolVar(&cfg.opt.YencWrite, "yencout", true, "[true|false] writes yenc body parts to cache (experimental/testing)")
 	// debug output flags
 	flag.BoolVar(&runProf, "prof", false, "starts profiler @mem: waits 20sec and runs 120 sec @cpu: waits 20 sec and captures to end")
 	flag.StringVar(&webProf, "webprof", "", "start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' or 'IP4_ADDR:PORT' or '[IP6_ADDR]:PORT'")
@@ -287,6 +370,13 @@ func ParseFlags() {
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
 	//flag.StringVar(&configfile, "configfile", "config.json", "use this config file") // FIXME TODO
 	flag.Parse()
+
+	if cfg.opt.YencCRC {
+		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 2 {
+			cfg.opt.YencTest = 2
+		}
+		log.Printf("cfg.opt.YencTest=%d", cfg.opt.YencTest)
+	}
 } // end func ParseFlags
 
 func RunProf() {

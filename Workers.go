@@ -116,7 +116,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 				// 50 conns will need 1.25s to boot
 				time.Sleep(25 * time.Millisecond)
 			}
-			time.Sleep(time.Duration(provider.MaxConns) * 25 * time.Millisecond)
+			//time.Sleep(time.Duration(provider.MaxConns) * 25 * time.Millisecond)
 		}(provider, workerWGconnEstablish, waitWorker) // end go func
 	} // end for providerList
 	if cfg.opt.Debug {
@@ -414,7 +414,7 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 
 	nextLogPrint := time.Now().Unix() + cfg.opt.LogPrintEvery
 	var lastRunTook time.Duration
-	var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry uint64
+	var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry, inyenc, isyenc uint64
 	// loops forever over the segmentList and checks if there is anything to do for an item
 forever:
 	for {
@@ -424,7 +424,7 @@ forever:
 		allowUp = (!cfg.opt.CheckOnly && Counter.get("postProviders") > 0)
 		globalmux.RUnlock()
 
-		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry, inyenc, isyenc = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 		startLoop := time.Now()
 	forsegmentList:
 		for _, item := range segmentList {
@@ -449,10 +449,18 @@ forever:
 				isup++
 				//done++
 			}
+			if item.flagisYenc {
+				isyenc++
+				//done++
+			}
 
 			doContinue := false
 			if item.flaginDL {
 				indl++
+				doContinue = true
+			}
+			if item.flaginYenc {
+				inyenc++
 				doContinue = true
 			}
 			if item.flaginUP {
@@ -551,6 +559,8 @@ forever:
 		TupQ := Counter.get("TOTAL_upQueueCnt")
 		dlQ := Counter.get("dlQueueCnt")
 		TdlQ := Counter.get("TOTAL_dlQueueCnt")
+		yeQ := Counter.get("yencQueueCnt")
+		TyeQ := Counter.get("TOTAL_yencQueueCnt")
 		// print some stats and check if we're done
 		if !cfg.opt.Bar && (cfg.opt.Verbose || cfg.opt.Debug) {
 			CNTc, CNTd, CNTu := Counter.get("GoCheckRoutines"), Counter.get("GoDownsRoutines"), Counter.get("GoReupsRoutines")
@@ -562,6 +572,7 @@ forever:
 			isdl_perc := float64(isdl) / float64(todo) * 100
 			isup_perc := float64(isup) / float64(todo) * 100
 			dmca_perc := float64(dmca) / float64(todo) * 100
+			yenc_perc := float64(isyenc) / float64(todo) * 100
 
 			used_slots, max_slots := memlim.Usage()
 
@@ -587,6 +598,9 @@ forever:
 				}
 				if segm > 0 && segm != done {
 					log03 = fmt.Sprintf(" | SEGM:[%.3f%%] (%"+D+"d)", segm_perc, segm)
+				}
+				if yenc_perc == 100 || (yenc_perc > 0 && yenc_perc != cache_perc) {
+					log04 = fmt.Sprintf(" | YENC:[%.3f%%] (%"+D+"d / %"+D+"d Q:%d)", yenc_perc, isyenc, TyeQ, inyenc)
 				}
 				if dead > 0 {
 					log05 = fmt.Sprintf(" | DEAD:[%.3f%%] (%"+D+"d)", dead_perc, dead)
@@ -716,7 +730,7 @@ forever:
 
 		// continue as long as any of this triggers because stuff is still in queues and processing
 		//if (checked != todo || (TupQ > 0 && TupQ != isup) || (TdlQ > 0 && TdlQ != isdl) || inup > 0 || indl > 0) {
-		if checked != todo || inup > 0 || indl > 0 || inretry > 0 || dlQ > 0 || upQ > 0 {
+		if checked != todo || inup > 0 || indl > 0 || inretry > 0|| inyenc > 0 || dlQ > 0 || upQ > 0 || yeQ > 0 {
 			if cfg.opt.Debug {
 				log.Printf("\n[DV] continue [ TupQ=%d !=? isup=%d || TdlQ=%d !=? isdl=%d || inup=%d > 0? || indl=%d > 0? || inretry=%d > 0? ]", TupQ, isup, TdlQ, isdl, inup, indl, inretry)
 			}

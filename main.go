@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/pprof"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -44,6 +45,7 @@ var (
 	cfg                   = &Config{opt: &CFG{}}
 	globalmux             sync.RWMutex
 	stop_chan             chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
+	core_chan             chan struct{} // limits cpu usage
 	memlim                *MemLimiter
 	cache                 *Cache
 	cacheON               bool
@@ -206,14 +208,21 @@ func main() {
 		log.Printf("unable to load NZB file '%s': %v'", cfg.opt.NZBfilepath, err)
 		os.Exit(1)
 	}
+	if cfg.opt.Debug {
+		log.Printf("nzbfile='%#v'", nzbfile)
+		//os.Exit(1)
+	}
 	nzbhashname := SHA256str(filepath.Base(cfg.opt.NZBfilepath)) // fixme TODO processor/sessions
 	if len(nzbfile.Files) <= 0 {
 		log.Printf("error in NZB file '%s': nzbfile.Files=0'", cfg.opt.NZBfilepath)
-		os.Exit(1)
+
 	}
 
 	// loop through all file tags within the NZB file
 	for _, file := range nzbfile.Files {
+		if cfg.opt.Debug {
+			fmt.Printf(">> nzbfile file='%#v'\n\n", file)
+		}
 		// loop through all segment tags within each file tag
 		if cfg.opt.Debug {
 			for _, agroup := range file.Groups {
@@ -231,12 +240,13 @@ func main() {
 			// if you add more variables to 'segmentChanItem struct': compiler always fails here!
 			// we could supply neatly named vars but then we will forget one if updating the struct and app will crash...
 			item := &segmentChanItem{
-				segment,
+				&segment, &file,
 				make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)),
-				sync.RWMutex{}, nil, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), file.Number, 0, 0, 0, 0, 0, &nzbhashname} // fixme TODO processor/sessions
+				sync.RWMutex{}, nil, false, false, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &nzbhashname} // fixme TODO processor/sessions
 			segmentList = append(segmentList, item)
 		}
 	}
+
 	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
 	artsize := mibsize / float64(len(segmentList)) * 1024
 	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
@@ -272,6 +282,15 @@ func main() {
 	}
 	memlim = NewMemLimiter(cfg.opt.MemMax)
 
+	if cfg.opt.YencCpu <= 0 {
+		cfg.opt.YencCpu = runtime.NumCPU()
+	}
+
+	core_chan = make(chan struct{}, cfg.opt.YencCpu)
+	for i:=1; i<=cfg.opt.YencCpu; i++ {
+		core_chan <- struct{}{}
+	}
+
 	if cfg.opt.Debug {
 		log.Printf("Loaded providerList: %d ... preparation took %v ms cfg.opt.MemMax=%d", len(providerList), time.Since(preparationStartTime).Milliseconds(), cfg.opt.MemMax)
 	}
@@ -288,6 +307,7 @@ func main() {
 			cfg.opt.CRW,
 			cfg.opt.CheckOnly,
 			cfg.opt.MaxArtSize,
+			cfg.opt.YencWrite,
 			cfg.opt.DebugCache)
 
 		if cache == nil {
@@ -366,8 +386,8 @@ func main() {
 	upSpeed := int(float64(Counter.get("TOTAL_TXbytes")) / transferTook.Seconds() / 1024)
 
 	totalruntime := fmt.Sprintf(" | QUIT |\n\n> NZB: '%s' (%d segments)\n> Total Runtime: %.0f sec (%v)", filepath.Base(cfg.opt.NZBfilepath), len(segmentList), time.Since(preparationStartTime).Seconds(), time.Since(preparationStartTime))
-	segchecktook := fmt.Sprintf("\n> SegCheck: %.0f sec (%v) ~%.0f ms/seg", segmentCheckTook.Seconds(), segmentCheckTook, float32(segmentCheckTook.Milliseconds())/float32(nzbfile.Segments))
-	transfertook := fmt.Sprintf("\n> Transfer: %.0f sec (%v) ~%.0f ms/seg", transferTook.Seconds(), transferTook, float32(transferTook.Milliseconds())/float32(nzbfile.Segments))
+	segchecktook := fmt.Sprintf("\n> SegCheck: %.0f sec (%v)", segmentCheckTook.Seconds(), segmentCheckTook)
+	transfertook := fmt.Sprintf("\n> Transfer: %.0f sec (%v)", transferTook.Seconds(), transferTook)
 	avgUpDlspeed := fmt.Sprintf("\n> DL %d KiB/s  (Total: %.2f MiB)\n> UL %d KiB/s  (Total: %.2f MiB)", dlSpeed, float64(Counter.get("TOTAL_RXbytes"))/float64(1024)/float64(1024), upSpeed, float64(Counter.get("TOTAL_TXbytes"))/float64(1024)/float64(1024))
 	runtime_info := totalruntime + segchecktook + transfertook + avgUpDlspeed
 	result := ""
@@ -418,6 +438,98 @@ func main() {
 			providerList[id].mux.RUnlock()
 		} // end for providerList
 	}
+
+	if cfg.opt.YencWrite && cacheON {
+		var waitMerge sync.WaitGroup
+		mergeStart := time.Now().Unix()
+		log.Printf("Experimental YencWrite: try merging files....")
+		filenames := []string{}
+		for _, item := range segmentList {
+			if !slices.Contains(filenames, item.file.Filename) {
+				filenames = append(filenames, item.file.Filename)
+			}
+		}
+
+		for _, fn := range filenames {
+			// launch merging in parallel
+			waitMerge.Add(1)
+			getCoreLimiter()
+			go func(filename string, waitMerge *sync.WaitGroup){
+				defer returnCoreLimiter()
+				defer waitMerge.Done()
+				target := filepath.Join(cfg.opt.Cachedir, nzbhashname, "yenc", filename)
+				if FileExists(target) {
+					log.Printf("YencMerge: exists target='%s'", target)
+					return
+				}
+				var items []*segmentChanItem
+				loopItems:
+				for _, item := range segmentList {
+					if item.file.Filename != filename {
+						continue loopItems
+					}
+					/*
+					if !item.flagisYenc {
+						continue loopItems
+					}
+					*/
+					items = append(items, item)
+				} // end for segmentList
+				if len(items) == 0 {
+					log.Printf("ERROR YencMerge: no items? fn='%s'", filename)
+					return
+				}
+				log.Printf("YencMerge: wait fn='%s'", filename)
+				//mergeItems:
+				for _, item := range items {
+					partname, _, _, fp, _ := cache.GetYenc(item)// fp is "/path/to/*.part.N.yenc" file
+					if !FileExists(fp) {
+						log.Printf("ERROR YencMerge fn='%s' !FileExists partNo=%d fp='%s'", filename, item.segment.Number, fp)
+						return
+					}
+					if cfg.opt.Debug {
+						log.Printf("... merging: '%s'", partname)
+					}
+					if err := AppendFile(fp, target+".tmp"); err != nil {
+						log.Printf("ERROR YencMerge AppendFile err='%v'", err)
+						return
+					}
+				} // end for items
+
+				// a debug verify
+				testhash := ""
+				switch filename {
+					case "ubuntu-24.04-live-server-amd64.iso":
+						testhash = "8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3"
+				}
+				if testhash != "" {
+					log.Printf("YencMerge: wait ... sha256sum fn='%s'", filename)
+					hash, err := SHA256SumFile(target+".tmp")
+					if err != nil {
+						log.Printf("ERROR YencMerge: fn='%s' SHA256SumFile err='%v'", target+".tmp", err)
+						return
+					}
+					if hash != testhash {
+						log.Printf("ERROR YencMerge: fn='%s' has hash='%s' != '%s'", filename, hash, testhash)
+						os.Remove(target+".tmp")
+						return
+					}
+					log.Printf("YencMerge: Verify hash OK fn='%s'", filename)
+				} // end if testhash
+
+				// finally rename
+				if err := os.Rename(target+".tmp", target); err != nil {
+					log.Printf("ERROR YencMerge: move .tmp failed err='%v'", err)
+					return
+				}
+				log.Printf("YencMerge: OK fn='%s'", filename)
+			}(fn, &waitMerge) // end go func
+		} // end for filename
+
+		waitMerge.Wait()
+		mergeTook := time.Now().Unix() - mergeStart
+		result = result + fmt.Sprintf("\n\n> MergeTook: %d sec", mergeTook)
+	} // end if cfg.opt.YencWrite && cacheON
 
 	log.Print(runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end")
 	//writeCsvFile()

@@ -4,15 +4,11 @@ github.com/Tensai75/subjectparser v0.1.0 h1:6fEWnRov8lDHxJS2EWqY6VonwYfrIRN+k8h8
 github.com/Tensai75/subjectparser v0.1.0/go.mod h1:PNBFBnkOGbVDfX+56ZmC4GKSpqoRMCF1Y44xYd7NLGI=
 github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83 h1:vehfiL7LsK8bJQZdVuJxcMem4AP2HwPEQ8orUUnIA+E=
 github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83/go.mod h1:31AY7BccUb7qvKi4LQCwLOYsvcza9TdQtl/zHEIOcRE=
+github.com/go-while/yenc v0.0.0-20250522191317-7308d4a07f75 h1:l/nwfG8c8v1MIfpVv6o7AKlrYmUuS9QyZQe/ZwcngMQ=
+github.com/go-while/yenc v0.0.0-20250522191317-7308d4a07f75/go.mod h1:vLJi7ZhtsxxsoyER7Fo9Tiz6QpvauEQT6oXq7gqFLBk=
 github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
 github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
 golang.org/x/net v0.25.0 h1:d/OCCoBEUq33pjydKrGQhw7IlUPI2Oylr+8qLx49kac=
 golang.org/x/net v0.25.0/go.mod h1:JkAGAh7GEvH74S6FOH42FLoXpXbE/aqXSrIQjXgsiwM=
 golang.org/x/text v0.15.0 h1:h1V/4gjBv8v9cjcR6+AR5+/cIYK5N/WAgiv4xlsEtAk=
 golang.org/x/text v0.15.0/go.mod h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=
-gopkg.in/option.v0 v0.0.0-20220910000000-360f43518c40 h1:F5GXi2F4Ay44oV5rJ6BbsOZl4nYrb1Fv7w14KeTVj3g=
-gopkg.in/option.v0 v0.0.0-20220910000000-360f43518c40/go.mod h1:0NoLVhT/Lh19J02e6eFvBzkP8s+twOpvDEnu3HLFAWw=
-gopkg.in/ringbuffer.v0 v0.0.0-20220918000000-5de8faa4e64f h1:7mtO14VQRG/C1la1TuXDn47IAysD4ewATDo/Jl+Pc+4=
-gopkg.in/ringbuffer.v0 v0.0.0-20220918000000-5de8faa4e64f/go.mod h1:3TghidZ176UqWs/nFAHokh9C/3op/7yeG+a+AuVgeLs=
-gopkg.in/yenc.v0 v0.0.0-20221007000000-89ca7bd2041c h1:yr/d+op4Z8M9tqdHIT+w8810+WwKayoIn8GrCOhuu+8=
-gopkg.in/yenc.v0 v0.0.0-20221007000000-89ca7bd2041c/go.mod h1:dObRruJ/Wda00qz/c/fLQWWQH5e2vZIMuphX7eiGjnY=
