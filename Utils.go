@@ -77,6 +77,9 @@ func loadNzbFile(path string) (*nzbparser.Nzb, error) {
 } // end func loadNzbFile
 
 func loadProviderList(path string) error {
+	globalmux.Lock()
+	defer globalmux.Unlock()
+
 	if file, err := os.ReadFile(path); err != nil {
 		return err
 	} else {
@@ -84,18 +87,44 @@ func loadProviderList(path string) error {
 			return err
 		}
 		id := 0
-		providernames := make(map[string]bool) // tmp map to check unique/dupe provider names
+		providernames := make(map[string]bool)          // tmp map to check unique/duped provider names
+		providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
 		for n, _ := range cfg.providers {
 			if !cfg.providers[n].Enabled {
 				continue
 			}
-			if providernames[cfg.providers[n].Name] {
+			Name := cfg.providers[n].Name
+			if providernames[Name] {
 				// duplicate provider Name
-				return fmt.Errorf("FATAL ERROR: loadProviderList duplicate provider.Name (n=%d) in config", n)
+				return fmt.Errorf("ERROR: loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
 			}
-			providernames[cfg.providers[n].Name] = true
-			p := &cfg.providers[n] // link to this provider
+			providernames[Name] = true
+			Group := cfg.providers[n].Group
+			if providerACL[Group] == nil {
+				providerACL[Group] = make(map[string]bool)
+			}
 
+			// check for inconsistent configuration
+			if !cfg.providers[n].NoDownload && providerACL[Group]["NoDownload"] {
+				log.Printf("ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
+				os.Exit(1)
+			}
+			if !cfg.providers[n].NoUpload && providerACL[Group]["NoUpload"] {
+				log.Printf("ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
+				os.Exit(1)
+			}
+
+			// read NoDownload / NoUpload values from provider and set once per group for all
+			if cfg.providers[n].NoDownload {
+				providerACL[Group]["NoDownload"] = true
+			}
+			if cfg.providers[n].NoUpload {
+				providerACL[Group]["NoUpload"] = true
+			}
+
+			// link to this provider
+			p := &cfg.providers[n]
+			// provider is ready to connect
 			NewConnPool(p)
 			p.id = id
 			providerList = append(providerList, p)
