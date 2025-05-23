@@ -306,7 +306,7 @@ func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
 } // emd func WriteYenc
 
 func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp string, yencdir string, fp string, fp_tmp string) {
-	filename = fmt.Sprintf("%s.part.%d.yenc", item.file.Filename, item.segment.Number)
+	filename = fmt.Sprintf("%s.part.%d.yenc", filepath.Base(item.file.Filename), item.segment.Number)
 	filename_tmp = filename + ".tmp"
 	yencdir = filepath.Join(c.cachedir, *item.nzbhashname, "yenc")
 	fp = filepath.Join(yencdir, filename)
