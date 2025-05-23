@@ -29,7 +29,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false) !TODO: external source code needs review!")
 	flag.IntVar(&cfg.opt.YencTest, "yenctest", 2, "select mode 1 (bytes) or 2 (lines) to use in -crc32. (experimental/testing) mode 2 should use less mem.")
 	flag.IntVar(&cfg.opt.YencCpu, "yenccpu", 4, fmt.Sprintf("limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
-	flag.BoolVar(&cfg.opt.YencWrite, "yencout", true, "[true|false] writes yenc body parts to cache (experimental/testing)")
+	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc body parts to cache (experimental/testing)")
 	// debug output flags
 	flag.BoolVar(&runProf, "prof", false, "starts profiler @mem: waits 20sec and runs 120 sec @cpu: waits 20 sec and captures to end")
 	flag.StringVar(&webProf, "webprof", "", "start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' or 'IP4_ADDR:PORT' or '[IP6_ADDR]:PORT'")
