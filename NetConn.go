@@ -3,8 +3,8 @@ package main
 import (
 	//"bytes"
 	//"bufio"
-	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 	"fmt"
+	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 	"io"
 	"log"
 	"net"
@@ -388,12 +388,12 @@ readlines:
 			article = append(article, line)
 			if cfg.opt.YencCRC {
 				switch cfg.opt.YencTest {
-					case 1:
-						// case 1 needs double the memory
-						ydec = append(ydec, line+CRLF...) // as []byte
-					case 2:
-						// case 2 should need less memory
-						ydat = append(ydat, &line) // as []*string
+				case 1:
+					// case 1 needs double the memory
+					ydec = append(ydec, line+CRLF...) // as []byte
+				case 2:
+					// case 2 should need less memory
+					ydat = append(ydat, &line) // as []*string
 				}
 			}
 		}
@@ -412,26 +412,26 @@ readlines:
 		var err error
 		switch cfg.opt.YencTest {
 
-			case 1:
-				decoder := yenc.NewDecoder(nil, ydec, nil, 1)
-				if yPart, err = decoder.Decode(); err != nil { // chrisfarms/yenc
-					log.Printf("ERROR yenc.Decode mode=1 seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", item.segment.Id, provider.Name, len(ydec), err)
-					badcrc = true
-				} else {
-					if cfg.opt.Debug {
-						log.Printf("YencCRC OK mode=1 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
-					}
+		case 1:
+			decoder := yenc.NewDecoder(nil, ydec, nil, 1)
+			if yPart, err = decoder.Decode(); err != nil { // chrisfarms/yenc
+				log.Printf("ERROR yenc.Decode mode=1 seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", item.segment.Id, provider.Name, len(ydec), err)
+				badcrc = true
+			} else {
+				if cfg.opt.Debug {
+					log.Printf("YencCRC OK mode=1 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
 				}
-			case 2:
-				decoder := yenc.NewDecoder(nil, nil, ydat, 1)
-				if yPart, err = decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
-					log.Printf("ERROR yenc.Decode mode=2 seg.Id='%s' @ '%s' ydat=(%d lines) err='%v'", item.segment.Id, provider.Name, len(ydat), err)
-					badcrc = true
-				} else {
-					if cfg.opt.Debug {
-						log.Printf("YencCRC OK mode=2 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
-					}
+			}
+		case 2:
+			decoder := yenc.NewDecoder(nil, nil, ydat, 1)
+			if yPart, err = decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
+				log.Printf("ERROR yenc.Decode mode=2 seg.Id='%s' @ '%s' ydat=(%d lines) err='%v'", item.segment.Id, provider.Name, len(ydat), err)
+				badcrc = true
+			} else {
+				if cfg.opt.Debug {
+					log.Printf("YencCRC OK mode=2 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
 				}
+			}
 		} // end switch yencTest
 
 		if badcrc {

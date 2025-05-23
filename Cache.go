@@ -300,14 +300,14 @@ func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
 	item.flaginYenc = true
 	item.mux.Unlock()
 	c.yenc_writer_chan <- &yenc_item{
-		item: item,
+		item:  item,
 		yPart: yPart,
 	}
 } // emd func WriteYenc
 
 func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp string, yencdir string, fp string, fp_tmp string) {
 	filename = fmt.Sprintf("%s.part.%d.yenc", item.file.Filename, item.segment.Number)
-	filename_tmp = filename+".tmp"
+	filename_tmp = filename + ".tmp"
 	yencdir = filepath.Join(c.cachedir, *item.nzbhashname, "yenc")
 	fp = filepath.Join(yencdir, filename)
 	fp_tmp = filepath.Join(yencdir, filename_tmp)

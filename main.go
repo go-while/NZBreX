@@ -27,8 +27,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime/pprof"
 	"runtime"
+	"runtime/pprof"
 	"slices"
 	"strings"
 	"sync"
@@ -287,7 +287,7 @@ func main() {
 	}
 
 	core_chan = make(chan struct{}, cfg.opt.YencCpu)
-	for i:=1; i<=cfg.opt.YencCpu; i++ {
+	for i := 1; i <= cfg.opt.YencCpu; i++ {
 		core_chan <- struct{}{}
 	}
 
@@ -454,7 +454,7 @@ func main() {
 			// launch merging in parallel
 			waitMerge.Add(1)
 			getCoreLimiter()
-			go func(filename string, waitMerge *sync.WaitGroup){
+			go func(filename string, waitMerge *sync.WaitGroup) {
 				defer returnCoreLimiter()
 				defer waitMerge.Done()
 				target := filepath.Join(cfg.opt.Cachedir, nzbhashname, "yenc", filename)
@@ -463,15 +463,15 @@ func main() {
 					return
 				}
 				var items []*segmentChanItem
-				loopItems:
+			loopItems:
 				for _, item := range segmentList {
 					if item.file.Filename != filename {
 						continue loopItems
 					}
 					/*
-					if !item.flagisYenc {
-						continue loopItems
-					}
+						if !item.flagisYenc {
+							continue loopItems
+						}
 					*/
 					items = append(items, item)
 				} // end for segmentList
@@ -482,7 +482,7 @@ func main() {
 				log.Printf("YencMerge: wait fn='%s'", filename)
 				//mergeItems:
 				for _, item := range items {
-					partname, _, _, fp, _ := cache.GetYenc(item)// fp is "/path/to/*.part.N.yenc" file
+					partname, _, _, fp, _ := cache.GetYenc(item) // fp is "/path/to/*.part.N.yenc" file
 					if !FileExists(fp) {
 						log.Printf("ERROR YencMerge fn='%s' !FileExists partNo=%d fp='%s'", filename, item.segment.Number, fp)
 						return
@@ -499,19 +499,19 @@ func main() {
 				// a debug verify
 				testhash := ""
 				switch filename {
-					case "ubuntu-24.04-live-server-amd64.iso":
-						testhash = "8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3"
+				case "ubuntu-24.04-live-server-amd64.iso":
+					testhash = "8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3"
 				}
 				if testhash != "" {
 					log.Printf("YencMerge: wait ... sha256sum fn='%s'", filename)
-					hash, err := SHA256SumFile(target+".tmp")
+					hash, err := SHA256SumFile(target + ".tmp")
 					if err != nil {
 						log.Printf("ERROR YencMerge: fn='%s' SHA256SumFile err='%v'", target+".tmp", err)
 						return
 					}
 					if hash != testhash {
 						log.Printf("ERROR YencMerge: fn='%s' has hash='%s' != '%s'", filename, hash, testhash)
-						os.Remove(target+".tmp")
+						os.Remove(target + ".tmp")
 						return
 					}
 					log.Printf("YencMerge: Verify hash OK fn='%s'", filename)

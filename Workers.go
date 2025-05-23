@@ -69,7 +69,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 				segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				// fill check channel for provider group with pointers
-				go func(segmentChanCheck chan *segmentChanItem){
+				go func(segmentChanCheck chan *segmentChanItem) {
 					start := time.Now()
 					for _, item := range segmentList {
 						segmentChanCheck <- item
@@ -265,17 +265,17 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool) {
 			 */
 			if cfg.opt.CheckFirst {
 				select {
-					case memDL[providerList[pid].Group] <- item:
-						pushed = true
-					default:
-						// chan is full
+				case memDL[providerList[pid].Group] <- item:
+					pushed = true
+				default:
+					// chan is full
 				}
 			} else {
 				select {
-					case segmentChansDowns[providerList[pid].Group] <- item:
-						pushed = true
-					default:
-						// chan is full
+				case segmentChansDowns[providerList[pid].Group] <- item:
+					pushed = true
+				default:
+					// chan is full
 				}
 			}
 			if pushed {
@@ -340,19 +340,19 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 			*/
 			if cfg.opt.UploadLater && cacheON {
 				select {
-					case memUP[providerList[pid].Group] <- item:
-						// pass
-						pushed = true
-					default:
-						// chan is full
+				case memUP[providerList[pid].Group] <- item:
+					// pass
+					pushed = true
+				default:
+					// chan is full
 				}
 			} else {
 				select {
-					case segmentChansReups[providerList[pid].Group] <- item:
-						// pass
-						pushed = true
-					default:
-						// chan is full
+				case segmentChansReups[providerList[pid].Group] <- item:
+					// pass
+					pushed = true
+				default:
+					// chan is full
 				}
 			}
 			if pushed {
@@ -730,7 +730,7 @@ forever:
 
 		// continue as long as any of this triggers because stuff is still in queues and processing
 		//if (checked != todo || (TupQ > 0 && TupQ != isup) || (TdlQ > 0 && TdlQ != isdl) || inup > 0 || indl > 0) {
-		if checked != todo || inup > 0 || indl > 0 || inretry > 0|| inyenc > 0 || dlQ > 0 || upQ > 0 || yeQ > 0 {
+		if checked != todo || inup > 0 || indl > 0 || inretry > 0 || inyenc > 0 || dlQ > 0 || upQ > 0 || yeQ > 0 {
 			if cfg.opt.Debug {
 				log.Printf("\n[DV] continue [ TupQ=%d !=? isup=%d || TdlQ=%d !=? isdl=%d || inup=%d > 0? || indl=%d > 0? || inretry=%d > 0? ]", TupQ, isup, TdlQ, isdl, inup, indl, inretry)
 			}

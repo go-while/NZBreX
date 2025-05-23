@@ -11,14 +11,14 @@ import (
 )
 
 const (
-	DOT  = "."
-	CR   = "\r"
-	LF   = "\n"
-	CRLF = CR + LF
-	DefaultCacheRW = 100
-	DefaultChanSize = 1000
+	DOT                        = "."
+	CR                         = "\r"
+	LF                         = "\n"
+	CRLF                       = CR + LF
+	DefaultCacheRW             = 100
+	DefaultChanSize            = 1000
 	DefaultLogPrintEvery int64 = 5
-	DefaultBufferSize = 256 * 1024
+	DefaultBufferSize          = 256 * 1024
 )
 
 type (
