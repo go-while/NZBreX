@@ -244,7 +244,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 
 } // end func GoWorker
 
-func pushDL(allowDl bool, item *segmentChanItem) (pushed bool) {
+func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 	if !allowDl {
 		return
 	}
@@ -253,9 +253,14 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool) {
 	matchThis := (len(item.lines) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
 
 	if matchThis {
+	providerDl:
 		for pid, avail := range item.availableOn {
 			if !avail {
-				continue
+				continue providerDl
+			}
+			if providerList[pid].NoDownload {
+				nodl++
+				continue providerDl
 			}
 			if cfg.opt.Debug {
 				log.Printf(" | [DV] push chan <- down seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
@@ -414,7 +419,7 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 
 	nextLogPrint := time.Now().Unix() + cfg.opt.LogPrintEvery
 	var lastRunTook time.Duration
-	var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry, inyenc, isyenc uint64
+	var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc uint64
 	// loops forever over the segmentList and checks if there is anything to do for an item
 forever:
 	for {
@@ -424,7 +429,7 @@ forever:
 		allowUp = (!cfg.opt.CheckOnly && Counter.get("postProviders") > 0)
 		globalmux.RUnlock()
 
-		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, noup, cached, inretry, inyenc, isyenc = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 		startLoop := time.Now()
 	forsegmentList:
 		for _, item := range segmentList {
@@ -497,7 +502,11 @@ forever:
 			noup += nNoUp
 			inretry += nInRetry
 			if allowDl && !pushedUp {
-				pushDL(allowDl, item)
+				pushedDl, nNoDl := pushDL(allowDl, item)
+				nodl += nNoDl
+				if pushedDl {
+					indl++
+				}
 			}
 
 		} // end for forsegmentList

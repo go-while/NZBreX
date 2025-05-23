@@ -66,6 +66,7 @@ type (
 	Provider struct {
 		Enabled       bool
 		NoUpload      bool
+		NoDownload    bool
 		Group         string
 		Name          string
 		Host          string

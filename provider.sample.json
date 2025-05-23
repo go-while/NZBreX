@@ -2,6 +2,7 @@
     {
       "Enabled": true,
       "NoUpload": false,
+      "NoDownload": false,
       "Group": "GroupA",
       "Name": "Provider 1 - US East",
       "Host": "",
@@ -18,6 +19,7 @@
     {
       "Enabled": true,
       "NoUpload": false,
+      "NoDownload": false,
       "Group": "GroupA",
       "Name": "Provider 1 - US West",
       "Host": "",
@@ -34,6 +36,7 @@
     {
       "Enabled": true,
       "NoUpload": false,
+      "NoDownload": false,
       "Group": "GroupA",
       "Name": "Provider 1 - EU",
       "Host": "",
@@ -49,6 +52,7 @@
     {
       "Enabled": true,
       "NoUpload": false,
+      "NoDownload": false,
       "Group": "GroupB",
       "Name": "Provider 2",
       "Host": "",
@@ -64,6 +68,7 @@
     {
       "Enabled": true,
       "NoUpload": true,
+      "NoDownload": false,
       "Group": "GroupC",
       "Name": "Provider 3",
       "Host": "",
@@ -78,6 +83,7 @@
     {
       "Enabled": true,
       "NoUpload": true,
+      "NoDownload": true,
       "Group": "",
       "Name": "Provider 4 - if no group is set, uses name as group",
       "Host": "",
