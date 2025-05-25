@@ -407,23 +407,24 @@ func main() {
 		for group, ids := range provGroups {
 			var pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed uint64
 			result = result + fmt.Sprintf("\n\n> Results | Group: '%s'", group)
-			for _, id := range ids {
-				providerList[id].mux.RLock()
-				result = result + fmt.Sprintf("\n> Results | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' | Group: '%s'",
-					providerList[id].articles.checked,
-					providerList[id].articles.available,
-					providerList[id].articles.missing,
-					providerList[id].articles.downloaded,
-					providerList[id].articles.refreshed,
-					providerList[id].Name,
-					providerList[id].Group,
+			for _, pid := range ids {
+				providerList[pid].mux.RLock()
+				result = result + fmt.Sprintf("\n>  Id:%3d | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' | Group: '%s'",
+					providerList[pid].id,
+					providerList[pid].articles.checked,
+					providerList[pid].articles.available,
+					providerList[pid].articles.missing,
+					providerList[pid].articles.downloaded,
+					providerList[pid].articles.refreshed,
+					providerList[pid].Name,
+					providerList[pid].Group,
 				)
-				pGchecked += providerList[id].articles.checked
-				pGavailable += providerList[id].articles.available
-				pGmissing += providerList[id].articles.missing
-				pGdownloaded += providerList[id].articles.downloaded
-				pGrefreshed += providerList[id].articles.refreshed
-				providerList[id].mux.RUnlock()
+				pGchecked += providerList[pid].articles.checked
+				pGavailable += providerList[pid].articles.available
+				pGmissing += providerList[pid].articles.missing
+				pGdownloaded += providerList[pid].articles.downloaded
+				pGrefreshed += providerList[pid].articles.refreshed
+				providerList[pid].mux.RUnlock()
 			} // end for id in range ids
 			result = result + fmt.Sprintf("\n> ^Totals | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | Group: '%s'",
 				pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed, group,
