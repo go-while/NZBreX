@@ -1,17 +1,17 @@
 package main
 
 import (
-	"sync"
 	"fmt"
-	"time"
 	"log"
-	"slices"
-	"path/filepath"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 )
 
-func YencMerge(nzbhashname string, result *string) () {
+func YencMerge(nzbhashname string, result *string) {
 	if !cfg.opt.YencMerge || !cacheON {
 		return
 	}
