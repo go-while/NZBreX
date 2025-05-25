@@ -676,13 +676,13 @@ forever:
 				log07 = fmt.Sprintf(" | ERRS:(%"+D+"d)", inretry)
 			}
 			if indl > 0 || isdl > 0 || dlQ > 0 || TdlQ > 0 {
-				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isdl_perc, isdl, TdlQ, indl, dlQ)
+				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isdl_perc, isdl, TdlQ, dlQ, indl)
 			}
 			if cached > 0 {
 				log09 = fmt.Sprintf(" | HD:[%03.3f%%] (%"+D+"d)", cache_perc, cached)
 			}
 			if inup > 0 || isup > 0 || upQ > 0 || TupQ > 0 {
-				log10 = fmt.Sprintf(" | UP:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isup_perc, isup, TupQ, inup, upQ)
+				log10 = fmt.Sprintf(" | UP:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isup_perc, isup, TupQ, upQ, inup)
 			}
 
 			if cfg.opt.Verbose && !cfg.opt.Debug {
