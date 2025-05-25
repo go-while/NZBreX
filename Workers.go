@@ -95,7 +95,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 
 				// check of capabilities
 				//srvtp, conn, err := connectBackend(0, srvuri, provider.SkipSslCheck)
-				connitem, err := provider.Conns.GetConn(0, provider)
+				connitem, err := provider.Conns.GetConn()
 				if err != nil {
 					log.Printf("ERROR Boot Provider '%s' err='%v'", provider.Name, err)
 					return
@@ -168,7 +168,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 	// gets a conn once for a worker and shares conn in check, down, reup routines
 	// without parking it back to the pool as long as workers are running
 	sharedConn := make(chan *ConnItem, 1)
-	connitem, err := provider.Conns.GetConn(wid, provider)
+	connitem, err := provider.Conns.GetConn()
 	if err != nil {
 		log.Printf("ERROR a GoWorker (%d) failed to connect '%s' err='%v'", wid, provider.Name, err)
 		return
@@ -276,7 +276,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 	case connitem := <-sharedConn:
 		if connitem != nil {
 			//log.Printf("GoWorker (%d) parked sharedConn @ '%s'", wid, provider.Name)
-			provider.Conns.ParkConn(provider, connitem)
+			provider.Conns.ParkConn(connitem)
 		}
 	default:
 		// no conn there?
@@ -449,7 +449,7 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 	}
 
 	segcheckdone := false
-	closeWait, closeCase := 5, ""
+	closeWait, closeCase := 1, ""
 	todo := uint64(len(segmentList))
 	providersCnt := len(providerList)
 

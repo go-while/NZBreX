@@ -1,10 +1,10 @@
 package main
 
 import (
-	"time"
 	"fmt"
 	"path/filepath"
 	"slices"
+	"time"
 )
 
 func Results(preparationStartTime time.Time) (result string, runtime_info string) {

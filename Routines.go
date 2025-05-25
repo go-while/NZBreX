@@ -31,7 +31,7 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 
 	connitem := SharedConnGet(sharedCC)
 	if connitem == nil {
-		newconnitem, err := provider.Conns.GetConn(wid, provider)
+		newconnitem, err := provider.Conns.GetConn()
 		if err != nil {
 			log.Printf("ERROR CheckRoutine connect failed Provider '%s' err='%v'", provider.Name, err)
 			return err
@@ -79,7 +79,7 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 	default:
 		if code == 0 && err != nil {
 			// connection problem, closed?
-			provider.Conns.CloseConn(provider, connitem, sharedCC) // close conn on error
+			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
 			time.Sleep(time.Second * 5)
 			segmentChansCheck[provider.Group] <- item
@@ -156,7 +156,7 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 
 	connitem := SharedConnGet(sharedCC)
 	if connitem == nil {
-		newconnitem, err := provider.Conns.GetConn(wid, provider)
+		newconnitem, err := provider.Conns.GetConn()
 		if err != nil {
 			memlim.MemReturn("MemRetOnERR 'GetConn':"+who, item)
 			log.Printf("ERROR GoDownsRoutine connect failed Provider '%s' err='%v'", provider.Name, err)
@@ -204,7 +204,7 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 	default:
 		if code == 0 && err != nil {
 			// connection problem, closed?
-			provider.Conns.CloseConn(provider, connitem, sharedCC) // close conn on error
+			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 
 			item.mux.RLock() // mutex #74b7
 			failed := item.fails
@@ -323,7 +323,7 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 		doIHAVE = true
 	} else {
 		//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
-		provider.Conns.CloseConn(provider, connitem, sharedCC) // close conn on error
+		provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 		return fmt.Errorf("WARN selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
 	}
 	//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
@@ -348,7 +348,7 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 			if code == 0 && err != nil {
 				memlim.MemReturn("MemRetOnERR 'CMD_POST':"+who, item)
 				// connection problem, closed?
-				provider.Conns.CloseConn(provider, connitem, sharedCC) // close conn on error
+				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 				log.Printf("WARN CMD_POST failed seg.Id='%s' @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
 				time.Sleep(time.Second * 5)
 				segmentChansReups[provider.Group] <- item
@@ -381,7 +381,7 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC
 			if code == 0 && err != nil {
 				// connection problem, closed?
 				memlim.MemReturn("MemRetOnERR 'CMD_IHAVE':"+who, item)
-				provider.Conns.CloseConn(provider, connitem, sharedCC) // close conn on error
+				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 				log.Printf("WARN CMD_IHAVE failed seg.Id='%s' @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
 				time.Sleep(time.Second * 5)
 				segmentChansReups[provider.Group] <- item
