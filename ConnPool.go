@@ -12,8 +12,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"log"
 	"io"
+	"log"
 	"net"
 	"net/textproto"
 	"strings"
@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	noDeadLine time.Time // used as zero value!
+	noDeadLine   time.Time         // used as zero value!
 	readDeadConn = time.Unix(1, 0) // no syscall needed
 )
 
@@ -225,7 +225,7 @@ getConnFromPool:
 		case connitem = <-c.pool:
 			if connitem.conn == nil {
 				log.Printf("WARN ConnPool GetConn: got nil conn @ '%s'... continue", provider.Name)
-				c.CloseConn(provider, connitem)
+				c.CloseConn(provider, connitem, nil)
 				continue getConnFromPool // until chan rans empty
 			}
 			// instantly got an idle conn from pool!
@@ -237,7 +237,7 @@ getConnFromPool:
 				connitem.conn.SetReadDeadline(readDeadConn)
 				if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
 					log.Printf("INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", provider.Name, readBytes, rerr)
-					c.CloseConn(provider, connitem)
+					c.CloseConn(provider, connitem, nil)
 					continue getConnFromPool // until chan rans empty
 				}
 				connitem.conn.SetReadDeadline(noDeadLine)
@@ -306,11 +306,11 @@ func (c *ProviderConns) ParkConn(provider *Provider, connitem *ConnItem) {
 	default:
 		// pool chan is full!!
 		log.Printf("ERROR in ConnPool ParkConn: chan is full! provider '%s'. forceClose conn?!", provider.Name)
-		c.CloseConn(provider, connitem)
+		c.CloseConn(provider, connitem, nil)
 	}
 } // end func ParkConn
 
-func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem) {
+func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem, sharedCC chan *ConnItem) {
 	if cfg.opt.Debug {
 		Counter.incr("TOTAL_DisConns")
 	}
@@ -323,6 +323,12 @@ func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem) {
 		log.Printf("DisConn '%s' inPool=%d open=%d", provider.Name, len(c.pool), c.openConns)
 	}
 	c.mux.Unlock()
+	// if a sharedConnChan is supplied we send a nil to the channel
+	// a nil as connitem signals the routines to get a new conn
+	// mostly because conn was closed by network, protocol error or timeout
+	if sharedCC != nil {
+		sharedCC <- nil
+	}
 } // end func CloseConn
 
 func (c *ProviderConns) GetStats() (openconns int, idle int) {

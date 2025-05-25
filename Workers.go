@@ -163,6 +163,16 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 	workerWGconnEstablish.Done()
 	globalmux.Unlock()
 
+	// gets a conn once for a worker and shares conn in check, down, reup routines
+	// without parking it back to the pool as long as workers are running
+	sharedConn := make(chan *ConnItem, 1)
+	connitem, err := provider.Conns.GetConn(wid, provider)
+	if err != nil {
+		log.Printf("ERROR a GoWorker (%d) failed to connect '%s' err='%v'", wid, provider.Name, err)
+		return
+	}
+	sharedConn <- connitem // puts connitem into sharedConn channel
+
 	/* new worker code CheckRoutine */
 	go func(wid int, provider *Provider, segmentChanCheck chan *segmentChanItem, segmentChanDown chan *segmentChanItem, waitWorker *sync.WaitGroup) {
 		defer waitWorker.Done()
@@ -185,7 +195,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 					if cfg.opt.Debug {
 						log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 					}
-					if err := GoCheckRoutine(wid, provider, item); err != nil { // re-queue?
+					if err := GoCheckRoutine(wid, provider, item, sharedConn); err != nil { // re-queue?
 						log.Printf("ERROR in GoCheckRoutine err='%v'", err)
 						//time.Sleep(5 * time.Second)
 						//segmentChanCheck <-item // re-queue
@@ -222,7 +232,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				if cfg.opt.Debug {
 					log.Printf("WorkerDown: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 				}
-				if err := GoDownsRoutine(wid, provider, item); err != nil {
+				if err := GoDownsRoutine(wid, provider, item, sharedConn); err != nil {
 					log.Printf("ERROR in GoDownsRoutine err='%v'", err)
 					//time.Sleep(5 * time.Second)
 					//segmentChanDowns <-item // re-queue
@@ -251,7 +261,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				if cfg.opt.Debug {
 					log.Printf("WorkerReup: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 				}
-				if err := GoReupsRoutine(wid, provider, item); err != nil {
+				if err := GoReupsRoutine(wid, provider, item, sharedConn); err != nil {
 					log.Printf("ERROR in GoReupsRoutine err='%v'", err)
 					//time.Sleep(5 * time.Second)
 					//segmentChanReups <-item // re-queue
@@ -850,3 +860,11 @@ forever:
 		log.Printf("%s\n   WorkDivider quit: closeCase='%s'", logstring, closeCase)
 	}
 } // end func WorkDivider
+
+func SharedConnGet(sharedCC chan *ConnItem) (connitem *ConnItem) {
+	return <-sharedCC
+} // end func SharedConnGet
+
+func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
+	sharedCC <- connitem
+} // end func ReturnSharedConn

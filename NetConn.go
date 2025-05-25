@@ -505,7 +505,7 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 
 	provider.mux.Lock()         // mutex #9b71 checkCapabilities
 	defer provider.mux.Unlock() // mutex #9b71 checkCapabilities
-	defer provider.Conns.CloseConn(provider, connitem)
+	defer provider.Conns.CloseConn(provider, connitem, nil)
 
 	if !msg2srv(connitem.conn, "CAPABILITIES") {
 		return fmt.Errorf("ERROR '%s' checkCapabilities", provider.Name)
