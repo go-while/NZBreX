@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
+	//"bufio"
+	//"bytes"
 	"compress/gzip"
 	"fmt"
 	"github.com/Tensai75/nzbparser"
@@ -137,34 +137,28 @@ func loadProviderList(path string) error {
 	return nil
 } // end func loadProviderList
 
-func AppendFileBytes(data []byte, dstPath string) error {
+func AppendFileBytes(nullbytes int, dstPath string) error {
 	// Open destination file in append mode, create if not exists
 	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
 	defer dstFile.Close()
-	// Create a buffer and copy in chunks
-	buf := make([]byte, DefaultBufferSize)
-	rdr := bufio.NewReader(bytes.NewReader(data))
-	for {
-		n, readErr := rdr.Read(buf)
-		if n > 0 {
-			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
-				return writeErr
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return readErr
-		}
+	nul := make([]byte, nullbytes)
+	for i := 0; i < nullbytes; i++ {
+		nul = append(nul, 0x00)
+	}
+	if _, writeErr := dstFile.Write(nul); writeErr != nil {
+		return writeErr
 	}
 	return nil
 } // end func AppendFileBytes
 
-func AppendFile(srcPath, dstPath string) error {
+func AppendFile(srcPath string, dstPath string, delsrc bool) error {
+	if srcPath == "" || dstPath == "" {
+		return fmt.Errorf("ERROR Appendfile srcPath='%s' or dstPath='%s' empty!", srcPath, dstPath)
+	}
+
 	// Open source file for reading
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
@@ -180,7 +174,7 @@ func AppendFile(srcPath, dstPath string) error {
 	defer dstFile.Close()
 
 	// Create a buffer and copy in chunks
-	buf := make([]byte, DefaultBufferSize)
+	buf := make([]byte, DefaultYencWriteBuffer)
 	for {
 		n, readErr := srcFile.Read(buf)
 		if n > 0 {
@@ -195,9 +189,10 @@ func AppendFile(srcPath, dstPath string) error {
 			return readErr
 		}
 	}
-	if err := os.Remove(srcPath); err != nil {
-		//log.Printf("Error Yenc AppendFile Remove err='%v'", err)
-		return err
+	if delsrc {
+		if err := os.Remove(srcPath); err != nil {
+			return fmt.Errorf("ERROR Yenc AppendFile Remove err='%v'", err)
+		}
 	}
 	return nil
 } // end func AppendFile (written by AI! GPT-4o)
@@ -359,9 +354,9 @@ func RunProf() {
 	}
 	log.Printf("Started PprofWeb @ Port :61234")
 	go func() {
-		time.Sleep(time.Second * 15)
+		time.Sleep(time.Second * 15) // pProf
 		runtime.GC()
-		time.Sleep(time.Second * 5)
+		time.Sleep(time.Second * 5) // pProf
 		//log.Printf("Prof start capturing cpu profile")
 		if _, err := Prof.StartCPUProfile(); err != nil {
 			log.Printf("ERROR Prof.StartCPUProfile err='%v'", err)

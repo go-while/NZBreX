@@ -83,8 +83,8 @@ func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 			break
 		}
 		m.mux.Unlock()
-		time.Sleep(time.Second)
-		log.Printf("WAIT! already inmem seg.Id='%s'", item.segment.Id)
+		time.Sleep(time.Second) // infinite wait for memlim
+		log.Print("ERROR! MemLimit tried to lock an item already in mem! seg.Id='%s'", item.segment.Id)
 	} // end for waithere
 
 	<-m.memchan // infinite wait to get a slot from chan
@@ -103,7 +103,13 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	if cfg.opt.Debug {
 		Counter.incr("WAIT_MemReturn")
 	}
-	m.memchan <- struct{}{} // return mem slot into chan
+	select {
+	case m.memchan <- struct{}{}: // return mem slot into chan
+		//pass
+	default:
+		// wtf chan is full?? that's a bug!
+		log.Printf("ERROR MemReturn chan is full who='%s'", who)
+	}
 	m.mux.Lock()
 	delete(m.memdata, item)
 	m.mux.Unlock()

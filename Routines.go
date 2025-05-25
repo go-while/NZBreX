@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+func IsSegmentStupid(item *segmentChanItem) (crazy bool) {
+	// dead.. or done processing? not sure....
+	// check me bug? NoDownload-flag !
+	crazy = ((len(item.availableOn) == 0 && len(item.missingOn) == len(providerList)) ||
+		((len(item.availableOn)-len(item.ignoreDlOn)) == 0 && len(item.missingOn)+len(item.ignoreDlOn) == len(providerList)))
+	return
+}
+
 func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	if cfg.opt.SloMoC > 0 {
 		time.Sleep(time.Duration(cfg.opt.SloMoC) * time.Millisecond)
@@ -32,18 +40,30 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	switch code {
 	case 223:
 		// messageid found at provider
-		item.mux.Lock()
-		for id, prov := range providerList {
+		for pid, prov := range providerList {
 			if prov.Group != provider.Group {
 				continue
 			}
-			item.availableOn[id] = true
-			delete(item.missingOn, id)
-			item.checkedAt++
+			/* ??? moved check NoDownload and nodl counter to pushDL() */
 
+			switch provider.NoDownload {
+			case false:
+				// pass
+			case true:
+				// check me bug? NoDownload-flag !
+				// only flag as available on provider if provider actually allows downloading...?
+				item.mux.Lock()
+				item.ignoreDlOn[pid] = true
+				item.mux.Unlock()
+			}
+
+			item.mux.Lock()
+			item.availableOn[pid] = true
+			delete(item.missingOn, pid)
+			item.checkedAt++
+			item.mux.Unlock()
 		}
 		//checkedAt += item.checkedAt // segmentBar
-		item.mux.Unlock()
 		provider.mux.Lock() // mutex #939d articles.checked/available++
 		provider.articles.checked++
 		provider.articles.available++
@@ -53,7 +73,7 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 		//fileStatLock.Unlock()
 
 	default:
-		if code == 0 || err != nil {
+		if code == 0 && err != nil {
 			// connection problem, closed?
 			provider.Conns.CloseConn(provider, connitem) // close conn on error
 			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
@@ -74,12 +94,13 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 				}
 				item.checkedAt++
 			}
+
 			//checkedAt += item.checkedAt // segmentBar
 			item.mux.Unlock()
-			provider.mux.Lock() // mutex #24b0 articles.checked/missing++
+			provider.mux.Lock() // mutex #3b99 articles.checked/missing++
 			provider.articles.checked++
 			provider.articles.missing++
-			provider.mux.Unlock() // mutex #24b0 articles.checked/missing++
+			provider.mux.Unlock() // mutex #3b99 articles.checked/missing++
 		}
 	} // end switch
 
@@ -95,7 +116,7 @@ func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	}
 	provider.Conns.ParkConn(provider, connitem)
 	return nil
-} // end func CheckRoutine
+} // end func GoCheckRoutine
 
 func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	if cfg.opt.CheckOnly {
@@ -113,10 +134,19 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
 		// item has been read from cache
-		Counter.decr("dlQueueCnt")
-		Counter.decr("TOTAL_dlQueueCnt")
+		Counter.decr("dlQueueCnt")       // decrease temporary counter when read from cache
+		Counter.decr("TOTAL_dlQueueCnt") // decrease total counter when read from cache
+		//memlim.MemReturn(who+":cacheRead", item)
 		return nil
 	}
+
+	item.mux.RLock()                  // mutex #de94
+	if item.ignoreDlOn[provider.id] { // check me bug? NoDownload-flag !
+		item.mux.RUnlock() // mutex #de94
+		memlim.MemReturn(who+"ignoreDlOn", item)
+		return nil
+	}
+	item.mux.RUnlock() // mutex #de94
 
 	connitem, err := provider.Conns.GetConn(wid, provider)
 	if err != nil {
@@ -125,77 +155,115 @@ func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 		return err
 	}
 
-	code, err := CMD_ARTICLE(provider, connitem, item)
+	code, msg, err := CMD_ARTICLE(provider, connitem, item)
 
 	switch code {
 	case 220:
-		Counter.decr("dlQueueCnt")
+		if err != nil {
+			log.Printf("GoDownsRoutine got code 220 but err='%v'", err)
+		}
+		Counter.decr("dlQueueCnt") // on code 220
 		Counter.add("TMP_RXbytes", uint64(item.size))
 		Counter.add("TOTAL_RXbytes", uint64(item.size))
-		item.mux.Lock()
-		for id, prov := range providerList {
+
+		for pid, prov := range providerList {
 			if prov.Group != provider.Group {
 				continue
 			}
-			item.availableOn[id] = true
-			delete(item.missingOn, id)
+			item.mux.Lock() // mutex #0a11
+			item.availableOn[pid] = true
+			delete(item.missingOn, pid)
+			item.mux.Unlock() // mutex #0a11
 		}
-		item.flagisDL = true
+		item.mux.Lock()      // mutex #e96b
+		item.flagisDL = true // FIXME REVIEW should be set to false here if crc32 reports an error but code 220 is still there....
 		item.flaginDL = false
-		item.mux.Unlock()
-		provider.mux.Lock()
+		if cfg.opt.ByPassSTAT {
+			item.checkedAt++
+		}
+		item.mux.Unlock()   // mutex #e96b
+		provider.mux.Lock() // mutex #918f articles.available++/downloaded++
+		if cfg.opt.ByPassSTAT {
+			provider.articles.available++
+		}
 		provider.articles.downloaded++
-		provider.mux.Unlock()
+		provider.mux.Unlock() // mutex #918f articles.available++/downloaded++
 		if cacheON {
 			cache.Add2Cache(item)
 		}
 	default:
-		if code == 0 || err != nil {
+		if code == 0 && err != nil {
 			// connection problem, closed?
 			provider.Conns.CloseConn(provider, connitem) // close conn on error
 
-			item.mux.RLock()
+			item.mux.RLock() // mutex #74b7
 			failed := item.fails
-			isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList)
-			item.mux.RUnlock()
+			isdead := IsSegmentStupid(item)
+			//isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList) // check me bug? NoDownload-flag !
+			item.mux.RUnlock() // mutex #74b7
 
-			if failed <= 5 {
+			if !isdead && failed <= 5 {
 
-				log.Printf("WARN CMD_ARTICLE failed seg.Id='%s' @ '%s' err='%v' failed=%d re-queue in 5s", item.segment.Id, provider.Name, err, failed)
-				item.mux.Lock()
+				log.Printf("WARN CMD_ARTICLE failed re-queue in 5 sec: seg.Id='%s' @ '%s' failed=%d isdead=%t code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, failed, isdead, code, msg, err)
+				item.mux.Lock() // mutex #ee45
 				item.fails++
-				item.mux.Unlock()
+				item.mux.Unlock() // mutex #ee45
 				time.Sleep(time.Second * 5)
+				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE re-queued':"+who, item)
 				segmentChansDowns[provider.Group] <- item
 
 			} else if isdead {
-				Counter.decr("dlQueueCnt")
-				Counter.decr("TOTAL_dlQueueCnt")
+				Counter.decr("dlQueueCnt") // code=0 && err != nil && isdead
 				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE failed':"+who, item)
+				log.Printf("!!!! DEBUG GoDownsRoutine: isdead seg.Id='%s' code=0 or err='%v'", item.segment.Id, err)
 			}
 			return err
 
 		} else {
 			// downloading article failed from provider
-			item.mux.Lock()
-			for id, prov := range providerList {
+			for pid, prov := range providerList {
 				if prov.Group != provider.Group {
 					continue
 				}
 				// modify availableON and missingON lists
-				item.missingOn[id] = true
-				// remove our provider from availableON list
-				delete(item.availableOn, id)
+				item.mux.Lock() // mutex #821d
+				item.missingOn[pid] = true
+				switch code {
+				case 451:
+					item.dmcaOn[pid] = true
+				case 99932:
+					// got bad_crc
+					item.errorOn[pid] = true
+				} // end switch code
+				// remove provider from availableON list
+				delete(item.availableOn, pid)
+				item.mux.Unlock() // mutex #821d
 			}
-			isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList)
+
+			item.mux.Lock() // mutex #030b
+			//isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList) // check me bug? NoDownload-flag !
+			isdead := IsSegmentStupid(item)
 			item.flaginDL = false
-			item.mux.Unlock()
-			provider.mux.Lock() // mutex #24b0 articles.checked/missing++
+			item.mux.Unlock() // mutex #030b
+
+			provider.mux.Lock() // mutex #24b0 articles.available--/missing++
+			if provider.articles.available > 0 {
+				provider.articles.available--
+			}
 			provider.articles.missing++
-			provider.mux.Unlock() // mutex #24b0 articles.checked/missing++
+			provider.mux.Unlock() // mutex #24b0 articles.available--/missing++
+
+			Counter.decr("dlQueueCnt")
 			if isdead {
-				Counter.decr("dlQueueCnt")
-				Counter.decr("TOTAL_dlQueueCnt")
+
+				if cfg.opt.YencWrite && Counter.get("TOTAL_yencQueueCnt") > 0 {
+					Counter.decr("yencQueueCnt")
+				}
+			}
+			if code == 430 {
+				if cfg.opt.Print430 {
+					log.Printf("INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(providerList))
+				}
 			}
 			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
 		}
@@ -260,13 +328,8 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 			uploaded = true
 			// pass
 
-		case 441:
-			// Posting failed
-			unwanted = true // TODO checkme: maybe flag as retry?
-			// pass
-
 		default:
-			if code == 0 || err != nil {
+			if code == 0 && err != nil {
 				memlim.MemReturn("MemRetOnERR 'CMD_POST':"+who, item)
 				// connection problem, closed?
 				provider.Conns.CloseConn(provider, connitem) // close conn on error
@@ -274,6 +337,11 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 				time.Sleep(time.Second * 5)
 				segmentChansReups[provider.Group] <- item
 				return err
+			}
+			if code > 0 {
+				// Posting failed with any error code
+				unwanted = true // TODO checkme: maybe flag as retry?
+				// pass
 			}
 		}
 
@@ -288,23 +356,13 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 			uploaded = true
 			// pass
 
-		case 435:
-			// article unwanted
-			unwanted = true
-			// pass
-
 		case 436:
 			// retry later
 			retry = true
 			// pass
 
-		case 437:
-			// rejected
-			unwanted = true
-			// pass
-
 		default:
-			if code == 0 || err != nil {
+			if code == 0 && err != nil {
 				// connection problem, closed?
 				memlim.MemReturn("MemRetOnERR 'CMD_IHAVE':"+who, item)
 				provider.Conns.CloseConn(provider, connitem) // close conn on error
@@ -329,7 +387,6 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 			}
 			item.availableOn[id] = true
 			delete(item.missingOn, id)
-
 		}
 		item.flaginUP = false
 		item.flagisUP = true
@@ -346,16 +403,16 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 		log.Printf("Flag Unwanted seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		moreProvider := false
 		item.mux.Lock()
-		for id, prov := range providerList {
+		for pid, prov := range providerList {
 			if prov.Group != provider.Group {
-				if prov.capabilities.post || prov.capabilities.ihave {
-					if item.missingOn[id] && !item.unwantedOn[id] {
+				if !prov.NoUpload && (prov.capabilities.post || prov.capabilities.ihave) {
+					if item.missingOn[pid] && !item.unwantedOn[pid] {
 						moreProvider = true
 					}
 				}
 				continue
 			}
-			item.unwantedOn[id] = true
+			item.unwantedOn[pid] = true
 		}
 		item.flaginUP = false
 		item.mux.Unlock()
@@ -396,10 +453,19 @@ func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem) error {
 			log.Printf("OK ReupsRoutine clearmem seg.Id='%s'", item.segment.Id)
 		}
 		// clears this item content from memory because it got uploaded
+		//doMemReturn := true
 		item.mux.Lock()
 		item.lines = []string{}
+		/* // watch out for broken wings #99ffff!
+		 * // ideas was to not release memory here until yenc has been written, if flag is set...
+		 * // but something slows down by 90% if broken wings are enabled and it freezes...
+		if item.flaginYenc {
+			doMemReturn = false
+		}*/
 		item.mux.Unlock()
+		//if doMemReturn {
 		memlim.MemReturn(who, item)
+		//}
 	} else {
 		log.Printf("WARN ReupsRoutine NO clearmem seg.Id='%s'", item.segment.Id)
 	}

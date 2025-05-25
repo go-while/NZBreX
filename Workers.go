@@ -4,6 +4,8 @@ import (
 	"fmt"
 	//"github.com/Tensai75/cmpb"
 	"log"
+	"math/rand"
+	"os"
 	"sync"
 	"time"
 )
@@ -44,7 +46,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 	}
 
 	for _, provider := range providerList {
-		//log.Printf("BootWorkers list=%d provider='%#v' ", len(providerList), provider)
+		//log.Printf("BootWorkers list=%d provider='%#v' ", providersCnt, provider)
 		if !provider.Enabled || provider.MaxConns <= 0 {
 			if cfg.opt.Verbose {
 				log.Printf("!enabled provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
@@ -75,7 +77,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 						segmentChanCheck <- item
 					}
 					for {
-						time.Sleep(time.Second)
+						time.Sleep(time.Second) // wait for check routine to empty out the chan
 						if len(segmentChanCheck) == 0 {
 							break
 						}
@@ -103,6 +105,20 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 					provider.NoUpload = true
 				}
 			}
+			if cfg.opt.Verbose {
+				provider.mux.RLock()
+				//log.Printf("Capabilities: [ IHAVE: %s | POST: %s | CHECK: %s | STREAM: %s ] @ '%s' NoDl=%t NoUp=%t MaxConns=%d",
+				log.Printf("Capabilities: | IHAVE: %s | POST: %s | NoDL: %s | NoUP: %s | MaxC: %3d | @ '%s'",
+					yesno(provider.capabilities.ihave),
+					yesno(provider.capabilities.post),
+					//yesno(provider.capabilities.check),
+					//yesno(provider.capabilities.stream),
+					yesno(provider.NoDownload),
+					yesno(provider.NoUpload),
+					provider.MaxConns,
+					provider.Name)
+				provider.mux.RUnlock()
+			}
 			// fires up 1 go routine for every provider conn
 			for wid := 1; wid <= provider.MaxConns; wid++ {
 				if cfg.opt.Debug {
@@ -111,12 +127,13 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 				globalmux.Lock()
 				workerWGconnEstablish.Add(1)
 				globalmux.Unlock()
+				// GoWorker connecting....
 				go GoWorker(wid, provider, waitWorker, workerWGconnEstablish)
+				// all providers boot up at the same time
 				// give workers some space in time to start and connect
-				// 50 conns will need 1.25s to boot
-				time.Sleep(25 * time.Millisecond)
+				// 50 conns on a provider will need up to 2.5s to boot
+				time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 			}
-			//time.Sleep(time.Duration(provider.MaxConns) * 25 * time.Millisecond)
 		}(provider, workerWGconnEstablish, waitWorker) // end go func
 	} // end for providerList
 	if cfg.opt.Debug {
@@ -147,7 +164,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 	globalmux.Unlock()
 
 	/* new worker code CheckRoutine */
-	go func(wid int, provider *Provider, segmentChanCheck chan *segmentChanItem, waitWorker *sync.WaitGroup) {
+	go func(wid int, provider *Provider, segmentChanCheck chan *segmentChanItem, segmentChanDown chan *segmentChanItem, waitWorker *sync.WaitGroup) {
 		defer waitWorker.Done()
 	forGoCheckRoutine:
 		for {
@@ -162,18 +179,29 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				}
 				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
 				item.mux.Unlock()
-				if cfg.opt.Debug {
-					log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
-				}
-				if err := GoCheckRoutine(wid, provider, item); err != nil { // re-queue
-					log.Printf("ERROR in GoCheckRoutine err='%v'", err)
-					//time.Sleep(5 * time.Second)
-					//segmentChanCheck <-item // re-queue
+
+				switch cfg.opt.ByPassSTAT {
+				case false:
+					if cfg.opt.Debug {
+						log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+					}
+					if err := GoCheckRoutine(wid, provider, item); err != nil { // re-queue?
+						log.Printf("ERROR in GoCheckRoutine err='%v'", err)
+						//time.Sleep(5 * time.Second)
+						//segmentChanCheck <-item // re-queue
+					}
+				case true:
+					item.mux.Lock()
+					item.flaginDL = true
+					item.mux.Unlock()
+					Counter.incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
+					Counter.incr("TOTAL_dlQueueCnt") //cfg.opt.ByPassSTAT
+					segmentChanDown <- item
 				}
 			}
 			continue forGoCheckRoutine
 		} // end forGoCheckRoutine
-	}(wid, provider, segCC, waitWorker) // end go func()
+	}(wid, provider, segCC, segCD, waitWorker) // end go func()
 
 	/* new worker code DownsRoutine */
 	go func(wid int, provider *Provider, segmentChanDowns chan *segmentChanItem, waitWorker *sync.WaitGroup) {
@@ -258,8 +286,15 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 			if !avail {
 				continue providerDl
 			}
+			if item.ignoreDlOn[pid] {
+				if cfg.opt.Debug {
+					log.Printf(" | [DV] ignoreDlOn seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
+				}
+				continue providerDl
+			}
 			if providerList[pid].NoDownload {
 				nodl++
+				item.ignoreDlOn[pid] = true
 				continue providerDl
 			}
 			if cfg.opt.Debug {
@@ -275,7 +310,7 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 				default:
 					// chan is full
 				}
-			} else {
+			} else if !cfg.opt.ByPassSTAT {
 				select {
 				case segmentChansDowns[providerList[pid].Group] <- item:
 					pushed = true
@@ -317,9 +352,10 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 			if !miss {
 				continue providerUp
 			}
-			//providerList[pid].mux.RLock()
+			providerList[pid].mux.RLock() // FIXME TODO #b8bd287b: dynamic capas
 			flagNoUp := (providerList[pid].NoUpload || (!providerList[pid].capabilities.ihave && !providerList[pid].capabilities.post))
-			//providerList[pid].mux.RUnlock()
+			providerList[pid].mux.RUnlock()
+
 			if flagNoUp {
 				noup++
 				continue providerUp
@@ -391,13 +427,9 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 	}
 
 	segcheckdone := false
-	closeWait := 4
-	closeCase := ""
+	closeWait, closeCase := 5, ""
 	todo := uint64(len(segmentList))
 	providersCnt := len(providerList)
-	var allowDl, allowUp bool
-
-	var logstring, log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99 string
 
 	if cfg.opt.CheckFirst {
 		memDL = make(map[string]chan *segmentChanItem)
@@ -417,20 +449,31 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 		}
 	} // end if cfg.opt.UploadLater
 
-	nextLogPrint := time.Now().Unix() + cfg.opt.LogPrintEvery
+	// some values we count on in every loop to check how far processing
+	nextLogPrint := time.Now().Unix() + cfg.opt.PrintStats
 	var lastRunTook time.Duration
-	var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc uint64
+
+	// strings
+	var logstring, log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99 string
+
 	// loops forever over the segmentList and checks if there is anything to do for an item
 forever:
 	for {
 		time.Sleep(time.Duration((lastRunTook.Milliseconds() * 2)) + (2555 * time.Millisecond))
 		globalmux.RLock()
-		allowDl = (!cfg.opt.CheckOnly)
-		allowUp = (!cfg.opt.CheckOnly && Counter.get("postProviders") > 0)
+		allowDl := (!cfg.opt.CheckOnly)
+		allowUp := (!cfg.opt.CheckOnly && Counter.get("postProviders") > 0)
 		globalmux.RUnlock()
 
-		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc = 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		// uint64
+		var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64
+
+		// Tnodl, Tnoup counts segments that not have been downloaded
+		// or uploaded because provider has config flat NoDownload or NoUpload set
+		var Tnodl, Tnoup uint64
+
 		startLoop := time.Now()
+
 	forsegmentList:
 		for _, item := range segmentList {
 
@@ -438,25 +481,27 @@ forever:
 			if item.cached {
 				cached++
 			}
-			if item.checkedAt != providersCnt {
+
+			if /*!cfg.opt.ByPassSTAT &&*/ item.checkedAt != providersCnt {
 				// ignore item, will retry next run
 				item.mux.RUnlock() // RUNLOCKS HERE #824d
 				continue forsegmentList
 			}
+			if !cfg.opt.ByPassSTAT {
+				checked++
+			} else {
+				checked += uint64(item.checkedAt)
+			}
 
 			// capture statistics of this momemt
-			checked++
-
 			if item.flagisDL {
 				isdl++
 			}
-			if item.flagisUP {
-				isup++
-				//done++
-			}
 			if item.flagisYenc {
 				isyenc++
-				//done++
+			}
+			if item.flagisUP {
+				isup++
 			}
 
 			doContinue := false
@@ -477,14 +522,15 @@ forever:
 				segm++ // counts overall availability of segments
 			}
 
-			if len(item.availableOn) == 0 && len(item.missingOn) == providersCnt {
-				// segment is not available on any provider...
+			//if len(item.availableOn) == 0 && len(item.missingOn) == providersCnt {
+			if IsSegmentStupid(item) { // check me bug? NoDownload-flag !
+				// segment is not available to download on any provider...
 				dead++
 				doContinue = true
 			}
 
 			if len(item.missingOn) == 0 && len(item.availableOn) == providersCnt {
-				// segment is on all providers or should be ... we add provider to to item.availableOn after re-upload
+				// segment is on all providers or should be ... we add provider to item.availableOn after re-upload
 				allOk++
 				done++
 				doContinue = true
@@ -500,10 +546,12 @@ forever:
 
 			pushedUp, nNoUp, nInRetry := pushUP(allowUp, item)
 			noup += nNoUp
+			//Tnoup += len(item.ignoreDlOn)
 			inretry += nInRetry
 			if allowDl && !pushedUp {
 				pushedDl, nNoDl := pushDL(allowDl, item)
 				nodl += nNoDl
+				Tnodl += uint64(len(item.ignoreDlOn))
 				if pushedDl {
 					indl++
 				}
@@ -564,13 +612,14 @@ forever:
 			}
 		} // end if argUploadLater
 
-		upQ := Counter.get("upQueueCnt")
+		upQ = Counter.get("upQueueCnt")
 		TupQ := Counter.get("TOTAL_upQueueCnt")
-		dlQ := Counter.get("dlQueueCnt")
+		dlQ = Counter.get("dlQueueCnt")
 		TdlQ := Counter.get("TOTAL_dlQueueCnt")
-		yeQ := Counter.get("yencQueueCnt")
+		yeQ = Counter.get("yencQueueCnt")
 		TyeQ := Counter.get("TOTAL_yencQueueCnt")
 		// print some stats and check if we're done
+		accounted := false
 		if !cfg.opt.Bar && (cfg.opt.Verbose || cfg.opt.Debug) {
 			CNTc, CNTd, CNTu := Counter.get("GoCheckRoutines"), Counter.get("GoDownsRoutines"), Counter.get("GoReupsRoutines")
 			cache_perc := float64(cached) / float64(todo) * 100
@@ -587,104 +636,84 @@ forever:
 
 			//log00 = fmt.Sprintf(" TODO: %d ", todo)
 
-			extended_log := true
-			switch extended_log {
-			case true:
-
-				if (cfg.opt.CheckFirst || cfg.opt.CheckOnly) || (checked > 0 && checked != segm && checked != done) {
-					log01 = fmt.Sprintf(" |  STAT:[%.1f%%] (%"+D+"d)", check_perc, checked)
-				}
-				if done > 0 {
-					if !cfg.opt.Debug {
-						log02 = fmt.Sprintf(" | DONE:[%.3f%%] (%"+D+"d/%d)", done_perc, done, todo)
-					} else {
-						if done_perc >= 99 && done_perc < 100 {
-							log02 = fmt.Sprintf(" | DONE:[%.9f%%] (%"+D+"d)", done_perc, done)
-						} else {
-							log02 = fmt.Sprintf(" | DONE:[%.5f%%] (%"+D+"d)", done_perc, done)
-						}
-					}
-				}
-				if segm > 0 && segm != done {
-					log03 = fmt.Sprintf(" | SEGM:[%.3f%%] (%"+D+"d)", segm_perc, segm)
-				}
-				if yenc_perc == 100 || (yenc_perc > 0 && yenc_perc != cache_perc) {
-					log04 = fmt.Sprintf(" | YENC:[%.3f%%] (%"+D+"d / %"+D+"d Q:%d)", yenc_perc, isyenc, TyeQ, inyenc)
-				}
-				if dead > 0 {
-					log05 = fmt.Sprintf(" | DEAD:[%.3f%%] (%"+D+"d)", dead_perc, dead)
-				}
-				if dmca > 0 {
-					log06 = fmt.Sprintf(" | DMCA:[%.3f%%] (%"+D+"d)", dmca_perc, dmca)
-				}
-				if inretry > 0 {
-					log07 = fmt.Sprintf(" | ERRS:(%"+D+"d)", inretry)
-				}
-				if indl > 0 || isdl > 0 || dlQ > 0 {
-					log08 = fmt.Sprintf(" | DL:[%.3f%%] (%"+D+"d / %"+D+"d Q:%d)", isdl_perc, isdl, TdlQ, dlQ)
-				}
-				if cached > 0 {
-					log09 = fmt.Sprintf(" | HD:[%.3f%%] (%"+D+"d)", cache_perc, cached)
-				}
-				if inup > 0 || isup > 0 || upQ > 0 || TupQ > 0 {
-					log10 = fmt.Sprintf(" | UP:[%.3f%%] (%"+D+"d / %"+D+"d Q:%d)", isup_perc, isup, TupQ, upQ)
-				}
-				if used_slots >= 0 {
-
-					if cfg.opt.Verbose && !cfg.opt.Debug {
-
-						log11 = fmt.Sprintf(" | MEM:%d/%d [C=%d|D=%d|U=%d]", used_slots, max_slots, CNTc, CNTd, CNTu)
-
-					} else if cfg.opt.Debug {
-
-						CNTmw, CNTmr, CNTwmr := Counter.get("TOTAL_MemCheckWait"), Counter.get("TOTAL_MemReturned"), Counter.get("WAIT_MemReturn")
-						CNTmo := CNTmw - CNTmr
-
-						CNTnc, CNTgc, CNTdc, CNTpc, CNTwc := Counter.get("TOTAL_NewConns"), Counter.get("TOTAL_GetConns"), Counter.get("TOTAL_DisConns"), Counter.get("TOTAL_ParkedConns"), Counter.get("WaitingGetConns")
-						CNToc := CNTnc - CNTdc
-						memdata := memlim.ViewData()
-						log11 = fmt.Sprintf("\n memdata=%d:\n %#v \n  | MEM:%d/%d [C=%d|D=%d|U=%d] [CNTmemWait=%d|CNTmemRet=%d|MemOpen=%d|MemWaitReturn=%d] (indl=%d|inup=%d) CP:(parked=%d|get=%d|new=%d|dis=%d|open=%d|wait=%d)",
-							len(memdata), memdata, used_slots, max_slots, CNTc, CNTd, CNTu, CNTmw, CNTmr, CNTmo, CNTwmr, indl, inup, CNTpc, CNTgc, CNTnc, CNTdc, CNToc, CNTwc)
-					}
-				}
-			case false:
-
-				if checked > 0 && checked != segm && checked != done {
-					log01 = fmt.Sprintf("| STAT: [%.1f%%] (%"+D+"d/%"+D+"d)  ", check_perc, checked, todo)
-				}
-
-				if done > 0 {
-					log02 = fmt.Sprintf("| DONE: [%.1f%%] |", done_perc)
-				}
-				if segm > 0 && segm != done {
-					log03 = fmt.Sprintf("| SEGM: [%.1f%%] |", segm_perc)
-				}
-				if dead > 0 {
-					log05 = fmt.Sprintf("| DEAD: [%.1f%%] |", dead_perc)
-				}
-				if dmca > 0 {
-					log06 = fmt.Sprintf("| DMCA: [%.1f%%] |", dmca_perc)
-				}
-				if inretry > 0 {
-					log07 = fmt.Sprintf("| inRETRY (%"+D+"d) |", inretry)
-				}
-				if isdl > 0 {
-					log08 = fmt.Sprintf("| GETS: [%.1f%%] |", isdl_perc)
-				}
-				if cached > 0 {
-					log09 = fmt.Sprintf("| DISK: [%.1f%%] |", cache_perc)
-				}
-				if isup > 0 {
-					log10 = fmt.Sprintf("| REUP: [%.1f%%] |", isup_perc)
+			if (cfg.opt.CheckFirst || cfg.opt.CheckOnly) || (checked > 0 && checked != segm && checked != done) {
+				if check_perc != 100 {
+					log01 = fmt.Sprintf(" | STAT:[%03.1f%%] (%"+D+"d)", check_perc, checked)
+				} else {
+					log01 = fmt.Sprintf(" | STAT:[done] (%"+D+"d)", checked)
 				}
 			}
+			if done > 0 {
+				if !cfg.opt.Debug {
+					log02 = fmt.Sprintf(" | DONE:[%03.3f%%] (%"+D+"d/%d)", done_perc, done, todo)
+				} else {
+					if done_perc >= 99 && done_perc < 100 {
+						log02 = fmt.Sprintf(" | DONE:[%03.9f%%] (%"+D+"d)", done_perc, done)
+					} else {
+						log02 = fmt.Sprintf(" | DONE:[%03.5f%%] (%"+D+"d)", done_perc, done)
+					}
+				}
+			}
+			if segm > 0 && segm != done {
+				log03 = fmt.Sprintf(" | SEGM:[%03.3f%%] (%"+D+"d)", segm_perc, segm)
+				if nodl > 0 {
+					log03 = log03 + fmt.Sprintf(" nodl=%d/%d", nodl, Tnodl)
+				}
+				if noup > 0 {
+					log03 = log03 + fmt.Sprintf(" noup=%d/%d", noup, Tnoup)
+				}
+			}
+			if yenc_perc > 0 && yenc_perc != cache_perc {
+				log04 = fmt.Sprintf(" | YENC:[%03.3f%%] (%"+D+"d / %"+D+"d Q:%d←%d)", yenc_perc, isyenc, TyeQ, inyenc, yeQ)
+			}
+			if dead > 0 {
+				log05 = fmt.Sprintf(" | DEAD:[%03.3f%%] (%"+D+"d)", dead_perc, dead)
+			}
+			if dmca > 0 {
+				log06 = fmt.Sprintf(" | DMCA:[%03.3f%%] (%"+D+"d)", dmca_perc, dmca)
+			}
+			if inretry > 0 {
+				log07 = fmt.Sprintf(" | ERRS:(%"+D+"d)", inretry)
+			}
+			if indl > 0 || isdl > 0 || dlQ > 0 || TdlQ > 0 {
+				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isdl_perc, isdl, TdlQ, indl, dlQ)
+			}
+			if cached > 0 {
+				log09 = fmt.Sprintf(" | HD:[%03.3f%%] (%"+D+"d)", cache_perc, cached)
+			}
+			if inup > 0 || isup > 0 || upQ > 0 || TupQ > 0 {
+				log10 = fmt.Sprintf(" | UP:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isup_perc, isup, TupQ, inup, upQ)
+			}
 
-			logstring = fmt.Sprintf("%s%s%s%s%s%s%s%s%s%s%s%s%s", log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99)
-			if cfg.opt.Verbose && cfg.opt.LogPrintEvery >= 0 && logstring != "" && nextLogPrint < time.Now().Unix() {
-				nextLogPrint = time.Now().Unix() + cfg.opt.LogPrintEvery
+			if cfg.opt.Verbose && !cfg.opt.Debug {
+				openConns, idleConns := 0, 0
+				for _, prov := range providerList {
+					oc, ic := prov.Conns.GetStats()
+					openConns += oc
+					idleConns += ic
+				}
+				log11 = fmt.Sprintf(" | MEM:%d/%d [Cr=%d|Dr=%d|Ur=%d] [oC:%d iC=%d) ", used_slots, max_slots, CNTc, CNTd, CNTu, openConns, idleConns)
+
+			} else if cfg.opt.Debug {
+
+				CNTmw, CNTmr, CNTwmr := Counter.get("TOTAL_MemCheckWait"), Counter.get("TOTAL_MemReturned"), Counter.get("WAIT_MemReturn")
+				CNTmo := CNTmw - CNTmr
+
+				CNTnc, CNTgc, CNTdc, CNTpc, CNTwc := Counter.get("TOTAL_NewConns"), Counter.get("TOTAL_GetConns"), Counter.get("TOTAL_DisConns"), Counter.get("TOTAL_ParkedConns"), Counter.get("WaitingGetConns")
+				CNToc := CNTnc - CNTdc
+				memdata := memlim.ViewData()
+				log11 = fmt.Sprintf("\n memdata=%d:\n %#v \n  | MEM:%d/%d [Cr=%d|Dr=%d|Ur=%d] [CNTmemWait=%d|CNTmemRet=%d|MemOpen=%d|MemWaitReturn=%d] (indl=%d|inup=%d) CP:(parked=%d|get=%d|new=%d|dis=%d|open=%d|wait=%d)",
+					len(memdata), memdata, used_slots, max_slots, CNTc, CNTd, CNTu, CNTmw, CNTmr, CNTmo, CNTwmr, indl, inup, CNTpc, CNTgc, CNTnc, CNTdc, CNToc, CNTwc)
+			}
+
+			// build stats log string ...
+			logstring = log00 + log01 + log02 + log03 + log04 + log05 + log06 + log07 + log08 + log09 + log10 + log11 + log99
+			if cfg.opt.Verbose && cfg.opt.PrintStats >= 0 && logstring != "" && nextLogPrint < time.Now().Unix() {
+				nextLogPrint = time.Now().Unix() + cfg.opt.PrintStats
 				log.Print(logstring)
 			}
-		} // end if !argsBar
+			accounted = true
+		} // print some stats
 
 		if !segcheckdone && checked == todo {
 			setTimerNow(&segmentCheckEndTime)
@@ -738,7 +767,6 @@ forever:
 		*/
 
 		// continue as long as any of this triggers because stuff is still in queues and processing
-		//if (checked != todo || (TupQ > 0 && TupQ != isup) || (TdlQ > 0 && TdlQ != isdl) || inup > 0 || indl > 0) {
 		if checked != todo || inup > 0 || indl > 0 || inretry > 0 || inyenc > 0 || dlQ > 0 || upQ > 0 || yeQ > 0 {
 			if cfg.opt.Debug {
 				log.Printf("\n[DV] continue [ TupQ=%d !=? isup=%d || TdlQ=%d !=? isdl=%d || inup=%d > 0? || indl=%d > 0? || inretry=%d > 0? ]", TupQ, isup, TdlQ, isdl, inup, indl, inretry)
@@ -746,10 +774,14 @@ forever:
 			continue forever
 		}
 
-		if closeWait == 0 {
+		if closeWait <= 0 {
+			if closeCase != "" {
+				log.Printf(" | [DV] closeCase='%s'", closeCase)
+			}
 			if !cfg.opt.Verbose {
 				log.Print(logstring)
 			}
+			log.Printf(" | [DV] quit all 0? inup=%d indl=%d inretry=%d inyenc=%d dlQ=%d upQ=%d yeQ=%d accounted=%t", inup, indl, inretry, inyenc, dlQ, upQ, yeQ, accounted)
 			break forever
 		}
 
@@ -757,50 +789,57 @@ forever:
 		globalmux.RLock()
 		closeCase0 := (done == todo)
 		closeCase1 := (cfg.opt.CheckOnly)
-		closeCase2 := (cacheON && (Counter.get("postProviders") == 0 && TupQ == 0 && cached == todo))
+		closeCase2 := (cacheON && (Counter.get("postProviders") == 0 && cached == todo))
 		closeCase3 := (cacheON && (dead+cached == todo && dead+isup == todo))
 		closeCase4 := (isup == todo)
 		closeCase5 := (dead+isup == todo)
 		closeCase6 := (dead+done == todo)
-		closeCase7 := false // (dead + isdl == todo)
+		closeCase7 := false // placeholder
 		globalmux.RUnlock()
 
 		if closeCase0 {
 			closeWait--
-			closeCase = closeCase + "|Debug#0"
-			continue
+			closeCase = closeCase + "|Debug#0@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase1 {
 			closeWait--
-			closeCase = closeCase + "|Debug#1"
-			continue
+			closeCase = closeCase + "|Debug#1@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase2 {
 			closeWait--
-			closeCase = closeCase + "|Debug#2"
-			continue
+			closeCase = closeCase + "|Debug#2@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase3 {
 			closeWait--
-			closeCase = closeCase + "|Debug#3"
-			continue
+			closeCase = closeCase + "|Debug#3@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase4 {
 			closeWait--
-			closeCase = closeCase + "|Debug#4"
-			continue
+			closeCase = closeCase + "|Debug#4@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase5 {
 			closeWait--
-			closeCase = closeCase + "|Debug#5"
-			continue
+			closeCase = closeCase + "|Debug#5@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase6 {
 			closeWait--
-			closeCase = closeCase + "|Debug#6"
-			continue
+			closeCase = closeCase + "|Debug#6@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else if closeCase7 {
 			closeWait--
-			closeCase = closeCase + "|Debug#7"
-			continue
+			closeCase = closeCase + "|Debug#7@" + fmt.Sprintf("%d", time.Now().Unix())
+
 		} else {
-			log.Printf("WARN closeCase reset...")
+			log.Printf("WARN [DV] hit impossible closeCase ... kill in %d more loops", 15-closeWait)
 			closeWait++
-			closeCase = "|reset"
+			if closeWait >= 15 {
+				log.Print("... force quit ...")
+				os.Exit(1)
+			}
+			closeCase = ""
+		}
+		if closeCase != "" {
+			log.Printf(" | DV closeCase='%s' closeWait=%d", closeCase, closeWait)
 		}
 	} // end forever
 

@@ -285,6 +285,16 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 	return
 } // end func c.CacheWriter
 
+func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp string, yencdir string, fp string, fp_tmp string) {
+	//filename = fmt.Sprintf("%s.part.%d.yenc", filepath.Base(item.file.Filename), item.segment.Number)
+	filename = fmt.Sprintf("%s.%0"+D+"d", filepath.Base(item.file.Filename), item.segment.Number)
+	filename_tmp = filename + ".tmp"
+	yencdir = filepath.Join(c.cachedir, *item.nzbhashname, "yenc")
+	fp = filepath.Join(yencdir, filename)
+	fp_tmp = filepath.Join(yencdir, filename_tmp)
+	return
+} // end func GetYenc
+
 func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
 	if c.yenc_writer_chan == nil {
 		log.Printf("ERROR cache.WriteYenc yenc_writer_chan is nil")
@@ -304,15 +314,6 @@ func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
 		yPart: yPart,
 	}
 } // emd func WriteYenc
-
-func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp string, yencdir string, fp string, fp_tmp string) {
-	filename = fmt.Sprintf("%s.part.%d.yenc", filepath.Base(item.file.Filename), item.segment.Number)
-	filename_tmp = filename + ".tmp"
-	yencdir = filepath.Join(c.cachedir, *item.nzbhashname, "yenc")
-	fp = filepath.Join(yencdir, filename)
-	fp_tmp = filepath.Join(yencdir, filename_tmp)
-	return
-} // end func GetYenc
 
 func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 	defer Counter.decr("yencQueueCnt")
@@ -338,7 +339,7 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 	if c.debug {
 		log.Printf("Writing yenc part: '%s'", fp_tmp)
 	}
-
+	//doMemReturn := true
 	if file, err := os.OpenFile(fp_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		defer file.Close()
 		datawriter := bufio.NewWriterSize(file, len(yitem.yPart.Body))
@@ -367,18 +368,37 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 		yitem.item.mux.Lock()
 		yitem.item.flaginYenc = false
 		yitem.item.flagisYenc = true
+		/* // watch out for broken wings #99ffff!
+		if yitem.item.flaginUP {
+			doMemReturn = false
+		}
+		*/
 		yitem.item.mux.Unlock()
-
 	} // end OpenFile
-
+	/* // watch out for broken wings #99ffff!
+	if doMemReturn {
+		memlim.MemReturn("yenc:cache", yitem.item)
+	}
+	*/
 	yitem.yPart.Body = nil
 	yitem.yPart = nil
 	return
 } // end func c.YencWriter
 
 func (c *Cache) resetYencFlagsOnErr(item *segmentChanItem) {
+	//doMemReturn := true
 	item.mux.Lock()
 	item.flaginYenc = false
 	item.flagisYenc = false
+	/* // watch out for broken wings #99ffff!
+	if item.flaginUP {
+		doMemReturn = false
+	}
+	*/
 	item.mux.Unlock()
+	/*
+		if doMemReturn {
+			memlim.MemReturn("resetYencFlagsOnErr", item)
+		}
+	*/
 } // end func resetYencFlagsOnErr

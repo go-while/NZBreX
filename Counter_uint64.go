@@ -1,13 +1,14 @@
 package main
 
 import (
+	"log"
 	"sync"
 )
 
 // Counter_uint64_uint64 is safe to use concurrently.
 type Counter_uint64 struct {
 	m   map[string]uint64
-	mux sync.Mutex
+	mux sync.RWMutex
 }
 
 func NewCounter() *Counter_uint64 {
@@ -16,8 +17,7 @@ func NewCounter() *Counter_uint64 {
 
 func (c *Counter_uint64) init(k string) (retbool bool) {
 	c.mux.Lock()
-	_, hasKey := c.m[k]
-	if !hasKey {
+	if _, hasKey := c.m[k]; !hasKey {
 		c.m[k] = 0
 		retbool = true
 	}
@@ -36,6 +36,11 @@ func (c *Counter_uint64) incr(k string) uint64 {
 	c.m[k] += 1
 	retval := c.m[k]
 	c.mux.Unlock()
+	/*
+		if k == "yencQueueCnt" {
+			log.Printf("DEBUG counter.incr k=yencQueueCnt=%d", retval)
+		}
+	*/
 	return retval
 } // end func Counter.incrCounter
 
@@ -62,32 +67,41 @@ func (c *Counter_uint64) decr(k string) uint64 {
 		if c.m[k] == 0 {
 			delete(c.m, k)
 		}
+	} else {
+		log.Printf("ERROR in Counter_uint64.decr: key='%s' is already 0!", k)
 	}
 	c.mux.Unlock()
+	/*
+		if k == "yencQueueCnt" {
+			log.Printf("DEBUG counter.decr k=yencQueueCnt=%d", retval)
+		}
+	*/
 	return retval
 } // end func Counter.decr
 
-func (c *Counter_uint64) add(k string, value uint64) {
+func (c *Counter_uint64) add(k string, v uint64) {
 	c.mux.Lock()
-	c.m[k] += value
+	c.m[k] += v
 	c.mux.Unlock()
 } // end func Counter.add
 
-func (c *Counter_uint64) sub(k string, value uint64) {
+func (c *Counter_uint64) sub(k string, v uint64) {
 	c.mux.Lock()
 	if c.m[k] > 0 {
-		c.m[k] -= value
+		c.m[k] -= v
 		if c.m[k] == 0 {
 			delete(c.m, k)
 		}
+	} else {
+		log.Printf("ERROR in Counter_uint64.sub: key='%s' value=%d is already 0!", k, v)
 	}
 	c.mux.Unlock()
 } // end func Counter.sub
 
 func (c *Counter_uint64) get(k string) uint64 {
-	c.mux.Lock()
+	c.mux.RLock()
 	retval := c.m[k]
-	c.mux.Unlock()
+	c.mux.RUnlock()
 	return retval
 } // end func Counter.get
 
@@ -99,9 +113,9 @@ func (c *Counter_uint64) getReset(k string) uint64 {
 	return retval
 } // end func Counter.getReset
 
-func (c *Counter_uint64) set(k string, value uint64) {
+func (c *Counter_uint64) set(k string, v uint64) {
 	c.mux.Lock()
-	c.m[k] = value
+	c.m[k] = v
 	c.mux.Unlock()
 } // end func Counter.setCounter
 

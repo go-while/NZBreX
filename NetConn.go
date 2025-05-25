@@ -18,15 +18,15 @@ import (
 
 func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 	defer waitWorker.Done()
-	if cfg.opt.LogPrintEvery < 0 {
-		// don't start speedmeter if LogPrintEvery < 0   (set to -1 to disable)
+	if cfg.opt.PrintStats < 0 {
+		// don't start speedmeter if PrintStats < 0   (set to -1 to disable)
 		return
 	}
-	LogPrintEvery := cfg.opt.LogPrintEvery
-	if LogPrintEvery < 5 {
-		LogPrintEvery = 5 // defaults to min 5sec
+	PrintStats := cfg.opt.PrintStats
+	if PrintStats < 5 {
+		PrintStats = 5 // defaults to min 5sec
 	}
-	cron := time.After(time.Duration(LogPrintEvery) * time.Second)
+	cron := time.After(time.Duration(PrintStats) * time.Second)
 
 	var logStr, logStr_RX, logStr_TX string
 	var TOTAL_TXbytes, TOTAL_RXbytes uint64
@@ -48,17 +48,17 @@ forever:
 			logStr, logStr_RX, logStr_TX = "", "", ""
 			if tmp_rxb > 0 {
 				TOTAL_RXbytes += tmp_rxb
-				rx_speed, mbps := ConvertSpeed(int64(tmp_txb), LogPrintEvery)
+				rx_speed, mbps := ConvertSpeed(int64(tmp_txb), PrintStats)
 				dlPerc := int(float64(TOTAL_RXbytes) / float64(byteSize) * 100)
-				logStr_RX = fmt.Sprintf(" |  DL  [%3d%%] | %d / %d MiB | SPEED: %5d KiB/s ~%3.1f Mbps", dlPerc, TOTAL_RXbytes/1024/1024, byteSize/1024/1024, rx_speed, mbps)
+				logStr_RX = fmt.Sprintf(" |  DL  [%3d%%] | %d / %d MiB  |  SPEED: %6d KiB/s ~%3.1f Mbps", dlPerc, TOTAL_RXbytes/1024/1024, byteSize/1024/1024, rx_speed, mbps)
 			}
 			if tmp_txb > 0 {
 				TOTAL_TXbytes += tmp_txb
-				tx_speed, mbps := ConvertSpeed(int64(tmp_txb), LogPrintEvery)
+				tx_speed, mbps := ConvertSpeed(int64(tmp_txb), PrintStats)
 				upPerc := int(float64(TOTAL_TXbytes) / float64(byteSize) * 100)
-				logStr_TX = fmt.Sprintf(" |  UL  [%3d%%] | %d / %d MiB | SPEED: %5d KiB/s ~%3.1f Mbps", upPerc, TOTAL_TXbytes/1024/1024, byteSize/1024/1024, tx_speed, mbps)
+				logStr_TX = fmt.Sprintf(" |  UL  [%3d%%] | %d / %d MiB  |  SPEED: %6d KiB/s ~%3.1f Mbps", upPerc, TOTAL_TXbytes/1024/1024, byteSize/1024/1024, tx_speed, mbps)
 			}
-			cron = time.After(time.Second * time.Duration(LogPrintEvery))
+			cron = time.After(time.Second * time.Duration(PrintStats))
 			if logStr_RX != "" && cfg.opt.Verbose {
 				//logStr = logStr + logStr_RX
 				log.Print(logStr_RX)
@@ -102,17 +102,17 @@ func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		//log.Printf("CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, provider.Name, msg)
 		return code, nil
 	}
-	return code, fmt.Errorf("Error CMD_STAT returned unknown code=%d msg='%s' @ '%s'", code, msg, provider.Name)
+	return code, fmt.Errorf("Error CMD_STAT returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
 } // end func CMD_STAT
 
-func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, error) {
+func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, string, error) {
 	if connitem.srvtp == nil {
-		return 0, fmt.Errorf("ERROR CMD_ARTICLE srvtp=nil")
+		return 0, "", fmt.Errorf("ERROR CMD_ARTICLE srvtp=nil")
 	}
 	id, err := connitem.srvtp.Cmd("ARTICLE <%s>", item.segment.Id)
 	if err != nil {
-		log.Printf("ERROR CMD_ARTICLE @ '%s' srvtp.Cmd err='%v'", provider.Name, err)
-		return 0, err
+		log.Printf("ERROR CMD_ARTICLE srvtp.Cmd @ '%s' err='%v'", provider.Name, err)
+		return 0, "", err
 	}
 	connitem.srvtp.StartResponse(id)
 	code, msg, _ := connitem.srvtp.ReadCodeLine(220)
@@ -120,22 +120,35 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 	switch code {
 	case 220:
 		// article is coming
-		//lines, err := srvtp.ReadDotLines() // original go
-		// new function to clean up headers directly while fetching from network
-		err := readArticleDotLines(provider, item, connitem.srvtp)
-		if err != nil {
-			log.Printf("ERROR CMD_ARTICLE @ '%s' srvtp.ReadDotLines err='%v'", provider.Name, err)
-			return code, err
+		// old textproto.ReadDotLines replaced with new function: readArticleDotLines
+		// to clean up headers directly while fetching from network
+		// and decoding yenc on the fly
+		bad_crc, err := readArticleDotLines(provider, item, connitem.srvtp)
+		if !bad_crc && err != nil {
+			log.Printf("ERROR CMD_ARTICLE srvtp.ReadDotLines @ '%s' err='%v'", provider.Name, err)
+			return code, msg, err
 		}
-		return code, nil
+		if bad_crc {
+			// replace code with a non-rfc return code!
+			// used like a flag only to return the bad_crc info up
+			// to set flags in the right place!
+			code = 99932
+		}
+		return code, "", nil
+
 	case 430:
-		log.Printf("WARN CMD_ARTICLE seg.Id='%s' @ '%s' code=%d msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, provider.Name, code, msg, err, item.dlcnt, item.fails)
-		return code, nil
+		if cfg.opt.Debug {
+			log.Printf("INFO CMD_ARTICLE:430 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, provider.Name, code, msg, err, item.dlcnt, item.fails)
+		}
+		return code, msg, nil
+
 	case 451:
-		return code, nil
+		return code, msg, nil
+
 	default:
+		// returns the unknown code with an error!
 	}
-	return code, fmt.Errorf("Error CMD_ARTICLE returned unknown code=%d @ '%s'", code, provider.Name)
+	return code, msg, fmt.Errorf("Error CMD_ARTICLE returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
 } // end func CMD_ARTICLE
 
 func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, uint64, error) {
@@ -174,15 +187,17 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 	case 436:
 		// Transfer not possible; try again later
 		return code, 0, nil
-	case 502:
-		/* FIXME TODO #b8bd287b do we need/want dynamic capabilities while running? */
-		//provider.mux.Lock()
-		//provider.capabilities.ihave = false
-		//provider.mux.Unlock()
-		log.Printf("ERROR code=%d in CMD_IHAVE @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
-		return code, 0, nil
+	/*
+		case 502:
+			// FIXME TODO #b8bd287b do we need/want dynamic capabilities while running?
+			//provider.mux.Lock()
+			//provider.capabilities.ihave = false
+			//provider.mux.Unlock()
+			log.Printf("ERROR code=%d in CMD_IHAVE @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
+			return code, 0, nil
+	*/
 	default:
-		return code, 0, fmt.Errorf("ERROR Unknown code=%d in CMD_IHAVE @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
+		return code, 0, fmt.Errorf("ERROR CMD_IHAVE unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
 	}
 	var txb uint64
 
@@ -255,6 +270,7 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		log.Printf("ERROR code=%d in CMD_POST @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
 		return code, 0, nil
 	default:
+		// uncatched return code
 		return code, 0, err
 	}
 
@@ -285,7 +301,10 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 	return code, txb, fmt.Errorf("Uncatched ERROR in CMD_POST code=%d msg='%s' err='%v'", code, msg, err)
 } // end func CMD_POST
 
-func readArticleDotLines(provider *Provider, item *segmentChanItem, srvtp *textproto.Conn) error {
+func readArticleDotLines(provider *Provider, item *segmentChanItem, srvtp *textproto.Conn) (badcrc bool, err error) {
+	if srvtp == nil {
+		return false, fmt.Errorf("ERROR readArticleDotLines conn or srvtp nil @ '%s'", provider.Name)
+	}
 	rxb, i := 0, 0
 	var parseHeader bool = true // initial
 	var ignoreNextContinuedLine bool
@@ -293,26 +312,23 @@ func readArticleDotLines(provider *Provider, item *segmentChanItem, srvtp *textp
 	//var messageIds []string
 	var ydec []byte
 	var ydat []*string
-	var badcrc bool
-
+	var line string
 readlines:
 	for {
-		if srvtp == nil {
-			return fmt.Errorf("ERROR readArticleDotLines srvtp nil @ '%s'", provider.Name)
-		}
-		line, err := srvtp.ReadLine()
+
+		line, err = srvtp.ReadLine()
 		if err != nil {
 			// broken pipe to remote site
-			return err
+			return
 		}
 		// see every line thats coming in
 		//log.Printf("readArticleDotLines: seg.Id='%s' line='%s'", segment.Id, line)
 
 		rxb += len(line)
 		if rxb > cfg.opt.MaxArtSize {
-			err := fmt.Errorf("ERROR readArticleDotLines > maxartsize=%d seg.Id='%s'", cfg.opt.MaxArtSize, item.segment.Id)
+			err = fmt.Errorf("ERROR readArticleDotLines > maxartsize=%d seg.Id='%s'", cfg.opt.MaxArtSize, item.segment.Id)
 			log.Print(err)
-			return err
+			return
 		}
 
 		if parseHeader && len(line) == 0 {
@@ -374,7 +390,6 @@ readlines:
 					}
 				}
 			}
-			//head = append(head, line)
 			article = append(article, line)
 		} // end parseHeader
 
@@ -390,10 +405,10 @@ readlines:
 				switch cfg.opt.YencTest {
 				case 1:
 					// case 1 needs double the memory
-					ydec = append(ydec, line+CRLF...) // as []byte
+					ydec = append(ydec, line...) // as []byte (with(out) crlf?) via an io.reader
 				case 2:
-					// case 2 should need less memory
-					ydat = append(ydat, &line) // as []*string
+					// case 2
+					ydat = append(ydat, &line) // as []*string line per line
 				}
 			}
 		}
@@ -409,14 +424,14 @@ readlines:
 		getCoreLimiter()
 		defer returnCoreLimiter()
 		var yPart *yenc.Part
-		var err error
+		var badcrc bool
 		switch cfg.opt.YencTest {
 
 		case 1:
 			decoder := yenc.NewDecoder(nil, ydec, nil, 1)
-			if yPart, err = decoder.Decode(); err != nil { // chrisfarms/yenc
+			decoder.SegId = &item.segment.Id
+			if yPart, badcrc, err = decoder.Decode(); err != nil { // chrisfarms/yenc
 				log.Printf("ERROR yenc.Decode mode=1 seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", item.segment.Id, provider.Name, len(ydec), err)
-				badcrc = true
 			} else {
 				if cfg.opt.Debug {
 					log.Printf("YencCRC OK mode=1 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
@@ -424,9 +439,9 @@ readlines:
 			}
 		case 2:
 			decoder := yenc.NewDecoder(nil, nil, ydat, 1)
-			if yPart, err = decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
-				log.Printf("ERROR yenc.Decode mode=2 seg.Id='%s' @ '%s' ydat=(%d lines) err='%v'", item.segment.Id, provider.Name, len(ydat), err)
-				badcrc = true
+			decoder.SegId = &item.segment.Id
+			if yPart, badcrc, err = decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
+				log.Printf("ERROR yenc.Decode mode=2 seg.Id='%s' @ '%s' ydat=(%d lines) err='%v' badcrc=%t", item.segment.Id, provider.Name, len(ydat), err, badcrc)
 			} else {
 				if cfg.opt.Debug {
 					log.Printf("YencCRC OK mode=2 seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
@@ -436,11 +451,23 @@ readlines:
 
 		if badcrc {
 			item.mux.Lock()
+			//item.flaginDL = false // FIXME REVIEW: moved to routines where all other flags are set
+			//item.flagisDL = false // FIXME REVIEW: moved to routines where all other flags are set
 			item.badcrc++
+			/*
+				for pid, prov := range providerList {
+					if prov.Group != provider.Group {
+						continue
+					}
+					item.missingOn[pid] = true
+					item.errorOn[pid] = true
+					delete(item.availableOn, pid)
+				}
+			*/
 			item.mux.Unlock()
-			errlog := fmt.Sprintf("ERROR CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
-			log.Print(errlog)
-			return fmt.Errorf(errlog)
+			Counter.decr("dlQueueCnt") // FIXME NEEDS REVIEW
+			log.Printf("ERROR readArticleDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+			return true, nil
 		}
 
 		if cfg.opt.YencWrite && cacheON && yPart != nil {
@@ -455,7 +482,7 @@ readlines:
 
 	item.dlcnt++
 	item.mux.Unlock()
-	return nil
+	return
 } // end func readArticleDotLines
 
 func msg2srv(conn net.Conn, message string) bool {
@@ -520,15 +547,6 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	}
 	// provider.NoUpload will be set to true if none capa is available
 	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)
-
-	if cfg.opt.Verbose {
-		log.Printf("Capabilities: [ IHAVE: %s | POST: %s | CHECK: %s | STREAM: %s ] @ '%s' NoUpload=%t",
-			yesno(provider.capabilities.ihave),
-			yesno(provider.capabilities.post),
-			yesno(provider.capabilities.check),
-			yesno(provider.capabilities.stream),
-			provider.Name, provider.NoUpload)
-	}
 	// done
 	return nil
 } // end func checkCapabilities

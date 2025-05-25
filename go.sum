@@ -4,8 +4,8 @@ github.com/Tensai75/subjectparser v0.1.0 h1:6fEWnRov8lDHxJS2EWqY6VonwYfrIRN+k8h8
 github.com/Tensai75/subjectparser v0.1.0/go.mod h1:PNBFBnkOGbVDfX+56ZmC4GKSpqoRMCF1Y44xYd7NLGI=
 github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83 h1:vehfiL7LsK8bJQZdVuJxcMem4AP2HwPEQ8orUUnIA+E=
 github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83/go.mod h1:31AY7BccUb7qvKi4LQCwLOYsvcza9TdQtl/zHEIOcRE=
-github.com/go-while/yenc v0.0.0-20250523091635-9615a08bd083 h1:RK+3cC79AJyvXgVeOpS9gCdYcuswY7GyFO3oQcoreCU=
-github.com/go-while/yenc v0.0.0-20250523091635-9615a08bd083/go.mod h1:tH94D5njy44e49VkAuQXrIfWYFuh3C74KEFlDz8U/oA=
+github.com/go-while/yenc v0.0.0-20250525013730-0e821d9c5ee2 h1:0V3BWU2BSLBP/X2B/Vf/fzZjsmHXgTIPm4LtowL1ke0=
+github.com/go-while/yenc v0.0.0-20250525013730-0e821d9c5ee2/go.mod h1:tH94D5njy44e49VkAuQXrIfWYFuh3C74KEFlDz8U/oA=
 github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
 github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
 golang.org/x/net v0.25.0 h1:d/OCCoBEUq33pjydKrGQhw7IlUPI2Oylr+8qLx49kac=

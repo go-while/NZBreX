@@ -199,6 +199,10 @@ func main() {
 		log.SetOutput(f) //DEBUG
 	}
 
+	if cfg.opt.Verbose {
+		log.Printf("Settings: '%#v'", *cfg.opt)
+	}
+
 	preparationStartTime := time.Now()
 	if cfg.opt.Debug {
 		log.Printf("Loading NZB: '%s'", cfg.opt.NZBfilepath)
@@ -241,7 +245,7 @@ func main() {
 			// we could supply neatly named vars but then we will forget one if updating the struct and app will crash...
 			item := &segmentChanItem{
 				&segment, &file,
-				make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)),
+				make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)),
 				sync.RWMutex{}, nil, false, false, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &nzbhashname} // fixme TODO processor/sessions
 			segmentList = append(segmentList, item)
 		}
@@ -249,6 +253,7 @@ func main() {
 
 	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
 	artsize := mibsize / float64(len(segmentList)) * 1024
+
 	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
 
 	if headers, err := ReadHeadersFromFile(cfg.opt.CleanHeadersFile); headers != nil {
@@ -277,22 +282,23 @@ func main() {
 		totalMaxConns += provider.MaxConns
 	}
 
-	if cfg.opt.MemMax <= 0 {
-		cfg.opt.MemMax = totalMaxConns
+	// set memory slots
+	if cfg.opt.MemMax <= 0 && totalMaxConns > 0 {
+		cfg.opt.MemMax = totalMaxConns * 2
 	}
 	memlim = NewMemLimiter(cfg.opt.MemMax)
 
+	// limits crc32 and yenc processing
 	if cfg.opt.YencCpu <= 0 {
 		cfg.opt.YencCpu = runtime.NumCPU()
 	}
-
 	core_chan = make(chan struct{}, cfg.opt.YencCpu)
 	for i := 1; i <= cfg.opt.YencCpu; i++ {
-		core_chan <- struct{}{}
+		core_chan <- struct{}{} // fill chan with empty structs to suck out and return
 	}
 
 	if cfg.opt.Debug {
-		log.Printf("Loaded providerList: %d ... preparation took %v ms cfg.opt.MemMax=%d", len(providerList), time.Since(preparationStartTime).Milliseconds(), cfg.opt.MemMax)
+		log.Printf("Loaded providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(providerList), time.Since(preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
 	}
 
 	var waitWorker sync.WaitGroup
@@ -439,7 +445,7 @@ func main() {
 		} // end for providerList
 	}
 
-	if cfg.opt.YencWrite && cacheON {
+	if cfg.opt.YencMerge && cacheON {
 		var waitMerge sync.WaitGroup
 		mergeStart := time.Now().Unix()
 		log.Printf("Experimental YencWrite: try merging files....")
@@ -463,42 +469,82 @@ func main() {
 					return
 				}
 				var items []*segmentChanItem
+				// capture all items for our filename
 			loopItems:
 				for _, item := range segmentList {
 					if item.file.Filename != filename {
 						continue loopItems
 					}
+
+					/* checking flagisYenc allows merging only ...
+					 * ... if parts have been downloaded this round
+					 */
+
 					/*
 						if !item.flagisYenc {
 							continue loopItems
 						}
 					*/
+
 					items = append(items, item)
 				} // end for segmentList
 				if len(items) == 0 {
-					log.Printf("ERROR YencMerge: no items? fn='%s'", filename)
+					log.Printf("ERROR YencMerge: no items found to merge? fn='%s'", filename)
 					return
 				}
-				log.Printf("YencMerge: wait fn='%s'", filename)
-				//mergeItems:
+				log.Printf("YencMerge: try merge fn='%s'", filename)
+				deleted := false
+				missingParts := 0
+			mergeItems:
 				for _, item := range items {
-					partname, _, _, fp, _ := cache.GetYenc(item) // fp is "/path/to/*.part.N.yenc" file
+					partname, _, _, fp, _ := cache.GetYenc(item) // fp is "/path/to/cache/{nzbhashname}/yenc/[filename}.NNNN" file
 					if !FileExists(fp) {
-						log.Printf("ERROR YencMerge fn='%s' !FileExists partNo=%d fp='%s'", filename, item.segment.Number, fp)
-						return
+						missingParts++
+						if strings.HasSuffix(filename, ".par") || strings.HasSuffix(filename, ".par2") {
+							if deleted {
+								continue mergeItems
+							}
+							if cfg.opt.Debug {
+								log.Printf("WARN YencMerge: missing partNo=%d fn='%s' not merging...", item.segment.Number, filename)
+							}
+							if FileExists(target + ".tmp") {
+								if err := os.Remove(target + ".tmp"); err != nil {
+									log.Printf("ERROR YencMerge: remove fn='%s'.tmp failed err='%v'", filename, err)
+									return
+								}
+							}
+							deleted = true
+							continue mergeItems
+						}
+						log.Printf("WARN YencMerge: fn='%s' missing partNo=%d writing %d nullbytes", filename, item.segment.Number, item.segment.Bytes)
+						if err := AppendFileBytes(item.segment.Bytes, target+".tmp"); err != nil {
+							log.Printf("ERROR YencMerge: AppendFile nullbytes err='%v'", err)
+							return
+						}
+						continue mergeItems
 					}
 					if cfg.opt.Debug {
-						log.Printf("... merging: '%s'", partname)
+						log.Printf("... merging part: '%s'", partname)
 					}
-					if err := AppendFile(fp, target+".tmp"); err != nil {
+					if err := AppendFile(fp, target+".tmp", cfg.opt.YencDelParts); err != nil {
 						log.Printf("ERROR YencMerge AppendFile err='%v'", err)
 						return
 					}
 				} // end for items
 
-				// a debug verify
+				// debug verify testhash
 				testhash := ""
 				switch filename {
+				case "debian-11.1.0-i386-DVD-1.iso":
+					testhash = "d3af1d61414b3e9b2278aeedb2416bf7d1542c5d7d5668e058adc4b331baf885"
+				case "debian-11.6.0-amd64-netinst.iso":
+					testhash = "e482910626b30f9a7de9b0cc142c3d4a079fbfa96110083be1d0b473671ce08d"
+				case "debian-12.2.0-amd64-netinst.iso":
+					testhash = "23ab444503069d9ef681e3028016250289a33cc7bab079259b73100daee0af66"
+				case "debian-12.9.0-amd64-DVD-1.iso":
+					testhash = "d336415ab09c0959d4ef32384637d8b15fcaee12a04154d69bbca8b4442d2aa3"
+				case "ubuntu-22.04-live-server-amd64.iso":
+					testhash = "84aeaf7823c8c61baa0ae862d0a06b03409394800000b3235854a6b38eb4856f"
 				case "ubuntu-24.04-live-server-amd64.iso":
 					testhash = "8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3"
 				}
@@ -515,12 +561,20 @@ func main() {
 						return
 					}
 					log.Printf("YencMerge: Verify hash OK fn='%s'", filename)
-				} // end if testhash
+				} // end debug verify testhash
+
+				if deleted || missingParts > 0 {
+					if cfg.opt.Debug {
+						log.Printf("YencMerge: missingParts=%d fn='%s' deleted=%t", missingParts, filename, deleted)
+					}
+				}
 
 				// finally rename
-				if err := os.Rename(target+".tmp", target); err != nil {
-					log.Printf("ERROR YencMerge: move .tmp failed err='%v'", err)
-					return
+				if !deleted {
+					if err := os.Rename(target+".tmp", target); err != nil {
+						log.Printf("ERROR YencMerge: move .tmp failed fn='%s' err='%v'", filename, err)
+						return
+					}
 				}
 				log.Printf("YencMerge: OK fn='%s'", filename)
 			}(fn, &waitMerge) // end go func

@@ -130,7 +130,7 @@ Run in a cmd line with the following argument:
 
 `-checkfirst` [true|false] false: starts downs/reups asap as segments are checked (default: false)
 
-`-uploadlater` [true|false] option needs cache! start uploads when everything got cached (default: false)
+`-uploadlater` (TODO!) [true|false] option needs cache! start uploads when everything got cached (default: false)
 
 `-checkonly` [true|false] check online status only: no downs/reups (default: false)
 
@@ -150,7 +150,9 @@ Run in a cmd line with the following argument:
 
 `-debugcache` [true|false] (default: false)
 
-`-print int` prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished
+`-printstats int` prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished
+
+`-print430 int` [true|false] prints notice about err code 430 article not found
 
 `-slomoc int`  SloMo'C' limiter sleeps N milliseconds before checking
 
@@ -170,9 +172,20 @@ Run in a cmd line with the following argument:
 
 `-prof` starts cpu+mem profiler: waits 20sec and runs 120sec
 
-`-webprof` start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' or 'IP4_ADDR:PORT' or '[IP6_ADDR]:PORT'
+`-profweb` start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' (default: empty = dont start websrv)
 
 `-version` prints app version
+
+`-yenccpu` limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() (default: 8)
+
+`-yencout` [true|false] writes yenc parts to cache (needs -cd=/dir/) (experimental/testing) (default: false)
+
+`-yencmerge` [true|false] merge yenc parts into target files (experimental/testing) (default: false)
+
+`-yencdelparts` [true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (experimental/testing) (default: false)
+
+`-yenctest` select mode 1 (bytes) or 2 (lines) to use in -crc32. (experimental/testing) mode 2 should use less mem. (default: 2)
+
 
 ---
 
@@ -310,6 +323,7 @@ This software uses the following external libraries:
 - github.com/Tensai75/cmpb#commit:16fb79f ([MIT License](https://github.com/Tensai75/cmpb/blob/master/LICENSE))
 - github.com/go-while/go-cpu-mem-profiler ([MIT License](https://github.com/go-while/go-cpu-mem-profiler/blob/master/LICENSE))
 - github.com/go-yenc/yenc ([MIT License](https://github.com/go-yenc/yenc/blob/master/LICENSE))
+
 
 ---
 
