@@ -305,6 +305,7 @@ func main() {
 	var workerWGconnEstablish sync.WaitGroup
 	var waitDivider sync.WaitGroup
 	var waitDividerDone sync.WaitGroup
+	var waitPool sync.WaitGroup
 
 	// boot cache routines
 	if cacheON {
@@ -344,7 +345,7 @@ func main() {
 	waitDivider.Add(1)
 	waitDividerDone.Add(1)
 	workerWGconnEstablish.Add(1)
-	GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, nzbfile.Bytes)
+	GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, &waitPool, nzbfile.Bytes)
 
 	if cfg.opt.Debug {
 		log.Print("main: workerWGconnEstablish.Wait()")
@@ -372,15 +373,17 @@ func main() {
 		log.Print("main: waitWorker.Wait()")
 	}
 	waitWorker.Wait()
-
+	if cfg.opt.Debug {
+		log.Print("main: waitWorker.Wait() released, waiting on waitPool.Wait()")
+	}
+	waitPool.Wait()
 	/*
 		if cfg.opt.Bar {
 			progressBars.Wait()
 		}
 	*/
-
 	if cfg.opt.Debug {
-		log.Print("main: waitWorker.Wait() released")
+		log.Print("main: waitPool.Wait() released")
 	}
 
 	//endTime := time.Now()
@@ -399,51 +402,71 @@ func main() {
 	result := ""
 
 	provGroups := make(map[string][]int)
+	var keeporder []string
 	for id, provider := range providerList {
+		if !slices.Contains(keeporder, provider.Group) {
+			keeporder = append(keeporder, provider.Group)
+		}
 		provGroups[provider.Group] = append(provGroups[provider.Group], id)
 	}
 
-	if len(provGroups) > 1 {
-		for group, ids := range provGroups {
+	for _, group := range keeporder {
+		for agroup, ids := range provGroups {
+			if group != agroup {
+				continue
+			}
 			var pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed uint64
-			result = result + fmt.Sprintf("\n\n> Results | Group: '%s'", group)
+			if len(ids) > 1 {
+				result = result + fmt.Sprintf("\n\n> Results | Group: '%s'", group)
+			} else if len(ids) == 1 {
+				result = result + fmt.Sprintf("\n\n> Results | Provi: '%s'", providerList[ids[0]].Name)
+			} else {
+				// should be unreachable code
+				continue
+			}
 			for _, pid := range ids {
 				providerList[pid].mux.RLock()
-				result = result + fmt.Sprintf("\n>  Id:%3d | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' | Group: '%s'",
-					providerList[pid].id,
-					providerList[pid].articles.checked,
-					providerList[pid].articles.available,
-					providerList[pid].articles.missing,
-					providerList[pid].articles.downloaded,
-					providerList[pid].articles.refreshed,
-					providerList[pid].Name,
-					providerList[pid].Group,
-				)
-				pGchecked += providerList[pid].articles.checked
-				pGavailable += providerList[pid].articles.available
-				pGmissing += providerList[pid].articles.missing
-				pGdownloaded += providerList[pid].articles.downloaded
-				pGrefreshed += providerList[pid].articles.refreshed
+				groupStr := ""
+				if len(ids) > 1 {
+					groupStr = fmt.Sprintf("| Group: '%s'", providerList[pid].Group)
+				}
+				if cfg.opt.CheckOnly {
+					result = result + fmt.Sprintf("\n>  Id:%3d | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | @ '%s' %s",
+						providerList[pid].id,
+						providerList[pid].articles.checked,
+						providerList[pid].articles.available,
+						providerList[pid].articles.missing,
+						providerList[pid].Name,
+						groupStr,
+					)
+				} else {
+					result = result + fmt.Sprintf("\n>  Id:%3d | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' %s",
+						providerList[pid].id,
+						providerList[pid].articles.checked,
+						providerList[pid].articles.available,
+						providerList[pid].articles.missing,
+						providerList[pid].articles.downloaded,
+						providerList[pid].articles.refreshed,
+						providerList[pid].Name,
+						groupStr,
+					)
+				}
+				if len(ids) > 1 {
+					pGchecked += providerList[pid].articles.checked
+					pGavailable += providerList[pid].articles.available
+					pGmissing += providerList[pid].articles.missing
+					pGdownloaded += providerList[pid].articles.downloaded
+					pGrefreshed += providerList[pid].articles.refreshed
+				}
 				providerList[pid].mux.RUnlock()
-			} // end for id in range ids
-			result = result + fmt.Sprintf("\n> ^Totals | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | Group: '%s'",
-				pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed, group,
-			)
+			} // end for pid in range ids
+			if len(ids) > 1 {
+				// count totals only if we have more than 1 provider in group
+				result = result + fmt.Sprintf("\n> ^Totals | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | Group: '%s'",
+					pGchecked, pGavailable, pGmissing, pGdownloaded, pGrefreshed, group,
+				)
+			}
 		}
-	} else {
-		for id, _ := range providerList {
-			providerList[id].mux.RLock()
-			result = result + fmt.Sprintf("\n> Results | checked: %"+D+"d | avail: %"+D+"d | miss: %"+D+"d | dl: %"+D+"d | up: %"+D+"d | @ '%s' | Group: '%s'",
-				providerList[id].articles.checked,
-				providerList[id].articles.available,
-				providerList[id].articles.missing,
-				providerList[id].articles.downloaded,
-				providerList[id].articles.refreshed,
-				providerList[id].Name,
-				providerList[id].Group,
-			)
-			providerList[id].mux.RUnlock()
-		} // end for providerList
 	}
 
 	if cfg.opt.YencMerge && cacheON {
