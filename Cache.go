@@ -248,7 +248,7 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 	filename_tmp := filename + ".tmp"
 	if file, err := os.OpenFile(filename_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		defer file.Close()
-		datawriter := bufio.NewWriterSize(file, c.maxartsize)
+		datawriter := bufio.NewWriterSize(file, DefaultCacheWriteBuffer)
 		for _, line := range item.lines {
 			if n, err := datawriter.WriteString(line + LF); err != nil {
 				log.Printf("ERROR GoCacheWriter datawriter.Write err='%v'", err)
@@ -342,7 +342,7 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 	//doMemReturn := true
 	if file, err := os.OpenFile(fp_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		defer file.Close()
-		datawriter := bufio.NewWriterSize(file, len(yitem.yPart.Body))
+		datawriter := bufio.NewWriterSize(file, DefaultYencWriteBuffer)
 		if n, err := datawriter.Write(yitem.yPart.Body); err != nil {
 			log.Printf("ERROR YencWriter datawriter.Write err='%v'", err)
 			c.resetYencFlagsOnErr(yitem.item)
