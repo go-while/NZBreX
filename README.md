@@ -193,9 +193,9 @@ Run in a cmd line with the following argument:
 
 `"Enabled": true|false,` enables or disables this provider
 
-`"NoDownload": true|false,` enables or disables downloads from provider
+`"NoDownload": true|false,` 'false = enables' or 'true = disables' downloads from provider
 
-`"NoUpload": true|false,` enables or disables upload to provider
+`"NoUpload": true|false,` 'false = enables' or 'true = disables' upload to provider
 
 `"Group": "GroupA",` provider accounts can be grouped together so requests will go only once to same group
 
