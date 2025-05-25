@@ -223,22 +223,26 @@ getConnFromPool:
 		select {
 		// try to get an idle conn from pool
 		case connitem = <-c.pool:
-
+			if connitem.conn == nil {
+				log.Printf("WARN ConnPool GetConn: got nil conn @ '%s'... continue", provider.Name)
+				c.CloseConn(provider, connitem)
+				continue getConnFromPool // until chan rans empty
+			}
 			// instantly got an idle conn from pool!
-			if connitem == nil || connitem.expires < time.Now().Unix() {
+
+			if connitem.expires > 0 && connitem.expires < time.Now().Unix() {
 				// but this conn is old and could be already closed from remote
 				// some provider have short timeout values.
-				log.Printf("Closing expired conn... '%s'", provider.Name)
-				c.CloseConn(provider, connitem)
-				continue getConnFromPool // until chan rans empty
+				// try reading from conn. check takes some µs
+				connitem.conn.SetReadDeadline(readDeadConn)
+				if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
+					log.Printf("INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", provider.Name, readBytes, rerr)
+					c.CloseConn(provider, connitem)
+					continue getConnFromPool // until chan rans empty
+				}
+				connitem.conn.SetReadDeadline(noDeadLine)
 			}
-			connitem.conn.SetReadDeadline(readDeadConn)
-			if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
-				log.Printf("ConnPool GetConn: reading from idle conn failed: '%s' readBytes=(%d != 0) err='%v'", provider.Name, readBytes, rerr)
-				c.CloseConn(provider, connitem)
-				continue getConnFromPool // until chan rans empty
-			}
-			connitem.conn.SetReadDeadline(noDeadLine)
+			connitem.expires = -1
 			// conn should be fine. take that!
 			if cfg.opt.Debug {
 				Counter.incr("TOTAL_GetConns")
