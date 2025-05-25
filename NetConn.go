@@ -138,7 +138,7 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 
 	case 430:
 		if cfg.opt.Debug {
-			log.Printf("INFO CMD_ARTICLE:430 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, provider.Name, code, msg, err, item.dlcnt, item.fails)
+			log.Printf("INFO CMD_ARTICLE:430 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, provider.Name, msg, err, item.dlcnt, item.fails)
 		}
 		return code, msg, nil
 
