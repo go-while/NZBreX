@@ -641,7 +641,6 @@ forever:
 		yeQ = Counter.get("yencQueueCnt")
 		TyeQ := Counter.get("TOTAL_yencQueueCnt")
 		// print some stats and check if we're done
-		accounted := false
 		if !cfg.opt.Bar && (cfg.opt.Verbose || cfg.opt.Debug) {
 			CNTc, CNTd, CNTu := Counter.get("GoCheckRoutines"), Counter.get("GoDownsRoutines"), Counter.get("GoReupsRoutines")
 			cache_perc := float64(cached) / float64(todo) * 100
@@ -734,7 +733,6 @@ forever:
 				nextLogPrint = time.Now().Unix() + cfg.opt.PrintStats
 				log.Print(logstring)
 			}
-			accounted = true
 		} // print some stats
 
 		if !segcheckdone && checked == todo {
@@ -797,13 +795,17 @@ forever:
 		}
 
 		if closeWait <= 0 {
-			if closeCase != "" {
-				log.Printf(" | [DV] closeCase='%s'", closeCase)
+			if cfg.opt.Debug {
+				if closeCase != "" {
+					log.Printf(" | [DV] closeCase='%s'", closeCase)
+				}
 			}
-			if !cfg.opt.Verbose {
-				log.Print(logstring)
+			if cfg.opt.Debug {
+				log.Print("Debug:"+logstring)
 			}
-			log.Printf(" | [DV] quit all 0? inup=%d indl=%d inretry=%d inyenc=%d dlQ=%d upQ=%d yeQ=%d accounted=%t", inup, indl, inretry, inyenc, dlQ, upQ, yeQ, accounted)
+			if cfg.opt.Debug {
+				log.Printf(" | [DV] quit all 0? inup=%d indl=%d inretry=%d inyenc=%d dlQ=%d upQ=%d yeQ=%d", inup, indl, inretry, inyenc, dlQ, upQ, yeQ)
+			}
 			break forever
 		}
 
@@ -865,7 +867,7 @@ forever:
 		}
 	} // end forever
 
-	if logstring != "" { // always prints final logstring
+	if !cfg.opt.Bar && logstring != "" { // always prints final logstring
 		log.Print(logstring)
 	}
 	if cfg.opt.Debug {
