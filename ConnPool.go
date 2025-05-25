@@ -13,15 +13,22 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"io"
 	"net"
 	"net/textproto"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 const (
 	DefaultConnExpireSeconds int64 = 20 // if conn was parked more than N seconds we close it and get a new one...
+)
+
+var (
+	noDeadLine time.Time // used as zero value!
+	readDeadConn = time.Unix(1, 0) // no syscall needed
 )
 
 // holds an active connection to share around
@@ -209,19 +216,29 @@ func (c *ProviderConns) GetConn(wid int, provider *Provider) (connitem *ConnItem
 		Counter.incr("WaitingGetConns")
 		defer Counter.decr("WaitingGetConns")
 	}
+	buf := make([]byte, 1, 1)
 getConnFromPool:
 	for {
+		buf = buf[:0] // resets buf
 		select {
 		// try to get an idle conn from pool
 		case connitem = <-c.pool:
+
 			// instantly got an idle conn from pool!
-			if connitem.expires < time.Now().Unix() {
+			if connitem == nil || connitem.expires < time.Now().Unix() {
 				// but this conn is old and could be already closed from remote
 				// some provider have short timeout values.
 				log.Printf("Closing expired conn... '%s'", provider.Name)
 				c.CloseConn(provider, connitem)
 				continue getConnFromPool // until chan rans empty
 			}
+			connitem.conn.SetReadDeadline(readDeadConn)
+			if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
+				log.Printf("ConnPool GetConn: reading from idle conn failed: '%s' readBytes=(%d != 0) err='%v'", provider.Name, readBytes, rerr)
+				c.CloseConn(provider, connitem)
+				continue getConnFromPool // until chan rans empty
+			}
+			connitem.conn.SetReadDeadline(noDeadLine)
 			// conn should be fine. take that!
 			if cfg.opt.Debug {
 				Counter.incr("TOTAL_GetConns")
@@ -269,7 +286,8 @@ getConnFromPool:
 			c.mux.Unlock()
 		} // end select
 	} // end for
-	return nil, fmt.Errorf("ERROR in ConnPool GetConn: uncatched return!")
+	// vet says: unreachable code
+	//return nil, fmt.Errorf("ERROR in ConnPool GetConn: uncatched return! wid=%d", wid)
 } // end func GetConn
 
 func (c *ProviderConns) ParkConn(provider *Provider, connitem *ConnItem) {
@@ -309,6 +327,18 @@ func (c *ProviderConns) GetStats() (openconns int, idle int) {
 	c.mux.RUnlock()
 	return
 }
+
+func isNetConnClosedErr(err error) bool {
+	switch {
+	case
+		errors.Is(err, net.ErrClosed),
+		errors.Is(err, io.EOF),
+		errors.Is(err, syscall.EPIPE):
+		return true
+	default:
+		return false
+	}
+} // end func isNetConnClosedErr (copy/paste from stackoverflow)
 
 func isNetworkUnreachable(err error) bool {
 	if err == nil {
