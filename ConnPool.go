@@ -29,6 +29,8 @@ const (
 var (
 	noDeadLine   time.Time         // used as zero value!
 	readDeadConn = time.Unix(1, 0) // no syscall needed
+	ConnPools    = make(map[int]*ProviderConns)
+	PoolsLock    sync.RWMutex
 )
 
 // holds an active connection to share around
@@ -45,9 +47,13 @@ type ProviderConns struct {
 	mux       sync.RWMutex
 	pool      chan *ConnItem // idle/parked conns are in here
 	//wait       []chan *ConnItem
-	provider   *Provider
 	rserver    string // "host:port"
 	wants_auth bool
+	// we have created an endless loop
+	// provider.Conns.provider.Conns.provider.Conns.provider.Conns.provider.Conns.provider.Conns.CloseConn(provider, connitem) xD
+	// if we want to call closeconn from outside the routine which keep a provider ptr too
+	// we cann call ConnPools[provider.id].CloseConn(provider, connitem)
+	provider *Provider
 }
 
 func NewConnPool(provider *Provider) {
@@ -90,10 +96,98 @@ func NewConnPool(provider *Provider) {
 		pool:    make(chan *ConnItem, provider.MaxConns),
 		rserver: rserver, wants_auth: wants_auth,
 	}
-
+	PoolsLock.Lock()
+	ConnPools[provider.id] = provider.Conns
+	PoolsLock.Unlock()
+	// no return value as we mutate the provider pointer!
 } // end func NewConnPool
 
-func (c *ProviderConns) connect(wid int, provider *Provider, retry int) (connitem *ConnItem, err error) {
+func KillConnPool(provider *Provider) {
+	PoolsLock.Lock()
+	defer PoolsLock.Unlock()
+
+	if provider == nil || provider.Conns == nil {
+		return
+	}
+
+	provider.Conns.mux.RLock()
+	openConns := provider.Conns.openConns
+	provider.Conns.mux.RUnlock()
+
+	if openConns > 0 {
+		//log.Printf("KillConnPool: '%s'", provider.Name)
+		killed := 0
+		for {
+			select {
+			case connitem := <-provider.Conns.pool:
+				provider.Conns.CloseConn(provider, connitem, nil)
+				//log.Printf("KillConnPool: '%s' closed a conn", provider.Name)
+				killed++
+			default:
+				// chan ran empty
+			}
+			provider.Conns.mux.RLock()
+			openConns := provider.Conns.openConns
+			provider.Conns.mux.RUnlock()
+			if openConns > 0 {
+				//log.Printf("KillConnPool: '%s' openConns=%d killed=%d", provider.Name, openConns, killed)
+				continue
+			}
+			break
+		} // end for
+	}
+
+	delete(ConnPools, provider.id)
+
+	provider.mux.Lock()
+	provider.Conns = nil
+	provider.mux.Unlock()
+
+	//log.Printf("KillConnPool: closed '%s'", provider.Name)
+} // end func KillConnPool
+
+func (c *ProviderConns) selectProviderPtr(thisprovider *Provider, src string) (provider *Provider, err error) {
+	/*
+		if cfg.opt.Debug {
+			// !!! WARNING !!! prints provider login details into logfile!
+			//log.Printf("DEBUG selectProviderPtr src=%s\n\n thisprovider='%#v'\n\n c.provider='%#v'", src, thisprovider, c.provider)
+		}
+	*/
+
+	// err check
+	if thisprovider == nil && c.provider == nil {
+		return nil, fmt.Errorf("ERROR in ConnPool selectProviderPtr src=%s: thisprovider & c.provider = nil", src)
+	}
+
+	// safety check
+	if thisprovider != nil && c.provider != nil {
+		if thisprovider.id != c.provider.id {
+			return nil, fmt.Errorf("ERROR in ConnPool selectProviderPtr src=%s: provider id does not match!", src)
+		}
+	}
+
+	// no provider supplied, use c.provider
+	if thisprovider == nil && c.provider != nil {
+		//log.Printf("DEBUG ConnPool selectProviderPtr: use c.provider")
+		provider = c.provider
+		return
+	}
+
+	if thisprovider != nil {
+		provider = thisprovider
+		//log.Printf("DEBUG ConnPool selectProviderPtr: use thisprovider")
+		return
+	}
+
+	return nil, fmt.Errorf("ERROR selectProviderPtr uncatched return")
+} // end func selectProviderPtr
+
+func (c *ProviderConns) connect(wid int, thisprovider *Provider, retry int) (connitem *ConnItem, err error) {
+
+	provider, err := c.selectProviderPtr(thisprovider, "connect")
+	if err != nil {
+		return
+	}
 
 	if provider.MaxConnErrors >= 0 && retry > provider.MaxConnErrors {
 		// set provider.MaxConnErrors to -1 to retry infinite
@@ -211,11 +305,18 @@ func (c *ProviderConns) connect(wid int, provider *Provider, retry int) (connite
 	return &ConnItem{srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
 } // end func connect
 
-func (c *ProviderConns) GetConn(wid int, provider *Provider) (connitem *ConnItem, err error) {
+func (c *ProviderConns) GetConn(wid int, thisprovider *Provider) (connitem *ConnItem, err error) {
+
+	provider, err := c.selectProviderPtr(thisprovider, "GetConn")
+	if err != nil {
+		return
+	}
+
 	if cfg.opt.Debug {
 		Counter.incr("WaitingGetConns")
 		defer Counter.decr("WaitingGetConns")
 	}
+
 	buf := make([]byte, 1, 1)
 getConnFromPool:
 	for {
@@ -294,7 +395,12 @@ getConnFromPool:
 	//return nil, fmt.Errorf("ERROR in ConnPool GetConn: uncatched return! wid=%d", wid)
 } // end func GetConn
 
-func (c *ProviderConns) ParkConn(provider *Provider, connitem *ConnItem) {
+func (c *ProviderConns) ParkConn(thisprovider *Provider, connitem *ConnItem) {
+
+	provider, err := c.selectProviderPtr(thisprovider, "ParkConn")
+	if err != nil {
+		return
+	}
 	connitem.expires = time.Now().Unix() + DefaultConnExpireSeconds
 	select {
 	case c.pool <- connitem:
@@ -310,7 +416,13 @@ func (c *ProviderConns) ParkConn(provider *Provider, connitem *ConnItem) {
 	}
 } // end func ParkConn
 
-func (c *ProviderConns) CloseConn(provider *Provider, connitem *ConnItem, sharedCC chan *ConnItem) {
+func (c *ProviderConns) CloseConn(thisprovider *Provider, connitem *ConnItem, sharedCC chan *ConnItem) {
+
+	provider, err := c.selectProviderPtr(thisprovider, "CloseConn")
+	if err != nil {
+		return
+	}
+
 	if cfg.opt.Debug {
 		Counter.incr("TOTAL_DisConns")
 	}

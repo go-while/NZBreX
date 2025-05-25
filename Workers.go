@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, byteSize int64) {
+func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
 	globalmux.Lock()
 	if segmentChansCheck != nil {
 		globalmux.Unlock()
@@ -56,7 +56,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 		globalmux.Lock()
 		workerWGconnEstablish.Add(1)
 		globalmux.Unlock()
-		go func(provider *Provider, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup) {
+		go func(provider *Provider, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup) {
 			defer workerWGconnEstablish.Done()
 			//log.Printf("Boot Provider '%s'", provider.Name)
 			if provider.Group == "" {
@@ -128,13 +128,13 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 				workerWGconnEstablish.Add(1)
 				globalmux.Unlock()
 				// GoWorker connecting....
-				go GoWorker(wid, provider, waitWorker, workerWGconnEstablish)
+				go GoWorker(wid, provider, waitWorker, workerWGconnEstablish, waitPool)
 				// all providers boot up at the same time
 				// give workers some space in time to start and connect
 				// 50 conns on a provider will need up to 2.5s to boot
 				time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 			}
-		}(provider, workerWGconnEstablish, waitWorker) // end go func
+		}(provider, workerWGconnEstablish, waitWorker, waitPool) // end go func
 	} // end for providerList
 	if cfg.opt.Debug {
 		log.Printf("Waiting for Workers to connect")
@@ -151,12 +151,14 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 	}
 } // end func GoBootWorkers
 
-func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup) {
+func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitPool *sync.WaitGroup) {
 	if cfg.opt.BUG {
 		log.Printf("GoWorker (%d) launching routines '%s'", wid, provider.Name)
 	}
 	globalmux.Lock()
 	waitWorker.Add(3)
+	waitPool.Add(1)
+
 	segCC := segmentChansCheck[provider.Group]
 	segCD := segmentChansDowns[provider.Group]
 	segCR := segmentChansReups[provider.Group]
@@ -197,8 +199,6 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 					}
 					if err := GoCheckRoutine(wid, provider, item, sharedConn); err != nil { // re-queue?
 						log.Printf("ERROR in GoCheckRoutine err='%v'", err)
-						//time.Sleep(5 * time.Second)
-						//segmentChanCheck <-item // re-queue
 					}
 				case true:
 					item.mux.Lock()
@@ -234,8 +234,6 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				}
 				if err := GoDownsRoutine(wid, provider, item, sharedConn); err != nil {
 					log.Printf("ERROR in GoDownsRoutine err='%v'", err)
-					//time.Sleep(5 * time.Second)
-					//segmentChanDowns <-item // re-queue
 				}
 			}
 			continue forGoDownsRoutine
@@ -263,8 +261,6 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				}
 				if err := GoReupsRoutine(wid, provider, item, sharedConn); err != nil {
 					log.Printf("ERROR in GoReupsRoutine err='%v'", err)
-					//time.Sleep(5 * time.Second)
-					//segmentChanReups <-item // re-queue
 				}
 			}
 			continue forGoReupsRoutine
@@ -275,6 +271,22 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 		log.Printf("GoWorker (%d) waitWorker.Wait processing Provider '%s'", wid, provider.Name)
 	}
 	waitWorker.Wait()
+
+	select {
+	case connitem := <-sharedConn:
+		if connitem != nil {
+			//log.Printf("GoWorker (%d) parked sharedConn @ '%s'", wid, provider.Name)
+			provider.Conns.ParkConn(provider, connitem)
+		}
+	default:
+		// no conn there?
+		//KillConnPool(provider *Provider)
+		log.Printf("GoWorker (%d) no sharedConn?! @ '%s'", wid, provider.Name)
+	}
+
+	waitPool.Done()
+	KillConnPool(provider)
+	waitPool.Wait()
 
 	if cfg.opt.Debug {
 		log.Printf("GoWorker (%d) quit @ '%s'", wid, provider.Name)
@@ -686,7 +698,7 @@ forever:
 				log07 = fmt.Sprintf(" | ERRS:(%"+D+"d)", inretry)
 			}
 			if indl > 0 || isdl > 0 || dlQ > 0 || TdlQ > 0 {
-				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isdl_perc, isdl, TdlQ, dlQ, indl)
+				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d=%d)", isdl_perc, isdl, TdlQ, dlQ, indl)
 			}
 			if cached > 0 {
 				log09 = fmt.Sprintf(" | HD:[%03.3f%%] (%"+D+"d)", cache_perc, cached)
