@@ -12,18 +12,18 @@ import (
 )
 
 const (
-	DOT                          = "."
-	CR                           = "\r"
-	LF                           = "\n"
-	CRLF                         = CR + LF
-	DefaultCacheRW               = 8
-	DefaultChanSize              = 1000
-	DefaultPrintStats      int64 = 5
-	DefaultCacheWriteBuffer      = 256 * 1024
-	DefaultYencWriteBuffer       = 256 * 1024
-	DefaultMaxArticleSize        = 1 * 1024 * 1024
-	DefaultConnectTimeout        = 9 * time.Second
-	DefaultConnectErrSleep       = 9 * time.Second
+	DOT                           = "."
+	CR                            = "\r"
+	LF                            = "\n"
+	CRLF                          = CR + LF
+	DefaultCacheRW                = 8
+	DefaultChanSize               = 1000
+	DefaultPrintStats       int64 = 5
+	DefaultCacheWriteBuffer       = 256 * 1024
+	DefaultYencWriteBuffer        = 256 * 1024
+	DefaultMaxArticleSize         = 1 * 1024 * 1024
+	DefaultConnectTimeout         = 9 * time.Second
+	DefaultConnectErrSleep        = 9 * time.Second
 )
 
 type Config struct {
