@@ -1,107 +1,332 @@
-[![Release Workflow](https://github.com/Tensai75/nzbrefresh/actions/workflows/build_and_publish.yml/badge.svg?event=release)](https://github.com/Tensai75/nzbrefresh/actions/workflows/build_and_publish.yml)
-[![Latest Release)](https://img.shields.io/github/v/release/Tensai75/nzbrefresh?logo=github)](https://github.com/Tensai75/nzbrefresh/releases/latest)
+[![Latest Release)](https://img.shields.io/github/v/release/go-while/nzbrefreshX?logo=github)](https://github.com/go-while/nzbrefreshX/releases/latest)
 
-# NZB Refresh
-Proof of concept for a cmd line tool to re-upload articles that are missing from providers with low retention.
+# NZB Refresh X (NZBreX)
 
-The cmd line tool analyses the NZB file specified as positional argument and checks the availability of the individual articles at all Usenet providers listed in the provider.json.
-If an article is missing from one or more providers, but is still available from at least another provider, the tool will download the article from one of the providers where the article is still available and attempt to re-upload the article using the POST command. It will first try to re-upload the article to one of the providers where the article is not available and, if this is not successful (e.g. due to missing POST capability), it will also try to re-upload the article to one of the other providers. However, the providers already haveing the article might refuse to accept the re-upload of the same article. So for best results, all usenet accounts used for this tool should have POST capability. 
+**NZB Refresh X**, or **NZBreX**, is a command-line utility designed to **restore missing Usenet articles** by downloading them from providers where they are still available and re-uploading them to others.
 
-The article is re-uploaded completely unchanged (same message ID, same subject), with the exception of the date header, which is updated to the current date. Once the article has been uploaded to one provider, it should then propagate to all other providers.
+This tool is a revamped fork of [Tensai75/nzbrefresh](https://github.com/Tensai75/nzbrefresh).
 
-As a result, the upload should become available again at *all* providers and be able to be downloaded with the *identical / original* NZB file that was used for the refresh.
+---
 
-__PLEASE NOTE: This is a very early alpha version, intended for initial testing only.__
+## What It Does
 
-Bug reports are very welcome. Please open an issue for this. If possible, add a link to the NZB file that was used when the error occurred.
+NZBreX loads an NZB file (provided as a command-line argument) and checks the availability of each article/segment listed in the file across all configured Usenet providers (defined in `provider.json`).
+
+If it finds articles that are missing from one or more providers—but still available on at least one other provider—it will:
+
+1. **Download** the missing article from a provider where it is still present.
+2. **Cache** the article locally (optional, based on your configuration).
+3. **Re-upload** the article to one or more providers where it was missing.
+
+- The tool uses the NNTP commands:
+
+   **STAT** for checking
+
+   **ARTICLE** for downloading
+
+   **IHAVE** or **POST** for uploading
+
+---
+
+## Multiplexing / Grouping of Provider Accounts
+
+> You can group multiple accounts together and articles will only be uploaded once to each group.
+
+- If you don't set `provider.Group`: every **Provider Account** with an empty group creates a group by `provider.Name`.
+
+- **Check**, **Download** and **Upload** can run concurrently as items fly in or sequential:
+
+  **Check** first `-checkfirst` then: **Download** and **Upload** concurrently
+
+  OR `-uploadlater` **Download only** and **Upload later** (uploadLater is still an idea and TODO)
+
+  Set 'NoUpload' to not upload at all, but allow download into cache.
+
+- Upload Priorities: the order is kept when reading the providers.json.
+
+---
+
+## Behavior
+
+- For **every connection** spawns 1 `go GoWorker(...)` with 3 private **go func()** routines.
+
+  These private routines per Worker execute requests: Check, Down, Reup
+
+- The article body is uploaded exactly as it was originally.
+
+- Some non-essential headers may be removed during re-upload:
+
+	cleanHeader = []string{
+		"X-",
+		"Date:",
+		"Nntp-",
+		"Path:",
+		"Xref:",
+		"Cancel-",
+		"Injection-",
+		"User-Agent:",
+		"Organization:",
+	}
+
+- The **Date** header is updated to the current date.
+
+- Once successfully uploaded to one provider, the article should propagate to others.
+
+---
+
+## Cache
+
+- The cache is a folder with subfolders for each NZB, holding the downloaded **segment.art** files.
+
+- The subfolder is the sha256 hash of the nzb file and **.art** files are hashed by **`<messageID@xyz>`** (including `<` and `>` !).
+
+- To fill your cache with downloaded segments set all providers to: '  "NoUpload": true,  '
+
+- The Cache is logically placed before executing download requests and uploads are fed always from cache if available.
+
+- The DL/UL queues can rise and decrease while item are checked and moved around.
+
+- Warning: cmd line arg `-cc` (Check Cache on Boot) can fuckup traditional harddisk drives if `-crw N` default value of 100 is used.
+
+---
 
 ## Installation
-1. Download the executable file for your system from the release page.
-2. Extract the archive.
-3. Edit the `provider.json` according to your requirements.
 
-## Running the program
-Run the program in a cmd line with the following argument:
+- 1. Compile or run from source or get the latest executable for your operating system from the [Releases](../../releases) page if there is any ;)
 
-`nzbrefresh [--check] [--provider PROVIDER] [--debug] NZBFILE`
+- 2. Configure the `provider.json` file with the details of your Usenet providers.
 
-   Positional arguments:
-   
-     NZBFILE                path to the NZB file to be checked (required)
+- 3. open a cmd line and run the program:
 
-   Options:
-   
-     --check, -c            only check availability - don't re-upload (optional)
-     
-     --provider PROVIDER, -p PROVIDER
-                            path to the provider JSON config file (optional / default is: './provider.json')
-     
-     --debug, -d            logs additional output to log file (optional, log file will be named NZBFILENAME.log)
+  `./nzbrex -checkonly -nzb nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz`
 
-     --csv                  writes statistic about available segements to a csv file (optional, csv file will be named NZBFILENAME.csv)
-     
-     --help, -h             display this help and exit
-     
-     --version              display version and exit
-     
+  `./nzbrex -cd cache -checkfirst -nzb nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz`
 
-## provider.json options
+  `./nzbrex --cd=cache --checkfirst --nzb=nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz`
+
+
+---
+
+## Running NZBreX
+Run in a cmd line with the following argument:
+
+`Usage of nzbrex:`
+
+- `go "flag" argument switches can be prefixed with single *-* or double *--* as you prefer!`
+
+`-help` print the latest help with all arguments and info texts!
+
+`-nzb string` /path/file.nzb (default "test.nzb")
+
+`-provider string` /path/provider.json (default "provider.json")
+
+`-cc` [true|false] checks nzb vs cache on boot (default: false)
+
+`-cd string` /path/to/cache/dir
+
+`-crw int` sets number of Cache Reader and Writer routines to equal amount (default 100)
+
+`-crc32` [true|false] checks crc32 of articles on the fly while downloading (default: false)
+
+`-checkfirst` [true|false] false: starts downs/reups asap as segments are checked (default: false)
+
+`-uploadlater` (TODO!) [true|false] option needs cache! start uploads when everything got cached (default: false)
+
+`-checkonly` [true|false] check online status only: no downs/reups (default: false)
+
+`-verify` [true|false] waits and tries to verify/recheck all reups (default: false)
+
+`-verbose` [true|false] a little more output than nothing (default: true)
+
+`-discard` [true|false] reduce console output to minimum (default: false)
+
+`-log` [true|false] logs to file (default: false)
+
+`-bar` [true|false] show progress bars (buggy) (default: false)
+
+`-bug` [true|false] full debug (default: false)
+
+`-debug` [true|false] part debug (default: false)
+
+`-debugcache` [true|false] (default: false)
+
+`-printstats int` prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished
+
+`-print430 int` [true|false] prints notice about err code 430 article not found
+
+`-slomoc int`  SloMo'C' limiter sleeps N milliseconds before checking
+
+`-slomod int`  SloMo'D' limiter sleeps N milliseconds before downloading
+
+`-slomou int`  SloMo'U' limiter sleeps N milliseconds before uploading
+
+`-cleanhdr` [true|false] removes unwanted headers. only change this if you know why! (default: true)
+
+`-cleanhdrfile` loads unwanted headers to cleanup from cleanHeaders.txt
+
+`-maxartsize int` limits article size (mostly articles have ~700K only) (default 1048576)
+
+`-mem int` limit memory usage to N segments in RAM ( 0 defaults to number of total provider connections*2 or what you set but usually there is no need for more. if your 'MEM' is full: your upload is just slow. giving more mem will NOT help!)
+
+`-chansize int` sets internal size of channels to queue items for check,down,reup. default should be fine.
+
+`-prof` starts cpu+mem profiler: waits 20sec and runs 120sec
+
+`-profweb` start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' (default: empty = dont start websrv)
+
+`-version` prints app version
+
+`-yenccpu` limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() (default: 8)
+
+`-yencout` [true|false] writes yenc parts to cache (needs -cd=/dir/) (experimental/testing) (default: false)
+
+`-yencmerge` [true|false] merge yenc parts into target files (experimental/testing) (default: false)
+
+`-yencdelparts` [true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (experimental/testing) (default: false)
+
+`-yenctest` select mode 1 (bytes) or 2 (lines) to use in -crc32. (experimental/testing) mode 2 should use less mem. (default: 2)
+
+
+---
+
+## provider.json options per provider
+
+`"Enabled": true|false,` enables or disables this provider
+
+`"NoDownload": true|false,` 'false = enables' or 'true = disables' downloads from provider
+
+`"NoUpload": true|false,` 'false = enables' or 'true = disables' upload to provider
+
+`"Group": "GroupA",` provider accounts can be grouped together so requests will go only once to same group
+
 `"Name": "Provider 1",` arbitrary name of the provider, used in the debug text/output
 
 `"Host": "",` usenet server host name or IP address
 
 `"Port": 119,` usenet server port number
 
+`"TCPMode": "tcp|tcp4|tcp6",` "tcp" uses ipv4 and ipv6, the others only one
+
+`"PreferIHAVE": false,` prefers IHAVE command if provider has capabilities
+
 `"SSL": false,` if true, secure SSL connections will be used
 
-`"SkipSslCheck": true,` if true, certificate errors will be ignored
+`"SkipSslCheck": false,` if true, certificate errors will be ignored
 
 `"Username": "",` usenet account username
 
 `"Password": "",` usenet account password
 
-`"ConnWaitTime": 10,` waiting time until reconnection after connection errors
-
 `"MaxConns": 50,` maximum number of connections to be used
-
-`"IdleTimeout": 30,` time after a connection is closed
-
-`"HealthCheck": false,` if true, will check health of connection before using it (will reduce speed)
-
-`"MaxTooManyConnsErrors": 3,` maximum number of consecutive "too manny connections error" after which MaxConns is automatically reduced
 
 `"MaxConnErrors": 3` maximum number of consecutive fatal connection errors after which the connection with the provider is deemed to have failed
 
-## TODOs
-- option to set the priority for the providers to be used for re-uploading
-- option to use either the STAT, HEAD or BODY command for the check
-- option to use the IHAVE command for re-uploading (not implemented with most providers, however)
-- folder monitoring with automatic checking
+---
+
+## Terminal Output
+
+NZBreX in **-verbose** mode prints some statistics while running:
+
+- **STAT** : the overall status of STAT command. counts up if an item has been checked on all providers
+
+- **DONE** : counts up if an item has been downloaded/uploaded, depending the cmdline arguments
+
+- **SEGM** : shows availability of the parts:
+
+   100% means: all segments are available, anywhere.
+
+   Does not mean on all providers - but all segments should be there to get.
+
+   Some provider report STAT with success but retrieving article fails with code 430 or 451.
+
+- **DEAD** : segments not available on any provider are counted as dead
+
+- **DMCA** : some providers return code 451 for banned articles
+
+- **DL** : status of the download queue
+
+- **HD** : cache status
+
+- **UP** : status of the reupload queue
+
+- **MEM N/N [C=0|D=0|U=0]** : shows usage of memory slots and running routines for Check, Download, Upload
+
+- If your default MEM slots are always full, which is fine, your upload is just slow...
+
+  ... or the tool got stuck on releasing memory and came to a full stop...
+
+  ... giving more memory than default does not help with your upload speed.
+
+  ... default is `total_maxconns*2` which keeps 1 item in queue for every provider connection, while it is processing an item ;)
+
+- Note: all percentages can lie a little because of rounding errors!
+
+- Sometimes rows appear or disappear: this depends on (not) matching numbers.
+
+```
+2025/05/13 23:48:37  | DONE | [55.309%] (1219/2204) | SEGM [86.706%] (1911) | GETS [55.535%] (1224 / 1911 Q:687) | DISK [55.535%] (1224) | REUP [55.309%] (1219 / 1224 Q:5) | MEM:10/10 [C=5|D=5|U=4]
+2025/05/13 23:48:40  |  DL  [ 55%]   SPEED:  5265 KiB/s | (Total: 865.00 MB)
+2025/05/13 23:48:40  |  UL  [ 55%]   SPEED:  4838 KiB/s | (Total: 862.00 MB)
+...
+2025/05/13 23:52:43  |  STAT [100.0%] (2204) | DONE | [93.149%] (2053/2204) | SEGM [95.054%] (2095) | DEAD [4.946%] ( 109) | GETS [93.149%] (2053 / 2204 Q:151) | DISK [93.149%] (2053) | REUP [93.149%] (2053 / 2053 Q:0) | MEM:5/10 [C=0|D=5|U=0]
+```
+
+---
+
+## TODOs for ...
+- you: testing!
+
+---
+
+## Ideas and more TODOs
+- #0010: any bugs? fix all todos in code!
+- #0020: better console output
+- #0030: verify of uploaded articles
+- #0050: config.json does not work
+- #0060: streaming (CHECK/TAKETHIS)
+- #0070: watchDir (processor/sessions)
+- #0080: progressbar (cosmetics)
+- #0090: disabled csv output as i don't need it
 - ...?
 
-This is a Proof of Concept with the minimum necessary features. 
-The TODOs is what I currently plan to implement but there is certainly also a lot of other things left to do.
+---
 
-## Version history
-### alpha 3
-- fix for panic errors (should fix all errors in issue [#1](https://github.com/Tensai75/nzbrefresh/issues/1))
-- added --csv switch for csv output of available segements per file per provider
-- use STAT instead of HEAD (should improve speed)
-- a lot of refactoring
+## Contributing & Reporting Issues
 
-### alpha 2
-- highly improved version with parallel processing
+Please open an issue on the [GitHub Issues](../../issues) page if you encounter problems or open a [Discussion](../../discussions)
 
-### alpha 1
-- first public version
+> Only add a link to the NZB file if it is freeware like debian/ubuntu iso!
+
+---
+
+- The **provider.ygg.json** works via yggdrasil network ;)
+
+---
+
+- Retention of the Test-Servers is short. Articles can expire within few minutes.
+
+  Connections can drop or reject or reply with unexpected return codes at any time!
+
+  If yggdrasil Test-Server does not work... do NOT open an issue!
+
+  Wait, leave it alone, do not disturb and run your own!
+
+---
 
 ## Credits
 This software is built using golang ([License](https://go.dev/LICENSE)).
 
+Source based on ([github.com/Tensai75/nzbrefresh#commit:cc2a8b7](https://github.com/Tensai75/nzbrefresh/commit/cc2a8b7206b503bd27c23b5fb72797dc2dc34b39)) ([MIT License](https://github.com/Tensai75/nzbrefresh/blob/main/LICENSE.md))
+
 This software uses the following external libraries:
-- github.com/alexflint/go-arg ([License](https://github.com/alexflint/go-arg/blob/master/LICENSE))
-- github.com/alexflint/go-scalar ([License](https://github.com/alexflint/go-scalar/blob/master/LICENSE))
-- github.com/fatih/color ([License](https://github.com/fatih/color/blob/main/LICENSE.md))
-- github.com/mattn/go-colorable ([License](https://github.com/mattn/go-colorable/blob/master/LICENSE))
-- github.com/mattn/go-isatty ([License](https://github.com/mattn/go-isatty/blob/master/LICENSE))
-- github.com/nu11ptr/cmpb ([License](https://github.com/nu11ptr/cmpb/blob/master/LICENSE))
+- github.com/fatih/color#commit:4c0661 ([MIT License](https://github.com/fatih/color/blob/main/LICENSE.md))
+- github.com/nu11ptr/cmpb ([MIT License](https://github.com/nu11ptr/cmpb/blob/master/LICENSE))
+- github.com/Tensai75/nzbparser#commit:a1e0d80 ([MIT License](https://github.com/Tensai75/nzbparser/blob/master/LICENSE))
+- github.com/Tensai75/cmpb#commit:16fb79f ([MIT License](https://github.com/Tensai75/cmpb/blob/master/LICENSE))
+- github.com/go-while/go-cpu-mem-profiler ([MIT License](https://github.com/go-while/go-cpu-mem-profiler/blob/master/LICENSE))
+- github.com/go-yenc/yenc ([MIT License](https://github.com/go-yenc/yenc/blob/master/LICENSE))
+
+
+---
+
+## Credits to Tensai75 !

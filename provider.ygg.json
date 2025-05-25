@@ -1,0 +1,68 @@
+[
+    {
+      "Enabled": true,
+      "Group": "UL-TEST",
+      "Name": "UL-TEST1",
+      "Host": "[205:66fe:5432:52d0:9235:e7a9:9447:1eb4]",
+      "Port": 11119,
+      "PreferIHAVE": true,
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    },
+    {
+      "Enabled": true,
+      "Group": "UL-TEST",
+      "Name": "UL-TEST2",
+      "Host": "[205:66fe:5432:52d0:9235:e7a9:9447:1eb4]",
+      "Port": 11119,
+      "PreferIHAVE": true,
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    },
+    {
+      "Enabled": true,
+      "Group": "UL-TEST",
+      "Name": "UL-TEST3",
+      "Host": "[205:66fe:5432:52d0:9235:e7a9:9447:1eb4]",
+      "Port": 11119,
+      "PreferIHAVE": true,
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    },
+    {
+      "Enabled": true,
+      "NoUpload": true,
+      "Group": "DL-TEST",
+      "Name": "DL-TEST1",
+      "Host": "[205:66fe:5432:52d0:9235:e7a9:9447:1eb4]",
+      "Port": 119,
+      "Username": "anonymous",
+      "Password": "anonymous",
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    },
+    {
+      "Enabled": true,
+      "NoUpload": true,
+      "Group": "DL-TEST",
+      "Name": "DL-TEST2",
+      "Host": "[205:66fe:5432:52d0:9235:e7a9:9447:1eb4]",
+      "Port": 119,
+      "Username": "anonymous",
+      "Password": "anonymous",
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    },
+    {
+      "Enabled": true,
+      "NoUpload": true,
+      "Group": "DL-TEST",
+      "Name": "DL-TEST3",
+      "Host": "[205:66fe:5432:52d0:9235:e7a9:9447:1eb4]",
+      "Port": 119,
+      "Username": "anonymous",
+      "Password": "anonymous",
+      "MaxConns": 5,
+      "MaxConnErrors": 3
+    }
+]

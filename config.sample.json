@@ -1,0 +1,25 @@
+[
+  {
+    "optProvider": "provider.json",
+    "optCachedir": "cache",
+    "optCheckCacheOnBoot": true,
+    "optCRW": 100,
+    "optMemMax": 0,
+    "optCheckOnly": false,
+    "optCheckFirst": false,
+    "optVerify": false,
+    "optCsv": false,
+    "optLog": false,
+    "optLogPrintEvery": 5,
+    "optDiscard": false,
+    "optCleanHeaders": true,
+    "optBUG": false,
+    "optDebug": false,
+    "optDebugCache": false,
+    "optVerbose": true,
+    "optBar": true,
+    "optColors": true,
+    "optMaxArtSize": 1048576,
+    "optSloMo": 1000
+    }
+]
