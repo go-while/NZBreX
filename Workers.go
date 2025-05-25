@@ -799,11 +799,6 @@ forever:
 				if closeCase != "" {
 					log.Printf(" | [DV] closeCase='%s'", closeCase)
 				}
-			}
-			if cfg.opt.Debug {
-				log.Print("Debug:"+logstring)
-			}
-			if cfg.opt.Debug {
 				log.Printf(" | [DV] quit all 0? inup=%d indl=%d inretry=%d inyenc=%d dlQ=%d upQ=%d yeQ=%d", inup, indl, inretry, inyenc, dlQ, upQ, yeQ)
 			}
 			break forever
@@ -867,9 +862,11 @@ forever:
 		}
 	} // end forever
 
+	/*
 	if !cfg.opt.Bar && logstring != "" { // always prints final logstring
-		log.Print(logstring)
+		log.Print("Final: "+logstring)
 	}
+	*/
 	if cfg.opt.Debug {
 		log.Printf("%s\n   WorkDivider quit: closeCase='%s'", logstring, closeCase)
 	}

@@ -116,13 +116,17 @@ func KillConnPool(provider *Provider) {
 	provider.Conns.mux.RUnlock()
 
 	if openConns > 0 {
-		//log.Printf("KillConnPool: '%s'", provider.Name)
+		if cfg.opt.Debug {
+			log.Printf("KillConnPool: '%s'", provider.Name)
+		}
 		killed := 0
 		for {
 			select {
 			case connitem := <-provider.Conns.pool:
 				provider.Conns.CloseConn(connitem, nil)
-				//log.Printf("KillConnPool: '%s' closed a conn", provider.Name)
+				if cfg.opt.Debug {
+					log.Printf("KillConnPool: '%s' closed a conn", provider.Name)
+				}
 				killed++
 			default:
 				// chan ran empty
@@ -131,7 +135,9 @@ func KillConnPool(provider *Provider) {
 			openConns := provider.Conns.openConns
 			provider.Conns.mux.RUnlock()
 			if openConns > 0 {
-				//log.Printf("KillConnPool: '%s' openConns=%d killed=%d", provider.Name, openConns, killed)
+				if cfg.opt.Debug {
+					log.Printf("KillConnPool: '%s' openConns=%d killed=%d", provider.Name, openConns, killed)
+				}
 				continue
 			}
 			break
@@ -143,8 +149,9 @@ func KillConnPool(provider *Provider) {
 	provider.mux.Lock()
 	provider.Conns = nil
 	provider.mux.Unlock()
-
-	//log.Printf("KillConnPool: closed '%s'", provider.Name)
+	if cfg.opt.Debug {
+		log.Printf("KillConnPool: closed '%s'", provider.Name)
+	}
 } // end func KillConnPool
 
 func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
