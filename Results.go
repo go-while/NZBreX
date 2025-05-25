@@ -15,11 +15,13 @@ func Results(preparationStartTime time.Time) (result string, runtime_info string
 	}
 	dlSpeed := int(float64(Counter.get("TOTAL_RXbytes")) / transferTook.Seconds() / 1024)
 	upSpeed := int(float64(Counter.get("TOTAL_TXbytes")) / transferTook.Seconds() / 1024)
-
+	var transfertook, avgUpDlspeed string
 	totalruntime := fmt.Sprintf(" | QUIT |\n\n> NZB: '%s' (%d segments)\n> Total Runtime: %.0f sec (%v)", filepath.Base(cfg.opt.NZBfilepath), len(segmentList), time.Since(preparationStartTime).Seconds(), time.Since(preparationStartTime))
 	segchecktook := fmt.Sprintf("\n> SegCheck: %.0f sec (%v)", segmentCheckTook.Seconds(), segmentCheckTook)
-	transfertook := fmt.Sprintf("\n> Transfer: %.0f sec (%v)", transferTook.Seconds(), transferTook)
-	avgUpDlspeed := fmt.Sprintf("\n> DL %d KiB/s  (Total: %.2f MiB)\n> UL %d KiB/s  (Total: %.2f MiB)", dlSpeed, float64(Counter.get("TOTAL_RXbytes"))/float64(1024)/float64(1024), upSpeed, float64(Counter.get("TOTAL_TXbytes"))/float64(1024)/float64(1024))
+	if !cfg.opt.CheckOnly {
+		transfertook = fmt.Sprintf("\n> Transfer: %.0f sec (%v)", transferTook.Seconds(), transferTook)
+		avgUpDlspeed = fmt.Sprintf("\n> DL %d KiB/s  (Total: %.2f MiB)\n> UL %d KiB/s  (Total: %.2f MiB)", dlSpeed, float64(Counter.get("TOTAL_RXbytes"))/float64(1024)/float64(1024), upSpeed, float64(Counter.get("TOTAL_TXbytes"))/float64(1024)/float64(1024))
+	}
 	runtime_info = totalruntime + segchecktook + transfertook + avgUpDlspeed
 
 	provGroups := make(map[string][]int)
