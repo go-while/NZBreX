@@ -867,4 +867,4 @@ func SharedConnGet(sharedCC chan *ConnItem) (connitem *ConnItem) {
 
 func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
 	sharedCC <- connitem
-} // end func ReturnSharedConn
+} // end func SharedConnReturn
