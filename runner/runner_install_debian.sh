@@ -5,6 +5,7 @@
 # 1. run this script twice without arguments: /root/runner_install_debian.sh
 # 2. run this script with arguments /root/runner_install_debian.sh "SYSUSER" "USERDIR" "GITNAME" "GITREPO" "GATOKEN" "LABELS" "NAME" "GROUP"
 
+
 GO_VER="go1.24.3"
 RUNNER_VERSION="2.324.0"
 RUNNER_FILENAME="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
@@ -18,6 +19,9 @@ test $(pwd) != "/root" && echo "error: you are not in /root" && exit 1
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
+
+ping -c 3 8.8.8.8
+ping -c 3 google.com
 
 if [ ! -e ".runner_apt_update" ]; then
  echo "preparing machine...."
