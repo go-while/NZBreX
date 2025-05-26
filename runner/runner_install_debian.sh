@@ -58,6 +58,9 @@ rm -v "$RUNNER_FILENAME"
 echo "sudo -u \"$SYSUSER\" tmux new-session -d -s \"${NAME}-${SYSUSER}\" \"${USERDIR}\"/actions-runner/run.sh" > "${USERDIR}"/actions-runner/RUN.sh
 test -e "${USERDIR}"/actions-runner/RUN.sh && echo "created: ${USERDIR}/actions-runner/RUN.sh" || exit 10
 chmod +x "${USERDIR}"/actions-runner/RUN.sh && "${USERDIR}"/actions-runner/RUN.sh || exit 11
+## print runner config
+echo "Config: ${USERDIR}"/actions-runner/.runner
+cat "${USERDIR}"/actions-runner/.runner
 
 
 mkdir -p /var/www/html/ga
