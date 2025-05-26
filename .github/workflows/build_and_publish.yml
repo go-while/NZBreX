@@ -8,7 +8,7 @@ on:
 jobs:
   build_matrix:
     name: "Build (GitHub-hosted matrix: Ubuntu/macOS/Windows)"
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ubu2204]
     strategy:
       matrix:
         os-arch:
