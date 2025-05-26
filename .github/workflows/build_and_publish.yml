@@ -8,7 +8,9 @@ on:
 jobs:
   build_matrix:
     name: "Build Matrix (All Self-hosted)"
-    runs-on: [self-hosted, ${{ matrix.runner_label }}]
+    runs-on:
+      - self-hosted
+      - ${{ matrix.runner_label }}
     strategy:
       matrix:
         include:
