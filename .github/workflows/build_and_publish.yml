@@ -183,8 +183,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - ubuntu_version: ubu1804
-            runner_label: ubu1804
           - ubuntu_version: ubu2004
             runner_label: ubu2004
           - ubuntu_version: ubu2204
