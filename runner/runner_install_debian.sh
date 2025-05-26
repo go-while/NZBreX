@@ -31,8 +31,6 @@ if [ ! -e ".runner_apt_update" ]; then
 elif [ ! -e ".runner_apt_install" ]; then
  apt update -y && apt install -y aptitude build-essential ca-certificates curl git dpkg-dev haveged nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip && echo "$(date +%s)" > ".runner_apt_install" || exit 11
  apt clean
- vnstat --create -i eth0 || vnstat --add -i eth0
- systemctl restart vnstat
  touch ".runner_apt_install"
 fi
 
