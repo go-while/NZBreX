@@ -3,7 +3,7 @@
 # install requires:
 # 0. wget https://raw.githubusercontent.com/go-while/NZBreX/refs/heads/8-rewrite-workflow-for-nzbrex/runner/runner_install_debian.sh -O runner_install_debian.sh
 # 1. run this script twice without arguments: /root/runner_install_debian.sh
-# 2. run this script with arguments /root/runner_install_debian.sh "SYSUSER" "USERDIR" "GITNAME" "GITREPO" "GATOKEN" "LABEL" "NAME" "GROUP"
+# 2. run this script with arguments /root/runner_install_debian.sh "SYSUSER" "USERDIR" "GITNAME" "GITREPO" "GATOKEN" "LABELS" "NAME" "GROUP"
 
 GO_VER="go1.24.3"
 RUNNER_VERSION="2.324.0"
@@ -40,7 +40,7 @@ if [ ! -e ".install_$GO_VER" ]; then
  touch ".install_$GO_VER"
 fi
 
-test -z "$8" && echo "usage: $0 SYSUSER USERDIR GITNAME GITREPO GATOKEN LABEL" && exit 1
+test -z "$8" && echo "usage: $0 SYSUSER USERDIR GITNAME GITREPO GATOKEN LABELS" && exit 1
 SYSUSER="$1"; USERDIR="$2"; GITNAME="$3"; GITREPO="$4"; GATOKEN="$5"; LABELS="$6"; NAME="$7" GROUP="$8"
 echo "setup SYSUSER=$SYSUSER USERDIR=$USERDIR GITNAME=$GITNAME GITREPO=$GITREPO GATOKEN=$GATOKEN LABELS=$LABELS NAME=$NAME GROUP=$GROUP"
 if [ ! -e "$USERDIR" ]; then
