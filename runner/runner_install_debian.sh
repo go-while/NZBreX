@@ -2,7 +2,7 @@
 # Inside your LXC/QEMU/KVM container (e.g., based on Debian 10, 11, 12 and Ubuntu 20.04, 22.04, 24.04)
 # install requires:
 # 0. wget https://raw.githubusercontent.com/go-while/NZBreX/refs/heads/8-rewrite-workflow-for-nzbrex/runner/runner_install_debian.sh -O runner_install_debian.sh
-# 1. run this script twice without arguments: /root/runner_install_debian.sh
+# 1. run this script !twice! without arguments: /root/runner_install_debian.sh
 # 2. run this script with arguments /root/runner_install_debian.sh "SYSUSER" "USERDIR" "GITNAME" "GITREPO" "GATOKEN" "LABELS" "NAME" "GROUP"
 
 
