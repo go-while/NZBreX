@@ -79,7 +79,7 @@ jobs:
             NZBreX_*.zip
 
   build_deb_selfhosted:
-    name: Build deb packages on self-hosted
+    - name: Build x64 deb packages on self-hosted
     runs-on: [self-hosted, Linux, X64, ${{ matrix.runner_label }}]
     strategy:
       matrix:
