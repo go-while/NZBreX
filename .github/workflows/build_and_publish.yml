@@ -8,6 +8,7 @@ on:
 jobs:
   build_matrix:
     name: "Build Matrix (All Self-hosted)"
+    runs-on: [self-hosted, ${{ matrix.runner_label }}]
     strategy:
       matrix:
         include:
@@ -72,9 +73,6 @@ jobs:
             os: linux
             arch: amd64
             name: ubuntu-24.04-amd64
-
-    runs-on: [self-hosted, ${{ matrix.runner_label }}]
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
