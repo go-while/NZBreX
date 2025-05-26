@@ -7,32 +7,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build_all_arch:
+    name: Build on ubuntu-latest for all architectures
     runs-on: ubuntu-latest
     strategy:
       matrix:
         os-arch:
-          - name: Linux-amd64
-            os: linux
-            arch: amd64
-          - name: Linux-arm64
-            os: linux
-            arch: arm64
-          - name: Linux-i386
-            os: linux
-            arch: 386
-          - name: macOS-amd64
-            os: darwin
-            arch: amd64
-          - name: macOS-arm64
-            os: darwin
-            arch: arm64
-          - name: Windows-amd64
-            os: windows
-            arch: amd64
-          - name: Windows-i386
-            os: windows
-            arch: 386
+          - { name: "Linux-amd64", os: linux, arch: amd64 }
+          - { name: "Linux-arm64", os: linux, arch: arm64 }
+          - { name: "Linux-i386", os: linux, arch: 386 }
+          - { name: "macOS-amd64", os: darwin, arch: amd64 }
+          - { name: "macOS-arm64", os: darwin, arch: arm64 }
+          - { name: "Windows-amd64", os: windows, arch: amd64 }
+          - { name: "Windows-i386", os: windows, arch: 386 }
+    env:
+      # Common environment variable for versioning.
+      # For release events, use the release tag; otherwise, use the short commit SHA.
+      REF_NAME: ${{ github.event_name == 'release' && github.ref_name || github.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,12 +31,12 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod' # Use the Go version specified in go.mod
+          go-version-file: 'go.mod'
 
       - name: Set Ref Name Variable
+        shell: bash
         run: |
           if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-            # Use Git commit SHA as the reference when manually triggered
             ref_name=${GITHUB_SHA::7}
           else
             ref_name=${{ github.ref_name }}
@@ -53,6 +44,7 @@ jobs:
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
 
       - name: Build for ${{ matrix.os-arch.name }}
+        shell: bash
         run: |
           mkdir -p builds/${{ matrix.os-arch.name }}/usr/bin
           if [ "${{ matrix.os-arch.os }}" == "windows" ]; then
@@ -60,35 +52,100 @@ jobs:
           else
             binary_name=NZBreX
           fi
-          GOARCH=${{ matrix.os-arch.arch }} GOOS=${{ matrix.os-arch.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name
-          if [ ! -f cleanHeaders.txt ]; then
-            echo "cleanHeaders.txt not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.sample.json ]; then
-            echo "provider.sample.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.ygg.json ]; then
-            echo "provider.ygg.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}.zip" builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
-          # Make deb packages for Linux only (all arches)
-          if [ "${{ matrix.os-arch.os }}" == "linux" ]; then
-            mkdir -p builds/${{ matrix.os-arch.name }}/DEBIAN
-            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-            ARCH=${{ matrix.os-arch.arch }}
-            echo "Package: NZBreX" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Version: ${VERSION}" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Architecture: ${ARCH}" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from low retention providers or after takedowns" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.os-arch.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}.deb
-          fi
 
-      - name: Upload Release Assets
-        if: github.event_name == 'release' # Only on release
+          # Build the binary for the given OS/arch.
+          GOARCH=${{ matrix.os-arch.arch }} GOOS=${{ matrix.os-arch.os }} \
+          go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" \
+          -o builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name
+
+          # Ensure required files exist.
+          for file in cleanHeaders.txt provider.sample.json provider.ygg.json; do
+            if [ ! -f "$file" ]; then
+              echo "$file not found! Build cannot continue." >&2
+              exit 1
+            fi
+          done
+
+          # Create a ZIP package with the binary and additional files.
+          zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.name }}.zip" \
+              builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name \
+              cleanHeaders.txt provider.sample.json provider.ygg.json
+
+      - name: Upload Release Assets (ZIP only)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            NZBreX_*.zip
+
+  build_deb_selfhosted:
+    name: Build deb packages on self-hosted (deb10, deb11, deb12)
+    runs-on: [self-hosted, Linux, X64, ${{ matrix.runner_label }}]
+    strategy:
+      matrix:
+        runner_label: [deb10, deb11, deb12]
+    env:
+      # As above, use the release tag or short commit SHA.
+      REF_NAME: ${{ github.event_name == 'release' && github.ref_name || github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set Ref Name Variable
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "release" ]; then
+            ref_name=${GITHUB_SHA::7}
+          else
+            ref_name=${{ github.ref_name }}
+          fi
+          echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
+
+      - name: Build for self-hosted runner ${{ matrix.runner_label }}
+        shell: bash
+        run: |
+          mkdir -p builds/${{ matrix.runner_label }}/usr/bin
+          binary_name=NZBreX
+
+          # Build for linux/amd64.
+          GOARCH=amd64 GOOS=linux go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" \
+              -o builds/${{ matrix.runner_label }}/usr/bin/$binary_name
+
+          # Ensure required files exist.
+          for file in cleanHeaders.txt provider.sample.json provider.ygg.json; do
+            if [ ! -f "$file" ]; then
+              echo "$file not found! Build cannot continue." >&2
+              exit 1
+            fi
+          done
+
+          # Create a ZIP package.
+          zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.runner_label }}.zip" \
+              builds/${{ matrix.runner_label }}/usr/bin/$binary_name \
+              cleanHeaders.txt provider.sample.json provider.ygg.json
+
+          # Build a deb package.
+          mkdir -p builds/${{ matrix.runner_label }}/DEBIAN
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+          ARCH=amd64
+          {
+            echo "Package: NZBreX"
+            echo "Version: ${VERSION}"
+            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>"
+            echo "Architecture: ${ARCH}"
+            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers"
+          } > builds/${{ matrix.runner_label }}/DEBIAN/control
+
+          dpkg-deb --root-owner-group --build builds/${{ matrix.runner_label }} \
+              NZBreX_${{ env.REF_NAME }}-linux-amd64.deb
+
+      - name: Upload Release Assets (ZIP and DEB)
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
