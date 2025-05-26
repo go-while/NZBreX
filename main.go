@@ -25,14 +25,14 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/signal"
+	//"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
+	//"syscall"
 	"time"
 )
 
@@ -110,13 +110,7 @@ func dumpGoroutines() {
 func init() {
 	stop_chan = make(chan struct{}, 1)
 	// Set up signal handler
-	go func() {
-		// 'kill -SIGUSR1 $(pidof nzbrex)' to dump running goroutines
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGUSR1)
-		<-sigs
-		dumpGoroutines()
-	}()
+	setupSigusr1Dump()
 	Counter = NewCounter()
 	Prof = prof.NewProf()
 } // end func init
