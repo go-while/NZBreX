@@ -1,0 +1,13 @@
+
+## SETUP COMMANDS FOR GITHUB ACTIONS SELFHOSTED RUNNERS
+
+# runner-deb10
+./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "XXXTOKENXXX" "deb10,X64" "runner-deb10" "default"
+
+# runner-deb11
+./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "XXXTOKENXXX" "deb11,X64" "runner-deb11" "default"
+
+# runner-deb12
+./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "XXXTOKENXXX" "deb12,X64" "runner-deb12" "default"
+
+
