@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_matrix:
-    name: Build (GitHub-hosted matrix Ubuntu/macOS/Windows)
+    name: "Build (GitHub-hosted matrix: Ubuntu/macOS/Windows)"
     runs-on: ubuntu-latest
     strategy:
       matrix:
