@@ -1,0 +1,12 @@
+# Inside your LXC container (e.g., based on Debian)
+sudo apt update && sudo apt install -y curl tar
+# Create directory for the runner
+mkdir actions-runner && cd actions-runner
+# Download the runner (replace version and URL as needed)
+curl -o actions-runner-linux-x64-2.303.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.303.0/actions-runner-linux-x64-2.303.0.tar.gz
+# Extract the package
+tar xzf actions-runner-linux-x64-2.303.0.tar.gz
+# Configure the runner (use your repository URL and token from GitHub)
+./config.sh --url https://github.com/your-username/your-repository --token YOUR_TOKEN_HERE
+# Run the runner interactively, or set it up as a service
+./run.sh
