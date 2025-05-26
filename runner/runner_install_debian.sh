@@ -16,6 +16,9 @@ GITREL_URL="${GITHUB_URL}/actions/runner/releases/download"
 test $(whoami) != "root" && echo "error: you are not root" && exit 1
 test $(pwd) != "/root" && echo "error: you are not in /root" && exit 1
 
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
 if [ ! -e ".runner_apt_update" ]; then
  echo "preparing machine...."
  apt update -y && apt full-upgrade -y && echo "$(date +%s)" > ".runner_apt_update"
@@ -38,8 +41,8 @@ if [ ! -e ".install_$GO_VER" ]; then
 fi
 
 test -z "$8" && echo "usage: $0 SYSUSER USERDIR GITNAME GITREPO GATOKEN LABEL" && exit 1
-SYSUSER="$1"; USERDIR="$2"; GITNAME="$3"; GITREPO="$4"; GATOKEN="$5"; LABEL="$6"; NAME="$7" GROUP="$8"
-echo "setup SYSUSER=$SYSUSER USERDIR=$USERDIR GITNAME=$GITNAME GITREPO=$GITREPO GATOKEN=$GATOKEN LABEL=$LABEL NAME=$NAME GROUP=$GROUP"
+SYSUSER="$1"; USERDIR="$2"; GITNAME="$3"; GITREPO="$4"; GATOKEN="$5"; LABELS="$6"; NAME="$7" GROUP="$8"
+echo "setup SYSUSER=$SYSUSER USERDIR=$USERDIR GITNAME=$GITNAME GITREPO=$GITREPO GATOKEN=$GATOKEN LABELS=$LABELS NAME=$NAME GROUP=$GROUP"
 if [ ! -e "$USERDIR" ]; then
  useradd --create-home --home-dir "$USERDIR" --shell /bin/bash "$SYSUSER" || exit 2
 fi
@@ -75,9 +78,6 @@ MAILTO=""
 * * * * * /root/cron.sh
 EOF
 systemctl restart cron.service
-
-sudo apt-get update
-sudo apt-get install -y
 
 exit 0
 
