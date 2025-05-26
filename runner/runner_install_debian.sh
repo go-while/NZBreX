@@ -5,6 +5,7 @@
 # 1. run this script twice without arguments: /root/runner_install_debian.sh
 # 2. run this script with arguments /root/runner_install_debian.sh "SYSUSER" "USERDIR" "GITNAME" "GITREPO" "GATOKEN" "LABEL" "NAME" "GROUP"
 
+GO_VER="go1.24.3"
 RUNNER_VERSION="2.324.0"
 RUNNER_FILENAME="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 RUNNER_SHA256="e8e24a3477da17040b4d6fa6d34c6ecb9a2879e800aa532518ec21e49e21d7b4"
@@ -21,10 +22,19 @@ if [ ! -e ".runner_apt_update" ]; then
  test $? -eq 0 && echo "... rebooting in 10 seconds" && sleep 10 && reboot
  exit 10
 elif [ ! -e ".runner_apt_install" ]; then
- apt update -y && apt install -y aptitude curl haveged nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget && echo "$(date +%s)" > ".runner_apt_install" || exit 11
+ apt update -y && apt install -y aptitude build-essential ca-certificates curl git dpkg-dev haveged nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip && echo "$(date +%s)" > ".runner_apt_install" || exit 11
  apt clean
  vnstat --create -i eth0 || vnstat --add -i eth0
  systemctl restart vnstat
+ touch ".runner_apt_install"
+fi
+
+if [ ! -e ".install_$GO_VER" ]; then
+ wget https://go.dev/dl/$GO_VER.linux-amd64.tar.gz -O /tmp/$GO_VER.linux-amd64.tar.gz
+ tar -C /usr/local -xzf /tmp/$GO_VER.linux-amd64.tar.gz
+ echo 'export PATH=$PATH:/usr/local/go/bin' >> "$USERDIR"/.profile
+ #source ~/.profile
+ touch ".install_$GO_VER"
 fi
 
 test -z "$8" && echo "usage: $0 SYSUSER USERDIR GITNAME GITREPO GATOKEN LABEL" && exit 1
@@ -46,6 +56,7 @@ echo "sudo -u \"$SYSUSER\" tmux new-session -d -s \"${NAME}-${SYSUSER}\" \"${USE
 test -e "${USERDIR}"/actions-runner/RUN.sh && echo "created: ${USERDIR}/actions-runner/RUN.sh" || exit 10
 chmod +x "${USERDIR}"/actions-runner/RUN.sh && "${USERDIR}"/actions-runner/RUN.sh || exit 11
 
+
 mkdir -p /var/www/html/ga
 cat <<EOF > /root/cron.sh
 echo -n > /var/www/html/ga/netstats.dat
@@ -64,6 +75,9 @@ MAILTO=""
 * * * * * /root/cron.sh
 EOF
 systemctl restart cron.service
+
+sudo apt-get update
+sudo apt-get install -y
 
 exit 0
 
