@@ -15,6 +15,12 @@ jobs:
           - name: Linux-amd64
             os: linux
             arch: amd64
+          - name: Linux-arm64
+            os: linux
+            arch: arm64
+          - name: Linux-i386
+            os: linux
+            arch: 386
           - name: macOS-amd64
             os: darwin
             arch: amd64
@@ -24,9 +30,9 @@ jobs:
           - name: Windows-amd64
             os: windows
             arch: amd64
-          - name: Linux-arm64
-            os: linux
-            arch: arm64
+          - name: Windows-i386
+            os: windows
+            arch: 386
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,6 +41,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod' # Use the Go version specified in go.mod
+
       - name: Set Ref Name Variable
         run: |
           if [ "$GITHUB_EVENT_NAME" != "release" ]; then
@@ -44,37 +51,46 @@ jobs:
             ref_name=${{ github.ref_name }}
           fi
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
+
       - name: Build for ${{ matrix.os-arch.name }}
         run: |
           mkdir -p builds/${{ matrix.os-arch.name }}/usr/bin
           if [ "${{ matrix.os-arch.os }}" == "windows" ]; then
-            # For Windows, add .exe to the binary name
-            binary_name=nzbrefresh.exe
+            binary_name=NZBreX.exe
           else
-            binary_name=nzbrefresh
+            binary_name=NZBreX
           fi
           GOARCH=${{ matrix.os-arch.arch }} GOOS=${{ matrix.os-arch.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name
-          zip -j "nzbrefresh_${{ env.REF_NAME }}-${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}.zip" builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name provider.json
-          # Makeing deb packages for linux and darwin
-          if [ "${{ matrix.os-arch.os }}" == "linux"  ] || [ "${{ matrix.os-arch.os }}" == "darwin"  ]; then
+          if [ ! -f cleanHeaders.txt ]; then
+            echo "cleanHeaders.txt not found! Build cannot continue." >&2
+            exit 1
+          fi
+          if [ ! -f provider.sample.json ]; then
+            echo "provider.sample.json not found! Build cannot continue." >&2
+            exit 1
+          fi
+          if [ ! -f provider.ygg.json ]; then
+            echo "provider.ygg.json not found! Build cannot continue." >&2
+            exit 1
+          fi
+          zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}.zip" builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
+          # Make deb packages for Linux only (all arches)
+          if [ "${{ matrix.os-arch.os }}" == "linux" ]; then
             mkdir -p builds/${{ matrix.os-arch.name }}/DEBIAN
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-            if [ "${{ matrix.os-arch.os }}" == "darwin" ]; then
-              ARCH=${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}
-            else
-              ARCH=${{ matrix.os-arch.arch }}
-            fi
-            echo "Package: nzbrefresh" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
+            ARCH=${{ matrix.os-arch.arch }}
+            echo "Package: NZBreX" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
             echo "Version: ${VERSION}" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Maintainer: ${{ github.repository_owner }} <${{ github.repository_owner_email }}>" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
+            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Description: NZB Refresh - a cmd line tool to re-upload articles missing from low retention providers or after takedowns" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.os-arch.name }} nzbrefresh_${{ env.REF_NAME }}-${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}.deb
+            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from low retention providers or after takedowns" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
+            dpkg-deb --root-owner-group --build builds/${{ matrix.os-arch.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.os }}-${{ matrix.os-arch.arch }}.deb
           fi
+
       - name: Upload Release Assets
         if: github.event_name == 'release' # Only on release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            nzbrefresh_*.zip
-            nzbrefresh_*.deb
+            NZBreX_*.zip
+            NZBreX_*.deb
