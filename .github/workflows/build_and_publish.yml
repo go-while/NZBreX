@@ -7,39 +7,74 @@ on:
 
 jobs:
   build_matrix:
-    name: "Build (GitHub-hosted matrix: Ubuntu/macOS/Windows)"
-    runs-on: [self-hosted, ubu2204]
+    name: "Build Matrix (All Self-hosted)"
     strategy:
       matrix:
-        os-arch:
-          - name: ubuntu-22.04-amd64
+        include:
+          # Ubuntu 22.04 cross-builds (on ubu2204 runner)
+          - runner_label: ubu2204
             os: linux
             arch: amd64
-            label: ubuntu-22.04
-          - name: ubuntu-22.04-arm64
+            name: ubuntu-22.04-amd64
+          - runner_label: ubu2204
             os: linux
             arch: arm64
-            label: ubuntu-22.04
-          - name: ubuntu-22.04-i386
+            name: ubuntu-22.04-arm64
+          - runner_label: ubu2204
             os: linux
             arch: 386
-            label: ubuntu-22.04
-          - name: macos-amd64
+            name: ubuntu-22.04-i386
+
+          # macOS cross-builds (on ubu2204 runner, emulated/cross-compiled)
+          - runner_label: ubu2204
             os: darwin
             arch: amd64
-            label: macOS
-          - name: macos-arm64
+            name: macos-amd64
+          - runner_label: ubu2204
             os: darwin
             arch: arm64
-            label: macOS
-          - name: windows-amd64
+            name: macos-arm64
+
+          # Windows cross-builds (on ubu2204 runner, emulated/cross-compiled)
+          - runner_label: ubu2204
             os: windows
             arch: amd64
-            label: windows
-          - name: windows-i386
+            name: windows-amd64
+          - runner_label: ubu2204
             os: windows
             arch: 386
-            label: windows
+            name: windows-i386
+
+          # Debian self-hosted builds
+          - runner_label: deb10
+            os: linux
+            arch: amd64
+            name: debian-10-amd64
+          - runner_label: deb11
+            os: linux
+            arch: amd64
+            name: debian-11-amd64
+          - runner_label: deb12
+            os: linux
+            arch: amd64
+            name: debian-12-amd64
+
+          # Ubuntu self-hosted builds
+          - runner_label: ubu2004
+            os: linux
+            arch: amd64
+            name: ubuntu-20.04-amd64
+          - runner_label: ubu2204
+            os: linux
+            arch: amd64
+            name: ubuntu-22.04-amd64
+          - runner_label: ubu2404
+            os: linux
+            arch: amd64
+            name: ubuntu-24.04-amd64
+
+    runs-on: [self-hosted, ${{ matrix.runner_label }}]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -58,15 +93,15 @@ jobs:
           fi
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
 
-      - name: Build for ${{ matrix.os-arch.label }} ${{ matrix.os-arch.arch }}
+      - name: Build ${{ matrix.name }}
         run: |
-          mkdir -p builds/${{ matrix.os-arch.name }}/usr/bin
-          if [ "${{ matrix.os-arch.os }}" == "windows" ]; then
+          mkdir -p builds/${{ matrix.name }}/usr/bin
+          if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
           else
             binary_name=NZBreX
           fi
-          GOARCH=${{ matrix.os-arch.arch }} GOOS=${{ matrix.os-arch.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name
+          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
             exit 1
@@ -79,18 +114,18 @@ jobs:
             echo "provider.ygg.json not found! Build cannot continue." >&2
             exit 1
           fi
-          zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.name }}.zip" builds/${{ matrix.os-arch.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
-          # Only make .deb packages for Linux/Ubuntu
-          if [ "${{ matrix.os-arch.os }}" == "linux" ]; then
-            mkdir -p builds/${{ matrix.os-arch.name }}/DEBIAN
+          zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
+          # Only make .deb packages for Linux
+          if [ "${{ matrix.os }}" == "linux" ]; then
+            mkdir -p builds/${{ matrix.name }}/DEBIAN
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-            ARCH=${{ matrix.os-arch.arch }}
-            echo "Package: NZBreX" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Version: ${VERSION}" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Architecture: ${ARCH}" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.os-arch.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.os-arch.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.os-arch.name }}.deb
+            ARCH=${{ matrix.arch }}
+            echo "Package: NZBreX" > builds/${{ matrix.name }}/DEBIAN/control
+            echo "Version: ${VERSION}" >> builds/${{ matrix.name }}/DEBIAN/control
+            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
+            echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
+            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
+            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
           fi
 
       - name: Upload Release Assets
@@ -100,147 +135,3 @@ jobs:
           files: |
             NZBreX_${{ env.REF_NAME }}-*.zip
             NZBreX_${{ env.REF_NAME }}-*.deb
-
-  build_linux_debian:
-    name: Build for Debian ${{ matrix.debian_version }} (x64) on self-hosted runner
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - ${{ matrix.runner_label }}
-    strategy:
-      matrix:
-        include:
-          - debian_version: deb10
-            runner_label: deb10
-          - debian_version: deb11
-            runner_label: deb11
-          - debian_version: deb12
-            runner_label: deb12
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Set Ref Name Variable
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-            ref_name=${GITHUB_SHA::7}
-          else
-            ref_name=${{ github.ref_name }}
-          fi
-          echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
-
-      - name: Build for Debian ${{ matrix.debian_version }}
-        run: |
-          mkdir -p builds/debian-${{ matrix.debian_version }}/usr/bin
-          binary_name=NZBreX
-          GOARCH=amd64 GOOS=linux go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/debian-${{ matrix.debian_version }}/usr/bin/$binary_name
-          if [ ! -f cleanHeaders.txt ]; then
-            echo "cleanHeaders.txt not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.sample.json ]; then
-            echo "provider.sample.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.ygg.json ]; then
-            echo "provider.ygg.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          zip -j "NZBreX_${{ env.REF_NAME }}-debian-${{ matrix.debian_version }}-amd64.zip" builds/debian-${{ matrix.debian_version }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
-
-          # Make deb package
-          mkdir -p builds/debian-${{ matrix.debian_version }}/DEBIAN
-          VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-          ARCH=amd64
-          echo "Package: NZBreX" >> builds/debian-${{ matrix.debian_version }}/DEBIAN/control
-          echo "Version: ${VERSION}" >> builds/debian-${{ matrix.debian_version }}/DEBIAN/control
-          echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/debian-${{ matrix.debian_version }}/DEBIAN/control
-          echo "Architecture: ${ARCH}" >> builds/debian-${{ matrix.debian_version }}/DEBIAN/control
-          echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/debian-${{ matrix.debian_version }}/DEBIAN/control
-          dpkg-deb --root-owner-group --build builds/debian-${{ matrix.debian_version }} NZBreX_${{ env.REF_NAME }}-debian-${{ matrix.debian_version }}-amd64.deb
-
-      - name: Upload Release Assets
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            NZBreX_${{ env.REF_NAME }}-debian-${{ matrix.debian_version }}-amd64.zip
-            NZBreX_${{ env.REF_NAME }}-debian-${{ matrix.debian_version }}-amd64.deb
-
-  build_linux_ubuntu:
-    name: Build for Ubuntu ${{ matrix.ubuntu_version }} (x64) on self-hosted runner
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64
-      - ${{ matrix.runner_label }}
-    strategy:
-      matrix:
-        include:
-          - ubuntu_version: ubu2004
-            runner_label: ubu2004
-          - ubuntu_version: ubu2204
-            runner_label: ubu2204
-          - ubuntu_version: ubu2404
-            runner_label: ubu2404
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Set Ref Name Variable
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-            ref_name=${GITHUB_SHA::7}
-          else
-            ref_name=${{ github.ref_name }}
-          fi
-          echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
-
-      - name: Build for Ubuntu ${{ matrix.ubuntu_version }}
-        run: |
-          mkdir -p builds/ubuntu-${{ matrix.ubuntu_version }}/usr/bin
-          binary_name=NZBreX
-          GOARCH=amd64 GOOS=linux go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/ubuntu-${{ matrix.ubuntu_version }}/usr/bin/$binary_name
-          if [ ! -f cleanHeaders.txt ]; then
-            echo "cleanHeaders.txt not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.sample.json ]; then
-            echo "provider.sample.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.ygg.json ]; then
-            echo "provider.ygg.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          zip -j "NZBreX_${{ env.REF_NAME }}-ubuntu-${{ matrix.ubuntu_version }}-amd64.zip" builds/ubuntu-${{ matrix.ubuntu_version }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
-
-          # Make deb package
-          mkdir -p builds/ubuntu-${{ matrix.ubuntu_version }}/DEBIAN
-          VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-          ARCH=amd64
-          echo "Package: NZBreX" >> builds/ubuntu-${{ matrix.ubuntu_version }}/DEBIAN/control
-          echo "Version: ${VERSION}" >> builds/ubuntu-${{ matrix.ubuntu_version }}/DEBIAN/control
-          echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/ubuntu-${{ matrix.ubuntu_version }}/DEBIAN/control
-          echo "Architecture: ${ARCH}" >> builds/ubuntu-${{ matrix.ubuntu_version }}/DEBIAN/control
-          echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/ubuntu-${{ matrix.ubuntu_version }}/DEBIAN/control
-          dpkg-deb --root-owner-group --build builds/ubuntu-${{ matrix.ubuntu_version }} NZBreX_${{ env.REF_NAME }}-ubuntu-${{ matrix.ubuntu_version }}-amd64.deb
-
-      - name: Upload Release Assets
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            NZBreX_${{ env.REF_NAME }}-ubuntu-${{ matrix.ubuntu_version }}-amd64.zip
-            NZBreX_${{ env.REF_NAME }}-ubuntu-${{ matrix.ubuntu_version }}-amd64.deb
