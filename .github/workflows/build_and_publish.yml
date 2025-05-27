@@ -397,7 +397,7 @@ jobs:
             PKGARCH="${{ matrix.pkgarch }}"
             OWNER="${{ github.repository_owner }}"
             REPO="${{ github.repository }}"
-            cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
+          cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
 # Maintainer: $OWNER <nzbrex@usenet-server.com>
 pkgname=nzbrex
 pkgver=${PKGVER}
