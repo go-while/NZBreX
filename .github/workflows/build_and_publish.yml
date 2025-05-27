@@ -288,15 +288,15 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-#      - name: Cache Go modules
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.cache/go-build
-#            ~/go/pkg/mod
-#          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-#          restore-keys: |
-#            ${{ runner.os }}-go-
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       # Run tests with race detector for supported platforms
       - name: Run race detector tests (amd64/linux only)
@@ -369,12 +369,12 @@ jobs:
 #            curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}"" https://git.usenet-server.com/upload.php
 #          fi
 
-      - name: Upload binary to PHP server
-        run: |
+#      - name: Upload binary to PHP server
+#        run: |
 #          curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX" -H ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }} https://git.usenet-server.com/upload.php
-          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" -H ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }} http://10.20.0.1:58080/upload.php
-          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" -H ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }} http://10.20.0.1:58080/upload.php
-
+#          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
+#          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
+#
 #      - name: Upload Build Artifacts to github blob storage
 #        uses: actions/upload-artifact@v4
 #        with:
