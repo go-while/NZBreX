@@ -382,6 +382,9 @@ jobs:
           if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" -o -z "${{ matrix.libc }}" ]; then
             mkdir -p builds/${{ matrix.name }}/DEBIAN
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+            if [[ ! $VERSION =~ ^[0-9] ]]; then
+              VERSION="0.0.$(date +%s)-$VERSION"
+            fi
             ARCH=${{ matrix.arch }}
             echo "Package: NZBreX" > builds/${{ matrix.name }}/DEBIAN/control
             echo "Version: ${VERSION}" >> builds/${{ matrix.name }}/DEBIAN/control
