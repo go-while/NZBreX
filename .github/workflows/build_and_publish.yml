@@ -395,7 +395,6 @@ jobs:
           fi
           # PKGBUILD and .pkg.tar.zst generation for Arch Linux
           if [ "${matrix_distro:-}" = "arch" ]; then
-            # Prepare PKGBUILD template
             mkdir -p builds/${{ matrix.name }}/archpkg
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
             PKGVER=$(echo "$VERSION" | sed 's/-/./g')
@@ -403,25 +402,25 @@ jobs:
             OWNER="${{ github.repository_owner }}"
             REPO="${{ github.repository }}"
             cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
-# Maintainer: $OWNER <nzbrex@usenet-server.com>
-pkgname=nzbrex
-pkgver=${PKGVER}
-pkgrel=1
-arch=($PKGARCH)
-pkgdesc="NZBreX - a cmd line tool to re-upload articles missing from providers"
-url="https://github.com/$REPO"
-license=('MIT')
-source=()
-sha256sums=()
-build() {
-  :
-}
-package() {
-  install -Dm755 "\${srcdir}/NZBreX" "\${pkgdir}/usr/bin/NZBreX"
-  install -Dm644 "\${srcdir}/cleanHeaders.txt" "\${pkgdir}/usr/share/nzbrex/cleanHeaders.txt"
-  install -Dm644 "\${srcdir}/provider.sample.json" "\${pkgdir}/usr/share/nzbrex/provider.sample.json"
-  install -Dm644 "\${srcdir}/provider.ygg.json" "\${pkgdir}/usr/share/nzbrex/provider.ygg.json"
-}
+            # Maintainer: $OWNER <nzbrex@usenet-server.com>
+            pkgname=nzbrex
+            pkgver=${PKGVER}
+            pkgrel=1
+            arch=($PKGARCH)
+            pkgdesc="NZBreX - a cmd line tool to re-upload articles missing from providers"
+            url="https://github.com/$REPO"
+            license=('MIT')
+            source=()
+            sha256sums=()
+            build() {
+              :
+            }
+            package() {
+              install -Dm755 "\${srcdir}/NZBreX" "\${pkgdir}/usr/bin/NZBreX"
+              install -Dm644 "\${srcdir}/cleanHeaders.txt" "\${pkgdir}/usr/share/nzbrex/cleanHeaders.txt"
+              install -Dm644 "\${srcdir}/provider.sample.json" "\${pkgdir}/usr/share/nzbrex/provider.sample.json"
+              install -Dm644 "\${srcdir}/provider.ygg.json" "\${pkgdir}/usr/share/nzbrex/provider.ygg.json"
+            }
 EOF
             # Copy sources for PKGBUILD
             cp builds/${{ matrix.name }}/usr/bin/NZBreX builds/${{ matrix.name }}/archpkg/NZBreX
@@ -430,10 +429,11 @@ EOF
             cp provider.ygg.json builds/${{ matrix.name }}/archpkg/provider.ygg.json
             # Try to install base-devel and pacman tools if not present (for self-hosted Ubuntu, use makedepends)
             if ! command -v makepkg &> /dev/null; then
-              sudo apt-get update
-              sudo apt-get install -y fakeroot binutils tar gzip xz zstd
+              #sudo apt-get update
+              #sudo apt-get install -y fakeroot binutils tar gzip xz zstd
               # Download makepkg from Arch's pacman repo or AUR helper if you want to fully automate.
               # For now, use a minimal makepkg.sh - or ask user to build on real Arch if this fails.
+              exit 1
             fi
             # Try to build the Arch package
             cd builds/${{ matrix.name }}/archpkg
