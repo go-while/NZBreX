@@ -439,21 +439,21 @@ EOF
             cd ../../../..
           fi
 
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-${{ matrix.name }}
-          path: |
-            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip
-            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
-            builds/${{ matrix.name }}/archpkg/PKGBUILD
-            builds/${{ matrix.name }}/archpkg/nzbrex-*.pkg.tar.*
-            builds/${{ matrix.name }}/archpkg/NZBreX
-            builds/${{ matrix.name }}/archpkg/cleanHeaders.txt
-            builds/${{ matrix.name }}/archpkg/provider.sample.json
-            builds/${{ matrix.name }}/archpkg/provider.ygg.json
-          retention-days: 1
-          if-no-files-found: warn
+#      - name: Upload Build Artifacts
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: build-${{ matrix.name }}
+#          path: |
+#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip
+#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
+#            builds/${{ matrix.name }}/archpkg/PKGBUILD
+#            builds/${{ matrix.name }}/archpkg/nzbrex-*.pkg.tar.*
+#            builds/${{ matrix.name }}/archpkg/NZBreX
+#            builds/${{ matrix.name }}/archpkg/cleanHeaders.txt
+#            builds/${{ matrix.name }}/archpkg/provider.sample.json
+#            builds/${{ matrix.name }}/archpkg/provider.ygg.json
+#          retention-days: 1
+#          if-no-files-found: warn
 
       - name: Upload Binary (optional)
         uses: actions/upload-artifact@v4
