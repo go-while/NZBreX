@@ -45,43 +45,6 @@ jobs:
             name: alpine-armv7
             libc: musl
 
-          # Arch Linux cross-builds
-          # These will just be generic Linux/amd64,arm64,386,arm binaries with no Arch-specific packaging (which is expected).
-          # That’s fine unless you want to distribute Arch .pkg.tar.zst packages, which would require Arch tools.
-          # This workflow will also generate an Arch PKGBUILD and build a .pkg.tar.zst if possible.
-          # amd64
-          - runner_label: ubu2204
-            os: linux
-            arch: amd64
-            name: archlinux-amd64
-            libc: glibc
-            distro: arch
-            pkgarch: x86_64
-          # arm64
-          - runner_label: ubu2204
-            os: linux
-            arch: arm64
-            name: archlinux-arm64
-            libc: glibc
-            distro: arch
-            pkgarch: aarch64
-          # i386
-          - runner_label: ubu2204
-            os: linux
-            arch: 386
-            name: archlinux-i386
-            libc: glibc
-            distro: arch
-            pkgarch: i686
-          # armv7
-          - runner_label: ubu2204
-            os: linux
-            arch: arm
-            name: archlinux-armv7
-            libc: glibc
-            distro: arch
-            pkgarch: armv7h
-
           # FreeBSD cross-builds
           # amd64
           - runner_label: ubu2204
