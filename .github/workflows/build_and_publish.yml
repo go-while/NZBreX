@@ -419,7 +419,7 @@ package() {
   install -Dm644 "\${srcdir}/provider.sample.json" "\${pkgdir}/usr/share/nzbrex/provider.sample.json"
   install -Dm644 "\${srcdir}/provider.ygg.json" "\${pkgdir}/usr/share/nzbrex/provider.ygg.json"
 }
-            EOF
+EOF
             # Copy sources for PKGBUILD
             cp builds/${{ matrix.name }}/usr/bin/NZBreX builds/${{ matrix.name }}/archpkg/NZBreX
             cp cleanHeaders.txt builds/${{ matrix.name }}/archpkg/cleanHeaders.txt
