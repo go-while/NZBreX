@@ -397,6 +397,7 @@ jobs:
             PKGVER=$(echo "$VERSION" | sed 's/-/./g')
             PKGARCH="${{ matrix.pkgarch }}"
             OWNER="${{ github.repository_owner }}"
+            REPO="${{ github.repository }}"
             cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
 # Maintainer: $OWNER <nzbrex@usenet-server.com>
 pkgname=nzbrex
@@ -404,8 +405,8 @@ pkgver=${PKGVER}
 pkgrel=1
 arch=($PKGARCH)
 pkgdesc="NZBreX - a cmd line tool to re-upload articles missing from providers"
-url="https://github.com/${{ github.repository }}"
-license=('custom')
+url="https://github.com/$REPO"
+license=('MIT')
 source=()
 sha256sums=()
 build() {
