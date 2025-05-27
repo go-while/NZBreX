@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_matrix:
-    name: "Build Matrix (All Self-hosted)"
+    name: "NZBReX"
     runs-on:
       - self-hosted
       - ${{ matrix.runner_label }}
