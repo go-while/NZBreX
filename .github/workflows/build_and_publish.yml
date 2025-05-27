@@ -378,6 +378,7 @@ jobs:
           zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
+          matrix_distro="${{ matrix.distro }}"
           if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" -o -z "${{ matrix.libc }}" ]; then
             mkdir -p builds/${{ matrix.name }}/DEBIAN
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
@@ -390,7 +391,7 @@ jobs:
             dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
           fi
           # PKGBUILD and .pkg.tar.zst generation for Arch Linux
-          if [ "${{ matrix.distro:- }}" = "arch" ]; then
+          if [ "${matrix_distro:-}" = "arch" ]; then
             # Prepare PKGBUILD template
             mkdir -p builds/${{ matrix.name }}/archpkg
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
