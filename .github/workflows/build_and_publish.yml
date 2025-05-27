@@ -397,7 +397,7 @@ jobs:
             PKGARCH="${{ matrix.pkgarch }}"
             OWNER="${{ github.repository_owner }}"
             REPO="${{ github.repository }}"
-          cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
+            cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
 # Maintainer: $OWNER <nzbrex@usenet-server.com>
 pkgname=nzbrex
 pkgver=${PKGVER}
@@ -418,6 +418,7 @@ package() {
   install -Dm644 "\${srcdir}/provider.ygg.json" "\${pkgdir}/usr/share/nzbrex/provider.ygg.json"
 }
 EOF
+          fi
             # Copy sources for PKGBUILD
             cp builds/${{ matrix.name }}/usr/bin/NZBreX builds/${{ matrix.name }}/archpkg/NZBreX
             cp cleanHeaders.txt builds/${{ matrix.name }}/archpkg/cleanHeaders.txt
