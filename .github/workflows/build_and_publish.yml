@@ -376,18 +376,19 @@ jobs:
             exit 1
           fi
           zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
-          # Only make .deb packages for Linux with glibc
-          if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc:-glibc}" = "glibc" ]; then
-            mkdir -p builds/${{ matrix.name }}/DEBIAN
-            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-            ARCH=${{ matrix.arch }}
-            echo "Package: NZBreX" > builds/${{ matrix.name }}/DEBIAN/control
-            echo "Version: ${VERSION}" >> builds/${{ matrix.name }}/DEBIAN/control
-            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
-            echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
-            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
-          fi
+
+        # Only make .deb packages for Linux with glibc
+        if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc:-glibc}" = "glibc" ]; then
+          mkdir -p builds/${{ matrix.name }}/DEBIAN
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+          ARCH=${{ matrix.arch }}
+          echo "Package: NZBreX" > builds/${{ matrix.name }}/DEBIAN/control
+          echo "Version: ${VERSION}" >> builds/${{ matrix.name }}/DEBIAN/control
+          echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
+          echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
+          echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
+          dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
+        fi
 
           # PKGBUILD and .pkg.tar.zst generation for Arch Linux
           if [ "${{ matrix.distro:- }}" = "arch" ]; then
@@ -399,25 +400,25 @@ jobs:
             OWNER="${{ github.repository_owner }}"
             REPO="${{ github.repository }}"
             cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
-            # Maintainer: $OWNER <nzbrex@usenet-server.com>
-            pkgname=nzbrex
-            pkgver=${PKGVER}
-            pkgrel=1
-            arch=($PKGARCH)
-            pkgdesc="NZBreX - a cmd line tool to re-upload articles missing from providers"
-            url="https://github.com/$REPO"
-            license=('MIT')
-            source=()
-            sha256sums=()
-            build() {
-              :
-            }
-            package() {
-              install -Dm755 "\${srcdir}/NZBreX" "\${pkgdir}/usr/bin/NZBreX"
-              install -Dm644 "\${srcdir}/cleanHeaders.txt" "\${pkgdir}/usr/share/nzbrex/cleanHeaders.txt"
-              install -Dm644 "\${srcdir}/provider.sample.json" "\${pkgdir}/usr/share/nzbrex/provider.sample.json"
-              install -Dm644 "\${srcdir}/provider.ygg.json" "\${pkgdir}/usr/share/nzbrex/provider.ygg.json"
-            }
+# Maintainer: $OWNER <nzbrex@usenet-server.com>
+pkgname=nzbrex
+pkgver=${PKGVER}
+pkgrel=1
+arch=($PKGARCH)
+pkgdesc="NZBreX - a cmd line tool to re-upload articles missing from providers"
+url="https://github.com/$REPO"
+license=('MIT')
+source=()
+sha256sums=()
+build() {
+  :
+}
+package() {
+  install -Dm755 "\${srcdir}/NZBreX" "\${pkgdir}/usr/bin/NZBreX"
+  install -Dm644 "\${srcdir}/cleanHeaders.txt" "\${pkgdir}/usr/share/nzbrex/cleanHeaders.txt"
+  install -Dm644 "\${srcdir}/provider.sample.json" "\${pkgdir}/usr/share/nzbrex/provider.sample.json"
+  install -Dm644 "\${srcdir}/provider.ygg.json" "\${pkgdir}/usr/share/nzbrex/provider.ygg.json"
+}
             EOF
             # Copy sources for PKGBUILD
             cp builds/${{ matrix.name }}/usr/bin/NZBreX builds/${{ matrix.name }}/archpkg/NZBreX
