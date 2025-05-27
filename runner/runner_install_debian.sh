@@ -1,4 +1,8 @@
 #!/bin/sh
+#
+# WARNING !
+# This Script: OVERWRITES SYSTEM STUFF! USE /AT YOUR OWN RISK AND/ ONLY ON A NEWLY INSTALLED MACHINE!
+#
 # Inside your LXC/QEMU/KVM container (e.g., based on Debian 10, 11, 12 and Ubuntu 20.04, 22.04, 24.04)
 # install requires:
 # 0. wget https://raw.githubusercontent.com/go-while/NZBreX/refs/heads/8-rewrite-workflow-for-nzbrex/runner/runner_install_debian.sh -O runner_install_debian.sh
