@@ -288,15 +288,15 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+#      - name: Cache Go modules
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            ~/.cache/go-build
+#            ~/go/pkg/mod
+#          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+#          restore-keys: |
+#            ${{ runner.os }}-go-
 
       # Run tests with race detector for supported platforms
       - name: Run race detector tests (amd64/linux only)
@@ -357,7 +357,25 @@ jobs:
             dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
           fi
 
-#      - name: Upload Build Artifacts
+#      - name: Upload artifact to PHP server
+#        run: |
+#          curl -F "file=@path/to/artifact.zip" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" https://git.usenet-server.com/upload.php
+
+#      - name: Upload binary to PHP server
+#        run: |
+#          if [ "${{ matrix.os }}" = "windows" ]; then
+#            curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX.exe" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}"" https://git.usenet-server.com/upload.php
+#          else
+#            curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}"" https://git.usenet-server.com/upload.php
+#          fi
+
+      - name: Upload binary to PHP server
+        run: |
+#          curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX" -H ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }} https://git.usenet-server.com/upload.php
+          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" -H ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }} http://10.20.0.1:58080/upload.php
+          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" -H ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }} http://10.20.0.1:58080/upload.php
+
+#      - name: Upload Build Artifacts to github blob storage
 #        uses: actions/upload-artifact@v4
 #        with:
 #          name: build-${{ matrix.name }}
@@ -373,7 +391,7 @@ jobs:
 #          retention-days: 1
 #          if-no-files-found: warn
 
-#      - name: Upload Binary (optional)
+#      - name: Upload Binary to github blob storage
 #        uses: actions/upload-artifact@v4
 #        with:
 #          name: binary-${{ matrix.name }}
@@ -388,5 +406,3 @@ jobs:
 #          files: |
 #            NZBreX_${{ env.REF_NAME }}-*.zip
 #            NZBreX_${{ env.REF_NAME }}-*.deb
-#            builds/*/archpkg/nzbrex-*.pkg.tar.*
-#            builds/*/archpkg/PKGBUILD
