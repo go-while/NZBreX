@@ -5,9 +5,13 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  packages: read
+
 jobs:
   build_matrix:
-    name: "NZBReX"
+    name: Build ${{ matrix.name }}
     runs-on:
       - self-hosted
       - ${{ matrix.runner_label }}
@@ -15,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        # Alpine Linux cross-builds (musl)
+          # Alpine Linux cross-builds (musl)
           - runner_label: ubu2204
             os: linux
             arch: amd64
@@ -36,6 +40,57 @@ jobs:
             arch: arm
             name: alpine-armv7
             libc: musl
+
+          # FreeBSD cross-builds
+          - runner_label: ubu2204
+            os: freebsd
+            arch: amd64
+            name: freebsd-amd64
+          - runner_label: ubu2204
+            os: freebsd
+            arch: 386
+            name: freebsd-i386
+          - runner_label: ubu2204
+            os: freebsd
+            arch: arm
+            name: freebsd-armv7
+          - runner_label: ubu2204
+            os: freebsd
+            arch: arm64
+            name: freebsd-arm64
+
+          # OpenBSD cross-builds
+          - runner_label: ubu2204
+            os: openbsd
+            arch: amd64
+            name: openbsd-amd64
+          - runner_label: ubu2204
+            os: openbsd
+            arch: 386
+            name: openbsd-i386
+          - runner_label: ubu2204
+            os: openbsd
+            arch: arm64
+            name: openbsd-arm64
+
+          # NetBSD cross-builds
+          - runner_label: ubu2204
+            os: netbsd
+            arch: amd64
+            name: netbsd-amd64
+          - runner_label: ubu2204
+            os: netbsd
+            arch: 386
+            name: netbsd-i386
+          - runner_label: ubu2204
+            os: netbsd
+            arch: arm
+            name: netbsd-armv7
+          - runner_label: ubu2204
+            os: netbsd
+            arch: arm64
+            name: netbsd-arm64
+
           # macOS cross-builds
           - runner_label: ubu2204
             os: darwin
@@ -45,7 +100,7 @@ jobs:
             os: darwin
             arch: arm64
             name: macos-arm64
-          # No i386 for macOS, Go does not support darwin/386
+
           # Windows cross-builds
           - runner_label: ubu2204
             os: windows
@@ -59,118 +114,165 @@ jobs:
             os: windows
             arch: 386
             name: windows-i386
+
           # Debian 10-12 self-hosted builds amd64
           - runner_label: deb10
             os: linux
             arch: amd64
             name: debian-10-amd64
+            libc: glibc
           - runner_label: deb11
             os: linux
             arch: amd64
             name: debian-11-amd64
+            libc: glibc
           - runner_label: deb12
             os: linux
             arch: amd64
             name: debian-12-amd64
+            libc: glibc
+
           # Debian 10-12 self-hosted builds arm64
           - runner_label: deb10
             os: linux
             arch: arm64
             name: debian-10-arm64
+            libc: glibc
           - runner_label: deb11
             os: linux
             arch: arm64
             name: debian-11-arm64
+            libc: glibc
           - runner_label: deb12
             os: linux
             arch: arm64
             name: debian-12-arm64
+            libc: glibc
+
           # Debian 10-12 self-hosted builds 32-bit ARM
           - runner_label: deb10
             os: linux
             arch: arm
             name: debian-10-armv7
+            libc: glibc
           - runner_label: deb11
             os: linux
             arch: arm
             name: debian-11-armv7
+            libc: glibc
           - runner_label: deb12
             os: linux
             arch: arm
             name: debian-12-armv7
+            libc: glibc
+
           # Debian 10-12 self-hosted builds i386
           - runner_label: deb10
             os: linux
             arch: 386
             name: debian-10-i386
+            libc: glibc
           - runner_label: deb11
             os: linux
             arch: 386
             name: debian-11-i386
+            libc: glibc
           - runner_label: deb12
             os: linux
             arch: 386
             name: debian-12-i386
+            libc: glibc
+
           # Ubuntu 20.04 - 24.04 self-hosted builds amd64
           - runner_label: ubu2004
             os: linux
             arch: amd64
             name: ubuntu-20.04-amd64
+            libc: glibc
           - runner_label: ubu2204
             os: linux
             arch: amd64
             name: ubuntu-22.04-amd64
+            libc: glibc
           - runner_label: ubu2404
             os: linux
             arch: amd64
             name: ubuntu-24.04-amd64
-        # Ubuntu 20.04 - 24.04 self-hosted builds arm64
+            libc: glibc
+
+          # Ubuntu 20.04 - 24.04 self-hosted builds arm64
           - runner_label: ubu2004
             os: linux
             arch: arm64
             name: ubuntu-20.04-arm64
+            libc: glibc
           - runner_label: ubu2204
             os: linux
             arch: arm64
             name: ubuntu-22.04-arm64
+            libc: glibc
           - runner_label: ubu2404
             os: linux
             arch: arm64
             name: ubuntu-24.04-arm64
-        # Ubuntu 20.04 - 24.04 self-hosted builds 32-bit ARM
+            libc: glibc
+
+          # Ubuntu 20.04 - 24.04 self-hosted builds 32-bit ARM
           - runner_label: ubu2004
             os: linux
             arch: arm
             name: ubuntu-20.04-armv7
+            libc: glibc
           - runner_label: ubu2204
             os: linux
             arch: arm
             name: ubuntu-22.04-armv7
+            libc: glibc
           - runner_label: ubu2404
             os: linux
             arch: arm
             name: ubuntu-24.04-armv7
-        # Ubuntu 20.04 - 24.04 self-hosted builds i386
+            libc: glibc
+
+          # Ubuntu 20.04 - 24.04 self-hosted builds i386
           - runner_label: ubu2004
             os: linux
             arch: 386
             name: ubuntu-20.04-i386
+            libc: glibc
           - runner_label: ubu2204
             os: linux
             arch: 386
             name: ubuntu-22.04-i386
+            libc: glibc
           - runner_label: ubu2404
             os: linux
             arch: 386
             name: ubuntu-24.04-i386
+            libc: glibc
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Go
+      - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      # Optional: Run tests before build (uncomment if desired)
+      # - name: Run tests
+      #   run: go test ./...
 
       - name: Set Ref Name Variable
         run: |
@@ -183,6 +285,7 @@ jobs:
 
       - name: Build ${{ matrix.name }}
         run: |
+          set -euo pipefail
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
@@ -203,8 +306,8 @@ jobs:
             exit 1
           fi
           zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
-          # Only make .deb packages for Linux
-          if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" != "musl" ]; then
+          # Only make .deb packages for Linux with glibc
+          if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" ]; then
             mkdir -p builds/${{ matrix.name }}/DEBIAN
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
             ARCH=${{ matrix.arch }}
@@ -215,6 +318,7 @@ jobs:
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
             dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
           fi
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -222,13 +326,17 @@ jobs:
           path: |
             NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip
             NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
+          retention-days: 1
           if-no-files-found: warn
+
       - name: Upload Binary (optional)
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.name }}
           path: builds/${{ matrix.name }}/usr/bin/*
+          retention-days: 1
           if-no-files-found: warn
+
       - name: Upload Release Assets
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
