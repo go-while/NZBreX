@@ -396,8 +396,9 @@ jobs:
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
             PKGVER=$(echo "$VERSION" | sed 's/-/./g')
             PKGARCH="${{ matrix.pkgarch }}"
+            OWNER="${{ github.repository_owner }}"
             cat > builds/${{ matrix.name }}/archpkg/PKGBUILD <<EOF
-# Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>
+# Maintainer: $OWNER <nzbrex@usenet-server.com>
 pkgname=nzbrex
 pkgver=${PKGVER}
 pkgrel=1
