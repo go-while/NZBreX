@@ -377,7 +377,8 @@ jobs:
           fi
           zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name cleanHeaders.txt provider.sample.json provider.ygg.json
           # Only make .deb packages for Linux with glibc
-          if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc:-glibc}" = "glibc" ]; then
+          matrix_libc="${{ matrix.libc }}"
+          if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" -o -z "${{ matrix.libc }}" ]; then
             mkdir -p builds/${{ matrix.name }}/DEBIAN
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
             ARCH=${{ matrix.arch }}
