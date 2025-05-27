@@ -335,15 +335,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      # Optional: Run tests with race detector for supported platforms
-      # Go’s race detector only works on amd64/linux and some others. If you want, you could add a separate test matrix with -race enabled for those.
+      # Run tests with race detector for supported platforms
       - name: Run race detector tests (amd64/linux only)
         if: matrix.os == 'linux' && matrix.arch == 'amd64'
         run: go test -race ./...
 
-      # Optional: Run tests before build (uncomment if desired)
-      # - name: Run tests
-      #   run: go test ./...
+      - name: Run normal tests (other platforms)
+        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
+        run: go test ./...
 
       - name: Set Ref Name Variable
         run: |
