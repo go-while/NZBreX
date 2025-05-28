@@ -25,11 +25,11 @@ jobs:
     name: GoReleaser Test
     runs-on: [self-hosted, ubu2204-gor] # or whatever your dedicated runner label is
 
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
-      GITHUB_REPOSITORY: ${{ github.repository }}
-      GITHUB_REF_NAME: ${{ github.ref_name }}
+#    env:
+#      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#      BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
+#      GITHUB_REPOSITORY: ${{ github.repository }}
+#      GITHUB_REF_NAME: ${{ github.ref_name }}
 
     steps:
       - name: Clean build directory
@@ -60,6 +60,7 @@ jobs:
       - name: Post-upload artifacts
         run: .goreleaser/post_upload_GaRuS.sh
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
