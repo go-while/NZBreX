@@ -280,6 +280,9 @@ jobs:
             libc: glibc
 
     steps:
+      - name: Clean build directory
+        run: rm -rf build dist
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -293,6 +296,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: false
+          # if your self-hosted runners are not reset (i.e., they persist their workspace and their Go module cache between jobs),
+          # using the GitHub Actions dependency cache provides little to no benefit.
+          # In fact, it can sometimes cause issues (like stale or conflicting cache states)
+          # and may slow down your pipeline due to unnecessary cache save/restore steps.
 
 #      - name: Cache Go modules
 #        uses: actions/cache@v4
@@ -484,5 +492,7 @@ jobs:
 #        if: runner.os == 'Linux' && runner.name == 'self-hosted'
 #        run: rm -rf "$GITHUB_WORKSPACE"/*
 
+      - name: Clean build directory
+        run: rm -rf build dist
 
 
