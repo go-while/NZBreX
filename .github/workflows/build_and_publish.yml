@@ -330,6 +330,9 @@ jobs:
 #          restore-keys: |
 #            ${{ runner.os }}-go-
 
+      - name: "Restore go cache"
+        run: runner/go-cache-restore.sh
+
       # Run tests with race detector for supported platforms
       - name: Run race detector tests (amd64/linux only)
         if: matrix.os == 'linux' && matrix.arch == 'amd64'
@@ -486,6 +489,9 @@ jobs:
 #      - name: Clean workspace (self-hosted only)
 #        if: runner.os == 'Linux' && runner.name == 'self-hosted'
 #        run: rm -rf "$GITHUB_WORKSPACE"/*
+
+      - name: "Backup go cache"
+        run: runner/go-cache-backup.sh
 
       - name: "@End Clean directory"
         run: |

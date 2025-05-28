@@ -50,6 +50,9 @@ jobs:
       #     sudo apt-get update
       #     sudo apt-get install -y musl-tools zip curl dpkg-dev
 
+      - name: "Restore go cache"
+        run: runner/go-cache-restore.sh
+
       - name: Run GoReleaser (Test Build)
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -68,6 +71,9 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SHA7: ${{ env.GITHUB_SHA7 }}
           COMPILER: "GOR"
+
+      - name: "Backup go cache"
+        run: runner/go-cache-backup.sh
 
       - name: "@End Clean directory"
         run: |
