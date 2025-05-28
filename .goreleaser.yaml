@@ -97,6 +97,7 @@ builds:
     main: .
     goos: [windows]
     goarch: [amd64]
+    binary: nzbrex_amd64.exe
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -106,6 +107,7 @@ builds:
     main: .
     goos: [windows]
     goarch: [386]
+    binary: nzbrex_i386.exe
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -115,6 +117,7 @@ builds:
     main: .
     goos: [windows]
     goarch: [arm64]
+    binary: nzbrex_arm64.exe
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=1         # Or whatever is needed
