@@ -489,6 +489,9 @@ jobs:
 
       - name: "@End Cleanup work directory"
         run: |
+          echo "pwd=$(pwd)";
+          du -hs ${{ github.workspace }}
           ls -lha . ${{ github.workspace }}/
+          echo "deleting workspace"
           rm -rfv ${{ github.workspace }}/
           ls -lha .
