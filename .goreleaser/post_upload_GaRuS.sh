@@ -9,12 +9,12 @@ upload_with_retry() {
   local delay=30
   while [ $attempt -le $max_attempts ]; do
     echo "Upload attempt $attempt for $file..."
-    if curl -f -F "file=@$file" \
+    if curl --silent -f -F "file=@$file" \
          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
          http://10.20.0.1:58080/upload.php; then
-      echo "Upload succeeded for $file"
+      echo "Upload succeeded for $file size=$(du -b $file)"
       return 0
     else
       echo "Upload failed for $file. Retrying in $delay seconds..."
