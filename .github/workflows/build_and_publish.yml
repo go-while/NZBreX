@@ -395,7 +395,7 @@ jobs:
           fi
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-          zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}_${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          zip -j "NZBreX_${VERSION}-${SHA7}_${OS}-${ARCH}_${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
 
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
@@ -412,8 +412,7 @@ jobs:
             echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
-            #dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.deb
+            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.deb
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
@@ -446,7 +445,7 @@ jobs:
 
           set -e
           for ext in zip deb; do
-            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.${ext}"
+            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
                 sha="sha${algo}sum"
@@ -457,63 +456,6 @@ jobs:
               upload_with_retry "$file"
             fi
           done
-
-
-#          set -e
-#          for ext in zip deb; do
-#            file="NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.${ext}"
-#            if [ -e "$file" ]; then
-#              for algo in 256 512; do
-#                sha="sha${algo}sum"
-#                $sha "$file" > "$file.$sha"
-#                curl -f -F "file=@$file.$sha" \
-#                  -H "X-Git-Repo: ${{ github.repository }}" \
-#                  -H "X-Git-Ref: ${{ env.REF_NAME }}" \
-#                  -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
-#                  http://10.20.0.1:58080/upload.php
-#              done
-#              curl -f -F "file=@$file" \
-#                -H "X-Git-Repo: ${{ github.repository }}" \
-#                -H "X-Git-Ref: ${{ env.REF_NAME }}" \
-#                -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
-#                http://10.20.0.1:58080/upload.php
-#            fi
-#          done
-
-#          if [ -e "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" ]; then
-#            sha256sum "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" > "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip.sha256sum"
-#            sha512sum "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" > "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip.sha512sum"
-#            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-#            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip.sha256sum" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-#            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip.sha512sum" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-#          fi
-#          if [ -e "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" ]; then
-#            sha256sum "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" > "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb.sha256sum"
-#            sha512sum "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" > "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb.sha512sum"
-#            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-#            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb.sha256sum" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-#            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb.sha512sum" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-#          fi
-
-#      - name: Upload Build Artifacts to github blob storage
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: build-${{ matrix.name }}
-#          path: |
-#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip
-#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
-#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip.sha256sum
-#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb.sha256sum
-#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip.sha512sum
-#            NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb.sha512sum
-#            builds/${{ matrix.name }}/archpkg/PKGBUILD
-#            builds/${{ matrix.name }}/archpkg/nzbrex-*.pkg.tar.*
-#            builds/${{ matrix.name }}/archpkg/NZBreX
-#            builds/${{ matrix.name }}/archpkg/cleanHeaders.txt
-#            builds/${{ matrix.name }}/archpkg/provider.sample.json
-#            builds/${{ matrix.name }}/archpkg/provider.ygg.json
-#          retention-days: 1
-#          if-no-files-found: warn
 
 #      - name: Upload Binary to github blob storage
 #        uses: actions/upload-artifact@v4
@@ -528,8 +470,8 @@ jobs:
 #        uses: softprops/action-gh-release@v2
 #        with:
 #          files: |
-#            NZBreX_${{ env.REF_NAME }}-*.zip
-#            NZBreX_${{ env.REF_NAME }}-*.deb
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.zip
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.deb
 
 #      #  $GITHUB_WORKSPACE only covers the checked-out project for the current job.
 #      #  It does not include global caches or other directories outside the current job’s workspace (like ~/.cache, /tmp, or custom directories).
