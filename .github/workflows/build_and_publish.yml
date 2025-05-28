@@ -397,6 +397,7 @@ jobs:
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           #zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
           zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
           matrix_distro="${{ matrix.distro }}"
@@ -412,7 +413,8 @@ jobs:
             echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
+            #dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb
+            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}.deb
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
@@ -445,7 +447,8 @@ jobs:
 
           set -e
           for ext in zip deb; do
-            file="NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.${ext}"
+            #file="NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.${ext}"
+            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
                 sha="sha${algo}sum"
