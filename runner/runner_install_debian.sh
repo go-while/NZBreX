@@ -31,7 +31,7 @@ if [ ! -e ".runner_apt_update" ]; then
  test $? -eq 0 && echo "... rebooting in 10 seconds" && sleep 10 && reboot
  exit 10
 elif [ ! -e ".runner_apt_install" ]; then
- apt update -y && apt install -y aptitude build-essential ca-certificates curl git dpkg-dev haveged nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip && echo "$(date +%s)" > ".runner_apt_install" || exit 11
+ apt update -y && apt install -y aptitude build-essential ca-certificates curl git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip && echo "$(date +%s)" > ".runner_apt_install" || exit 11
  apt clean
  touch ".runner_apt_install"
 fi
@@ -51,8 +51,8 @@ chown -R "$SYSUSER" "$USERDIR" || exit 8
 sudo -u "$SYSUSER" ./config.sh --url "https://github.com/${GITNAME}/${GITREPO}" --token "${GATOKEN}" --labels "${LABELS}" --name "${NAME}" --runnergroup "${GROUP}" --replace --unattended || exit 9
 echo -n > /root/.bash_history
 rm -v "$RUNNER_FILENAME"
-echo "sudo -u \"$SYSUSER\" tmux new-session -d -s \"${NAME}-${SYSUSER}\" \"${USERDIR}\"/actions-runner/run.sh" > "${USERDIR}"/actions-runner/RUN.sh
-test -e "${USERDIR}"/actions-runner/RUN.sh && echo "created: ${USERDIR}/actions-runner/RUN.sh" || exit 10
+echo "sudo -u \"$SYSUSER\" tmux new-session -d -s \"${NAME}-${SYSUSER}\" \"${USERDIR}/actions-runner/run.sh\"" > "${USERDIR}/actions-runner/RUN.sh"
+test -e "${USERDIR}/actions-runner/RUN.sh" && echo "created: ${USERDIR}/actions-runner/RUN.sh" || exit 10
 chmod +x "${USERDIR}"/actions-runner/RUN.sh && "${USERDIR}"/actions-runner/RUN.sh || exit 11
 ## print runner config
 echo "Config: ${USERDIR}"/actions-runner/.runner
@@ -75,6 +75,11 @@ cat <<EOF > /var/spool/cron/crontabs/root
 MAILTO=""
 @reboot /home/$SYSUSER/actions-runner/RUN.sh
 * * * * * /root/cron.sh
+EOF
+
+cat <<EOF > "/var/spool/cron/crontabs/$SYSUSER"
+MAILTO=""
+@reboot /home/$SYSUSER/actions-runner/run.sh
 EOF
 systemctl restart cron.service
 
