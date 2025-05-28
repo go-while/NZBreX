@@ -22,6 +22,7 @@ HASH=$(echo -n "$CACHE_KEY" | sha256sum | awk '{print $1}')
 TARFILE="cache-${HASH}.tgz"
 CACHEDIR="${HOME}/cache_backups"
 
+START=$(date +%s)
 if [[ -f "$CACHEDIR/$TARFILE" ]]; then
  echo "Restoring ~/.cache/go-build and ~/go/pkg/mod from $CACHEDIR/$TARFILE ..."
  tar xzf "$CACHEDIR/$TARFILE" -C "$HOME"
@@ -33,5 +34,9 @@ if [[ -f "$CACHEDIR/$TARFILE" ]]; then
  echo -n "Cache restored. "
  rm -fv "$CACHEDIR/$TARFILE"
 else
-  echo "No Cache file found in $CACHEDIR/$TARFILE"
+  echo "$0: cache-miss KEY=$KEY HASH=$HASH"
 fi
+END=$(date +%s)
+let took="END-START"
+echo "$0: took $took seconds"
+exit 0

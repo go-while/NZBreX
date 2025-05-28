@@ -25,18 +25,27 @@ TARFILE="cache-${HASH}.tgz"
 DESTDIR="${HOME}/cache_backups"
 
 mkdir -p "$DESTDIR"
-echo "Packing ~/.cache/go-build and ~/go/pkg/mod into $DESTDIR/$TARFILE ..."
-
 if [[ -f "$DESTDIR/$TARFILE" ]]; then
+ echo -n "$0: File exists "
  rm -fv "$DESTDIR/$TARFILE"
 fi
-
+echo "Packing ~/.cache/go-build and ~/go/pkg/mod into $DESTDIR/$TARFILE ..."
+START=$(date +%s)
 tar czf "$DESTDIR/$TARFILE" -C "$HOME" .cache/go-build go/pkg/mod
  if [[ $? -gt 0 ]]; then
-  echo -n "Error packing cache file '$DESTDIR/$TARFILE': "
+  echo -n "$0: Error packing "
   rm -fv "$DESTDIR/$TARFILE"
   exit 1
  fi
-echo "Cache tarball created: $DESTDIR/$TARFILE"
+echo "Cache tarball created: $(du -h $DESTDIR/$TARFILE)"
+END=$(date +%s)
+let took="END-START"
+echo "$0: took $took seconds"
 
+echo "Deleting any old cache files..."
 find "$DESTDIR" -type f -mtime +3 -print -delete
+
+END=$(date +%s)
+let took="END-START"
+echo "restore took: $took seconds"
+exit 0
