@@ -74,7 +74,6 @@ changelog:
 nfpms:
   - id: deb
     formats: [deb]
-    ids: [linux-glibc, linux-musl]
     vendor: NZBreX
     maintainer: "NZBreX <nzbrex@usenet-server.com>"
     description: "NZBreX - a cmd line tool to re-upload articles missing from providers"
@@ -88,8 +87,6 @@ release:
   github:
     owner: go-while
     name: NZBreX
-    draft: false
-    prerelease: auto
 
 hooks:
   post:
