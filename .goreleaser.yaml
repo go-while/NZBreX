@@ -44,21 +44,21 @@ builds:
 #      - CGO_ENABLED=0
 
 
-#  # Linux musl (Alpine) targets
-#  - id: linux-musl
-#    main: .
-#    goos: [linux]
-#    goarch: [amd64]
-#    #goarch: [amd64, 386, arm, arm64]
-#    #goarm: [6, 7]
-#    goarm: [7]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=1
-#      - CC=musl-gcc
-#    binary: NZBreX
-#    flags:
-#      - -tags=musl
+  # Linux musl (Alpine) targets
+  - id: linux-musl
+    main: .
+    goos: [linux]
+    goarch: [amd64]
+    #goarch: [amd64, 386, arm, arm64]
+    #goarm: [6, 7]
+    #goarm: [7]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=1
+      - CC=musl-gcc
+    binary: NZBreX
+    flags:
+      - -tags=musl
 
   # BSD targets
   - id: bsd
