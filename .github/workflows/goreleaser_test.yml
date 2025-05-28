@@ -16,42 +16,249 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: debian-10
-            runner: deb10
-            os_name: debian
-            os_version: "10"
-          - id: debian-11
-            runner: deb11
-            os_name: debian
-            os_version: "11"
-          - id: debian-12
-            runner: deb12
-            os_name: debian
-            os_version: "12"
-          - id: ubuntu-20.04
-            runner: ubu2004
-            os_name: ubuntu
-            os_version: "20.04"
-          - id: ubuntu-22.04
-            runner: ubu2204
-            os_name: ubuntu
-            os_version: "22.04"
-          - id: ubuntu-24.04
-            runner: ubu2404
-            os_name: ubuntu
-            os_version: "24.04"
+          # ---- Alpine Linux cross-builds (musl) ----
+          - runner_label: ubu2204
+            os: linux
+            arch: amd64
+            name: alpine-amd64
+            libc: musl
+          - runner_label: ubu2204
+            os: linux
+            arch: arm64
+            name: alpine-arm64
+            libc: musl
+          - runner_label: ubu2204
+            os: linux
+            arch: 386
+            name: alpine-i386
+            libc: musl
+          - runner_label: ubu2204
+            os: linux
+            arch: arm
+            name: alpine-armv7
+            libc: musl
+
+          # ---- FreeBSD cross-builds ----
+          - runner_label: ubu2204
+            os: freebsd
+            arch: amd64
+            name: freebsd-amd64
+          - runner_label: ubu2204
+            os: freebsd
+            arch: arm64
+            name: freebsd-arm64
+          - runner_label: ubu2204
+            os: freebsd
+            arch: 386
+            name: freebsd-i386
+          - runner_label: ubu2204
+            os: freebsd
+            arch: arm
+            name: freebsd-armv7
+
+          # ---- OpenBSD cross-builds ----
+          - runner_label: ubu2204
+            os: openbsd
+            arch: amd64
+            name: openbsd-amd64
+          - runner_label: ubu2204
+            os: openbsd
+            arch: arm64
+            name: openbsd-arm64
+          - runner_label: ubu2204
+            os: openbsd
+            arch: 386
+            name: openbsd-i386
+
+          # ---- NetBSD cross-builds ----
+          - runner_label: ubu2204
+            os: netbsd
+            arch: amd64
+            name: netbsd-amd64
+          - runner_label: ubu2204
+            os: netbsd
+            arch: arm64
+            name: netbsd-arm64
+          - runner_label: ubu2204
+            os: netbsd
+            arch: 386
+            name: netbsd-i386
+          - runner_label: ubu2204
+            os: netbsd
+            arch: arm
+            name: netbsd-armv7
+
+          # ---- macOS cross-builds ----
+          - runner_label: ubu2204
+            os: darwin
+            arch: amd64
+            name: macos-amd64
+          - runner_label: ubu2204
+            os: darwin
+            arch: arm64
+            name: macos-arm64
+
+          # ---- Windows cross-builds ----
+          - runner_label: ubu2204
+            os: windows
+            arch: amd64
+            name: windows-amd64
+          - runner_label: ubu2204
+            os: windows
+            arch: arm64
+            name: windows-arm64
+          - runner_label: ubu2204
+            os: windows
+            arch: 386
+            name: windows-i386
+
+          # ---- Debian 10-12 self-hosted builds (amd64) ----
+          - runner_label: deb10
+            os: linux
+            arch: amd64
+            name: debian-10-amd64
+            libc: glibc
+          - runner_label: deb11
+            os: linux
+            arch: amd64
+            name: debian-11-amd64
+            libc: glibc
+          - runner_label: deb12
+            os: linux
+            arch: amd64
+            name: debian-12-amd64
+            libc: glibc
+
+          # ---- Debian 10-12 self-hosted builds (arm64) ----
+          - runner_label: deb10
+            os: linux
+            arch: arm64
+            name: debian-10-arm64
+            libc: glibc
+          - runner_label: deb11
+            os: linux
+            arch: arm64
+            name: debian-11-arm64
+            libc: glibc
+          - runner_label: deb12
+            os: linux
+            arch: arm64
+            name: debian-12-arm64
+            libc: glibc
+
+          # ---- Debian 10-12 self-hosted builds (armv7) ----
+          - runner_label: deb10
+            os: linux
+            arch: arm
+            name: debian-10-armv7
+            libc: glibc
+          - runner_label: deb11
+            os: linux
+            arch: arm
+            name: debian-11-armv7
+            libc: glibc
+          - runner_label: deb12
+            os: linux
+            arch: arm
+            name: debian-12-armv7
+            libc: glibc
+
+          # ---- Debian 10-12 self-hosted builds (i386) ----
+          - runner_label: deb10
+            os: linux
+            arch: 386
+            name: debian-10-i386
+            libc: glibc
+          - runner_label: deb11
+            os: linux
+            arch: 386
+            name: debian-11-i386
+            libc: glibc
+          - runner_label: deb12
+            os: linux
+            arch: 386
+            name: debian-12-i386
+            libc: glibc
+
+          # ---- Ubuntu 20.04 - 24.04 self-hosted builds (amd64) ----
+          - runner_label: ubu2004
+            os: linux
+            arch: amd64
+            name: ubuntu-20.04-amd64
+            libc: glibc
+          - runner_label: ubu2204
+            os: linux
+            arch: amd64
+            name: ubuntu-22.04-amd64
+            libc: glibc
+          - runner_label: ubu2404
+            os: linux
+            arch: amd64
+            name: ubuntu-24.04-amd64
+            libc: glibc
+
+          # ---- Ubuntu 20.04 - 24.04 self-hosted builds (arm64) ----
+          - runner_label: ubu2004
+            os: linux
+            arch: arm64
+            name: ubuntu-20.04-arm64
+            libc: glibc
+          - runner_label: ubu2204
+            os: linux
+            arch: arm64
+            name: ubuntu-22.04-arm64
+            libc: glibc
+          - runner_label: ubu2404
+            os: linux
+            arch: arm64
+            name: ubuntu-24.04-arm64
+            libc: glibc
+
+          # ---- Ubuntu 20.04 - 24.04 self-hosted builds (armv7) ----
+          - runner_label: ubu2004
+            os: linux
+            arch: arm
+            name: ubuntu-20.04-armv7
+            libc: glibc
+          - runner_label: ubu2204
+            os: linux
+            arch: arm
+            name: ubuntu-22.04-armv7
+            libc: glibc
+          - runner_label: ubu2404
+            os: linux
+            arch: arm
+            name: ubuntu-24.04-armv7
+            libc: glibc
+
+          # ---- Ubuntu 20.04 - 24.04 self-hosted builds (i386) ----
+          - runner_label: ubu2004
+            os: linux
+            arch: 386
+            name: ubuntu-20.04-i386
+            libc: glibc
+          - runner_label: ubu2204
+            os: linux
+            arch: 386
+            name: ubuntu-22.04-i386
+            libc: glibc
+          - runner_label: ubu2404
+            os: linux
+            arch: 386
+            name: ubuntu-24.04-i386
+            libc: glibc
 
     runs-on:
       - self-hosted
-      - ${{ matrix.runner }}
+      - ${{ matrix.runner_label }}
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       GITHUB_REF_NAME: ${{ github.ref_name }}
-      TARGET_DISTRO: ${{ matrix.os_name }}
-      TARGET_VERSION: ${{ matrix.os_version }}
+      TARGET_DISTRO: ${{ matrix.name }}
+      TARGET_VERSION: ${{ matrix.libc }}
 
     steps:
       - name: Clean build directory
@@ -66,15 +273,16 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
-#      - name: Install build dependencies
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y musl-tools zip curl dpkg-dev
+      # Uncomment if you need platform-specific build dependencies
+      # - name: Install build dependencies
+      #   run: |
+      #     sudo apt-get update
+      #     sudo apt-get install -y musl-tools zip curl dpkg-dev
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:
           version: latest
 
-      - name: Run GoReleaser (targeted for ${{ matrix.os_name }} ${{ matrix.os_version }})
+      - name: Run GoReleaser (targeted for ${{ matrix.name }})
         run: goreleaser release --clean --skip-sign
