@@ -341,10 +341,30 @@ jobs:
         run: |
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
 
+      - name: Set VERSION and SHA7
+        id: vars
+        run: |
+          # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
+          if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="0.0.0-SNAPSHOT"
+          fi
+          # Strip leading 'v' if present
+          VERSION="${VERSION#v}"
+          SHA7="${GITHUB_SHA::7}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "SHA7=$SHA7" >> $GITHUB_ENV
+        env:
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+
       - name: Build ${{ matrix.name }}
         env:
-          VERSION: ${{ github.ref_name }}
-          SHA7: ${{ github.sha.substr(0, 7) }}
+          VERSION: ${{ env.VERSION }}
+          SHA7: ${{ env.SHA7 }}
           OS: ${{ matrix.os }}
           ARCH: ${{ matrix.arch }}
         run: |
@@ -356,7 +376,6 @@ jobs:
             binary_name=NZBreX
           fi
           # Optionally strip leading v from VERSION
-          VERSION_STRIPPED="$(echo "$VERSION" | sed 's/^v//')"
           GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
@@ -373,7 +392,7 @@ jobs:
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           #zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
-          zip -j "NZBreX_${VERSION_STRIPPED}-${SHA7}-${OS}-${ARCH}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
           matrix_distro="${{ matrix.distro }}"
