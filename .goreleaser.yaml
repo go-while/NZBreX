@@ -15,7 +15,8 @@ builds:
       - arm64
       - 386
     ldflags:
-      - "-s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}"
+      #- "-s -w -X main.appVersion={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}"
+      - "-s -w -X main.appVersion={{.Version}}"
     env:
       - CGO_ENABLED=0
 
