@@ -489,6 +489,6 @@ jobs:
 
       - name: "@End Cleanup work directory"
         run: |
-          ls -lha . ${{ github.workspace }}/*
-          rm -rfv ${{ github.workspace }}/*
-          ls -lha . ${{ github.workspace }}/*
+          ls -lha . ${{ github.workspace }}/
+          rm -rfv ${{ github.workspace }}/
+          ls -lha .
