@@ -1,4 +1,4 @@
-name: "Test runners"
+name: "Self-Hosted Runners"
 
 on:
   push:
@@ -370,8 +370,14 @@ jobs:
           OS: ${{ matrix.os }}
           ARCH: ${{ matrix.arch }}
           MATRIX: ${{ matrix.name }}
+          ALIBC: "${{ matrix.libc }}"
         run: |
           set -euo pipefail
+          if [ ! -z $ALIBC ]; then
+            LIBC="-${ALIBC}"
+          else
+            LIBC=""
+          fi
           test -z "$SHA7" && echo "SHA7 not set" && exit 1
           test -z "$VERSION" && echo "VERSION not set" && exit 1
           test -z "$OS" && echo "VERSION not set" && exit 1
@@ -400,7 +406,8 @@ jobs:
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           #zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
-          zip -j "NZBreX_${VERSION}-${SHA7}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+
+          zip -j "NZBreX_${VERSION}-${SHA7}-${{ matrix.name }}${LIBC}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
 
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
@@ -418,7 +425,7 @@ jobs:
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
             #dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.deb
+            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${LIBC}.deb
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
@@ -453,7 +460,7 @@ jobs:
           set -e
           for ext in zip deb; do
             #file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.${ext}"
-            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.${ext}"
+            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${LIBC}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
                 sha="sha${algo}sum"
