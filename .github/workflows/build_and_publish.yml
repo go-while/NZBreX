@@ -376,14 +376,15 @@ jobs:
           if [ ! -z $ALIBC ]; then
             LIBC="-${ALIBC}"
           else
-            LIBC=""
+            LIBC="-purego"
           fi
-          test -z "$SHA7" && echo "SHA7 not set" && exit 1
-          test -z "$VERSION" && echo "VERSION not set" && exit 1
-          test -z "$OS" && echo "VERSION not set" && exit 1
-          test -z "$ARCH" && echo "VERSION not set" && exit 1
-          test -z "$MATRIX" && echo "MATRIX not set" && exit 1
-          echo "VERSION=$VERSION SHA7=$SHA7 OS=$OS ARCH=$ARCH MATRIX=$MATRIX"
+          test -z "$SHA7" && echo "SHA7 not set" && exit 21
+          test -z "$VERSION" && echo "VERSION not set" && exit 22
+          test -z "$OS" && echo "VERSION not set" && exit 23
+          test -z "$ARCH" && echo "VERSION not set" && exit 24
+          test -z "$MATRIX" && echo "MATRIX not set" && exit 25
+          test -z "$LIBC" && echo "LIBC not set" && exit 26
+          echo "VERSION=$VERSION SHA7=$SHA7 OS=$OS ARCH=$ARCH MATRIX=$MATRIX LIBC=$LIBC"
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
@@ -407,7 +408,7 @@ jobs:
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           #zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
 
-          zip -j "NZBreX_${VERSION}-${SHA7}-${{ matrix.name }}${LIBC}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          zip -j "NZBreX_${VERSION}-${SHA7}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
 
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
@@ -425,7 +426,7 @@ jobs:
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
             #dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${LIBC}.deb
+            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
@@ -460,7 +461,7 @@ jobs:
           set -e
           for ext in zip deb; do
             #file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.${ext}"
-            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${LIBC}.${ext}"
+            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
                 sha="sha${algo}sum"
