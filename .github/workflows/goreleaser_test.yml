@@ -3,7 +3,7 @@ name: GoReleaser Test Build
 on:
   push:
     branches:
-      - 'gpt-tests-1748440700'
+      - 'gpt-tests-1748467242'
     tags:
       - "test*"
   release:
