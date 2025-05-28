@@ -23,7 +23,7 @@ builds:
       - CGO_ENABLED=1
       - CC=musl-gcc
     binary: NZBreX
-    go_build_flags:
+    flags:
       - -tags=musl
 
   # BSD targets
