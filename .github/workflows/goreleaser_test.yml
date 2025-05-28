@@ -290,4 +290,14 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean
+        ## Required for GitHub Release Uploads
+        #env:
+        #  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post-upload artifacts
+        run: .goreleaser/post_upload_GaRuS.sh
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
 
