@@ -77,3 +77,4 @@ jobs:
           echo "deleting workspace"
           rm -rfv ${{ github.workspace }}/
           ls -lha .
+          mkdir -vp ${{ github.workspace }}
