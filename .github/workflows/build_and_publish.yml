@@ -1,4 +1,4 @@
-name: Build and Publish
+name: "Test runners"
 
 on:
   push:
@@ -344,6 +344,7 @@ jobs:
             ref_name=${{ github.ref_name }}
           fi
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
+          echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
       #  set REF_NAME to "branch-name/sha::7" if not release
       #- name: "Set Ref Name Variable"
@@ -413,6 +414,7 @@ jobs:
               if curl -f -F "file=@$file" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
                    -H "X-Git-Ref: ${{ env.REF_NAME }}" \
+                   -H "X-Git-SHA7: ${{ env.GITHUB_SHA7 }}" \
                    -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
                    http://10.20.0.1:58080/upload.php; then
                 echo "Upload succeeded for $file"
@@ -434,6 +436,7 @@ jobs:
               for algo in 256 512; do
                 sha="sha${algo}sum"
                 $sha "$file" > "$file.$sha"
+                cat "$file.$sha"
                 upload_with_retry "$file.$sha"
               done
               upload_with_retry "$file"
