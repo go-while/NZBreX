@@ -342,6 +342,11 @@ jobs:
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
 
       - name: Build ${{ matrix.name }}
+        env:
+          VERSION: ${{ github.ref_name }}
+          SHA7: ${{ github.sha.substr(0, 7) }}
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           mkdir -p builds/${{ matrix.name }}/usr/bin
@@ -350,10 +355,8 @@ jobs:
           else
             binary_name=NZBreX
           fi
-          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
-          SHA7="${GITHUB_SHA::7}"
-          OS="${{ matrix.os }}"
-          ARCH="${{ matrix.arch }}"
+          # Optionally strip leading v from VERSION
+          VERSION_STRIPPED="$(echo "$VERSION" | sed 's/^v//')"
           GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
@@ -370,7 +373,7 @@ jobs:
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           #zip -j "NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
-          zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          zip -j "NZBreX_${VERSION_STRIPPED}-${SHA7}-${OS}-${ARCH}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
           matrix_distro="${{ matrix.distro }}"
