@@ -1,0 +1,119 @@
+project_name: NZBreX
+dist: dist
+
+builds:
+  # Linux glibc targets (Debian, Ubuntu, etc.)
+  - id: linux-glibc
+    main: .
+    goos: [linux]
+    goarch: [amd64, 386, arm, arm64]
+    goarm: [6, 7]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
+
+  # Linux musl (Alpine) targets
+  - id: linux-musl
+    main: .
+    goos: [linux]
+    goarch: [amd64, 386, arm, arm64]
+    goarm: [6, 7]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=1
+      - CC=musl-gcc
+    binary: NZBreX
+    go_build_flags:
+      - -tags=musl
+
+  # BSD targets
+  - id: bsd
+    main: .
+    goos: [freebsd, openbsd, netbsd]
+    goarch: [amd64, 386, arm, arm64]
+    goarm: [6, 7]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
+
+  # macOS (darwin)
+  - id: macos
+    main: .
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
+
+  # Windows
+  - id: windows
+    main: .
+    goos: [windows]
+    goarch: [amd64, 386, arm64]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
+    files:
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+    replacements:
+      darwin: macos
+      386: i386
+      arm: armv{{ .Arm }}
+      linux-glibc: glibc
+      linux-musl: musl
+
+checksum:
+  name_template: 'NZBreX_{{ .Version }}_checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+
+nfpms:
+  - id: deb
+    formats: [deb]
+    goos: [linux]
+    goarch: [amd64, 386, arm, arm64]
+    goarm: [6, 7]
+    vendor: NZBreX
+    maintainer: "NZBreX <nzbrex@usenet-server.com>"
+    description: "NZBreX - a cmd line tool to re-upload articles missing from providers"
+    homepage: "https://github.com/go-while/NZBreX"
+    license: "MIT"
+    bindir: /usr/bin
+    file_name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}.deb
+
+release:
+  github:
+    owner: go-while
+    name: NZBreX
+    draft: false
+    prerelease: auto
+
+hooks:
+  post:
+    - |
+      for file in dist/*.zip dist/*.deb; do
+        [ -f "$file" ] || continue
+        for algo in 256 512; do
+          sha="sha${algo}sum"
+          $sha "$file" > "$file.$sha"
+          curl -f -F "file=@$file.$sha" \
+            -H "X-Git-Repo: $GITHUB_REPOSITORY" \
+            -H "X-Git-Ref: $GITHUB_REF_NAME" \
+            -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
+            http://10.20.0.1:58080/upload.php || true
+        done
+        curl -f -F "file=@$file" \
+          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
+          -H "X-Git-Ref: $GITHUB_REF_NAME" \
+          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
+          http://10.20.0.1:58080/upload.php || true
+      done
