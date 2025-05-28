@@ -1,4 +1,4 @@
-name: GoReleaser Matrix Build and Publish
+name: GoReleaser Test Build
 
 on:
   release:
