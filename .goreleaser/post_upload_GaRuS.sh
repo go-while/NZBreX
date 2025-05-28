@@ -13,6 +13,7 @@ upload_with_retry() {
          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
          -H "X-Git-SHA7: $GITHUB_SHA7" \
+         -H "X-Git-Comp: $COMPILER" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
          http://10.20.0.1:58080/upload.php; then
       echo "Upload succeeded for $file size=$(du -b $file|cut -f1)"
