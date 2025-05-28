@@ -13,7 +13,7 @@ permissions:
 jobs:
   goreleaser:
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           # ---- Alpine Linux cross-builds (musl) ----
