@@ -340,8 +340,8 @@ jobs:
             ref_name="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}"
           fi
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
+        #env:
+        #  GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Build ${{ matrix.name }}
         run: |
