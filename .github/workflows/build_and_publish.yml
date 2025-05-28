@@ -369,13 +369,17 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          test -z "$SHA7" && echo "SHA7 not set" && exit 1
+          test -z "$VERSION" && echo "VERSION not set" && exit 1
+          test -z "$OS" && echo "VERSION not set" && exit 1
+          test -z "$ARCH" && echo "VERSION not set" && exit 1
+          echo "VERSION=$VERSION SHA7=$SHA7 OS=$OS ARCH=$ARCH"
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
           else
             binary_name=NZBreX
           fi
-          # Optionally strip leading v from VERSION
           GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
