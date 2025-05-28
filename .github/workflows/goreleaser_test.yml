@@ -279,10 +279,9 @@ jobs:
       #     sudo apt-get update
       #     sudo apt-get install -y musl-tools zip curl dpkg-dev
 
-      - name: Install GoReleaser
+      - name: Run GoReleaser (targeted for ${{ matrix.name }})
         uses: goreleaser/goreleaser-action@v5
         with:
-          version: latest
+        version: latest
+        args: release --clean --skip-sign
 
-      - name: Run GoReleaser (targeted for ${{ matrix.name }})
-        run: goreleaser release --clean --skip-sign
