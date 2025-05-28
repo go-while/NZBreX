@@ -48,5 +48,5 @@ find "$HOME/cache_backups" -type f -mtime +3 -name 'cache-*' -print -delete
 
 END=$(date +%s)
 let took="END-START"
-echo "restore took: $took seconds"
+echo "$0: took $took seconds"
 exit 0

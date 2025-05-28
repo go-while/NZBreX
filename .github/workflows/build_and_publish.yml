@@ -296,7 +296,7 @@ jobs:
           rm -rfv dist build ${{ github.workspace }}/
           mkdir -vp ${{ github.workspace }}
 
-      - name: Checkout code
+      - name: "Checkout code"
         uses: actions/checkout@v4
 
 #      - name: Clean Go module cache
@@ -305,7 +305,7 @@ jobs:
 #      - name: Restore Go modules cache
 #        # your cache restore step here
 
-      - name: Set up Go
+      - name: "Set up Go"
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
@@ -330,19 +330,19 @@ jobs:
 #          restore-keys: |
 #            ${{ runner.os }}-go-
 
-      - name: "Restore go cache"
-        run: runner/go-cache-restore.sh
+#      - name: "Restore go cache"
+#        run: runner/go-cache-restore.sh
 
       # Run tests with race detector for supported platforms
-      - name: Run race detector tests (amd64/linux only)
+      - name: "Run race detector tests (amd64/linux only)"
         if: matrix.os == 'linux' && matrix.arch == 'amd64'
         run: go test -race ./...
 
-      - name: Run normal tests (other platforms)
+      - name: "Run normal tests (other platforms)"
         if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         run: go test ./...
 
-      - name: "Set GaRuS Variables, VERSION and SHA7"
+      - name: "Set GaRuS Variables"
         id: vars
         run: |
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
@@ -466,7 +466,7 @@ jobs:
             fi
           done
 
-#      - name: Upload Binary to github blob storage
+#      - name: "Upload Binary to github blob storage"
 #        uses: actions/upload-artifact@v4
 #        with:
 #          name: binary-${{ matrix.name }}
@@ -474,7 +474,7 @@ jobs:
 #          retention-days: 1
 #          if-no-files-found: warn
 
-#      - name: Upload Release Assets
+#      - name: "Upload Release Assets to github"
 #        if: github.event_name == 'release'
 #        uses: softprops/action-gh-release@v2
 #        with:
@@ -484,14 +484,8 @@ jobs:
 #            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.deb
 
-#      #  $GITHUB_WORKSPACE only covers the checked-out project for the current job.
-#      #  It does not include global caches or other directories outside the current job’s workspace (like ~/.cache, /tmp, or custom directories).
-#      - name: Clean workspace (self-hosted only)
-#        if: runner.os == 'Linux' && runner.name == 'self-hosted'
-#        run: rm -rf "$GITHUB_WORKSPACE"/*
-
-      - name: "Backup go cache"
-        run: runner/go-cache-backup.sh
+#      - name: "Backup go cache"
+#        run: runner/go-cache-backup.sh
 
       - name: "@End Clean directory"
         run: |

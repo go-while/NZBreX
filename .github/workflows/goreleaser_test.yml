@@ -35,10 +35,10 @@ jobs:
           rm -rfv dist build ${{ github.workspace }}/
           mkdir -vp ${{ github.workspace }}
 
-      - name: Checkout code
+      - name: "Checkout code"
         uses: actions/checkout@v4
 
-      - name: Set up Go
+      - name: "Set up Go"
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
@@ -53,14 +53,14 @@ jobs:
       - name: "Restore go cache"
         run: runner/go-cache-restore.sh
 
-      - name: Run GoReleaser (Test Build)
+      - name: "Run GoReleaser (Test Build)"
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
           args: release --clean --snapshot
 
-      - name: Set SHA7
+      - name: "Set GaRuS Variables"
         run: echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
