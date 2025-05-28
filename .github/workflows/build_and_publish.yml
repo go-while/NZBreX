@@ -373,8 +373,8 @@ jobs:
           ALIBC: ${{ matrix.libc }}
         run: |
           set -euo pipefail
-          if [ ! -z $ALIBC ]; then
-            LIBC="-${ALIBC}"
+          if [ -n "$ALIBC" ]; then
+            LIBC="-$ALIBC"
           else
             LIBC="-purego"
           fi
@@ -488,9 +488,9 @@ jobs:
 #        with:
 #          files: |
 #            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.zip
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.zip
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${LIBC}.zip
 #            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.deb
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${LIBC}.deb
 
 #      - name: "Backup go cache"
 #        run: runner/go-cache-backup.sh
