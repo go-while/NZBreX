@@ -16,6 +16,8 @@ upload_with_retry() {
   local max_attempts=$MAX_ATTEMPTS
   while [ $attempt -le $max_attempts ]; do
     test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
+    size=$(du -b $file|cut -f1)
+    human=$(du -h $file|cut -f1)
     if curl --silent -f -F "file=@$file" \
          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
@@ -23,7 +25,7 @@ upload_with_retry() {
          -H "X-Git-Comp: $COMPILER" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
          $GARUS_ROUTE; then
-      echo "Upload succeeded for $file size=$(du -b $file|cut -f1) [$(du -h $file|cut -f1)]"
+      echo "Upload succeeded for $file size=$size [$human]"
       return 0
     else
       echo "Upload failed for $file. Retrying in $delay seconds..."
