@@ -123,7 +123,8 @@ builds:
 
 archives:
   - formats: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    #name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
     #name_template: NZBreX_{{ .Version }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
     files:
       - NZBreX*
