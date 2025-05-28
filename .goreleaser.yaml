@@ -97,7 +97,7 @@ builds:
     main: .
     goos: [windows]
     goarch: [amd64]
-    binary: nzbrex_amd64.exe
+    binary: nzbrex_amd64
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -107,7 +107,7 @@ builds:
     main: .
     goos: [windows]
     goarch: [386]
-    binary: nzbrex_i386.exe
+    binary: nzbrex_i386
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -117,16 +117,47 @@ builds:
     main: .
     goos: [windows]
     goarch: [arm64]
-    binary: nzbrex_arm64.exe
+    binary: nzbrex_arm64
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=1         # Or whatever is needed
       - CC=arm-linux-gnueabi-gcc # For example: aarch64-w64-mingw32-gcc or arm-linux-gnueabi-gcc
 
 archives:
-  # 1. General archive for all platforms (except special-cased Windows)
-  - formats: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+  - id: linux-glibc
+    builds: [linux-glibc]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
+    files:
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+
+  - id: linux-musl
+    builds: [linux-musl]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
+    files:
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+
+  - id: bsd
+    builds: [bsd]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
+    files:
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+
+  - id: macos
+    builds: [macos]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
     files:
       - NZBreX*
       - cleanHeaders.txt
