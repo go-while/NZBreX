@@ -27,6 +27,10 @@ DESTDIR="${HOME}/cache_backups"
 mkdir -p "$DESTDIR"
 echo "Packing ~/.cache/go-build and ~/go/pkg/mod into $DESTDIR/$TARFILE ..."
 
+if [[ -e "$DESTDIR/$TARFILE" ]]; then
+ rm -fv "$DESTDIR/$TARFILE"
+fi
+
 tar cvzf "$DESTDIR/$TARFILE" -C "$HOME" .cache/go-build go/pkg/mod
 
 echo "Cache tarball created: $DESTDIR/$TARFILE"
