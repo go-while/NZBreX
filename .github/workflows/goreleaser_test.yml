@@ -29,8 +29,11 @@ jobs:
 #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: "@Start Clean build directory"
-        run: rm -rf dist build
+      - name: "@Start Clean directory"
+        run: |
+          echo "deleting workspace"
+          rm -rfv dist build ${{ github.workspace }}/
+          mkdir -vp ${{ github.workspace }}
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -66,15 +69,8 @@ jobs:
           GITHUB_SHA7: ${{ env.GITHUB_SHA7 }}
           COMPILER: "GOR"
 
-      - name: "@Final Clean build directory"
-        run: rm -rfv build dist
-
-      - name: "@End Cleanup work directory"
+      - name: "@End Clean directory"
         run: |
-          echo "pwd=$(pwd)";
-          du -hs ${{ github.workspace }}
-          ls -lha . ${{ github.workspace }}/
           echo "deleting workspace"
-          rm -rfv ${{ github.workspace }}/
-          ls -lha .
+          rm -rfv dist build ${{ github.workspace }}/
           mkdir -vp ${{ github.workspace }}
