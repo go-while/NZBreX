@@ -1,0 +1,76 @@
+name: GoReleaser Matrix Build and Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  goreleaser:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: debian-10
+            runner: deb10
+            os_name: debian
+            os_version: "10"
+          - id: debian-11
+            runner: deb11
+            os_name: debian
+            os_version: "11"
+          - id: debian-12
+            runner: deb12
+            os_name: debian
+            os_version: "12"
+          - id: ubuntu-20.04
+            runner: ubu2004
+            os_name: ubuntu
+            os_version: "20.04"
+          - id: ubuntu-22.04
+            runner: ubu2204
+            os_name: ubuntu
+            os_version: "22.04"
+          - id: ubuntu-24.04
+            runner: ubu2404
+            os_name: ubuntu
+            os_version: "24.04"
+
+    runs-on: [self-hosted, ${{ matrix.runner }}]
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+      TARGET_DISTRO: ${{ matrix.os_name }}
+      TARGET_VERSION: ${{ matrix.os_version }}
+
+    steps:
+      - name: Clean build directory
+        run: rm -rf dist build
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools zip curl dpkg-dev
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          version: latest
+
+      - name: Run GoReleaser (targeted for ${{ matrix.os_name }} ${{ matrix.os_version }})
+        run: goreleaser release --clean --skip-sign
