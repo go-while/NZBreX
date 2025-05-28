@@ -29,7 +29,7 @@ jobs:
 #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Clean build directory
+      - name: "@Start Clean build directory"
         run: rm -rf dist build
 
       - name: Checkout code
@@ -66,5 +66,5 @@ jobs:
           GITHUB_SHA7: ${{ env.GITHUB_SHA7 }}
           COMPILER: "GOR"
 
-      - name: Clean build directory
+      - name: "@Final Clean build directory"
         run: rm -rf dist build

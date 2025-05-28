@@ -336,14 +336,10 @@ jobs:
         if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         run: go test ./...
 
-        # REF_NAME, GITHUB_SHA7 and COMPILER we need for GaRuS!
-      - name: "Set GaRuS Variables"
-        run: |
-          echo "COMPILER=SHR" >> "$GITHUB_ENV"
-
-      - name: Set VERSION and SHA7
+      - name: "Set GaRuS Variables, VERSION and SHA7"
         id: vars
         run: |
+          echo "COMPILER=SHR" >> "$GITHUB_ENV"
           # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
           if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
             VERSION="${GITHUB_REF_NAME}"
@@ -421,12 +417,12 @@ jobs:
         run: |
           upload_with_retry() {
             local file="$1"
-            local max_attempts=30
             local attempt=1
             local delay=30
+            local max_attempts=30
             while [ $attempt -le $max_attempts ]; do
-              echo "Upload attempt $attempt for $file..."
-              if curl -f -F "file=@$file" \
+              test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
+              if curl --silent -f -F "file=@$file" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
                    -H "X-Git-Ref: ${{ github.ref_name }}" \
                    -H "X-Git-SHA7: ${GITHUB_SHA::7}" \
