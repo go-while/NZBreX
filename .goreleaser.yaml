@@ -49,7 +49,8 @@ builds:
     main: .
     goos: [linux]
     goarch: [amd64, 386, arm, arm64]
-    goarm: [6, 7]
+    #goarm: [6, 7]
+    goarm: [7]
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=1
@@ -63,7 +64,8 @@ builds:
     main: .
     goos: [freebsd, openbsd, netbsd]
     goarch: [amd64, 386, arm, arm64]
-    goarm: [6, 7]
+    #goarm: [6, 7]
+    goarm: [7]
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -73,6 +75,7 @@ builds:
     main: .
     goos: [darwin]
     goarch: [amd64, arm64]
+    goarm: [7]
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
