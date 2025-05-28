@@ -59,7 +59,7 @@ jobs:
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_SHA7: ${GITHUB_SHA::7}
+          GITHUB_SHA7: ${{ github.sha.substr(0, 7) }}
           COMPILER: "GOR"
           BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
 
