@@ -17,11 +17,7 @@ if [[ ! -f $GO_SUM ]]; then
   exit 1
 fi
 
-CACHE_KEY="go-${(
-  cat "$GO_MOD"
-  echo "::"
-  cat "$GO_SUM"
-)}"
+CACHE_KEY="go-$(cat "$GO_MOD"; echo "::"; cat "$GO_SUM")"
 HASH=$(echo -n "$CACHE_KEY" | sha256sum | awk '{print $1}')
 TARFILE="cache-${HASH}.tgz"
 CACHEDIR="${HOME}/cache_backups"
