@@ -33,7 +33,7 @@ if [ ! -e ".runner_apt_update" ]; then
  test $? -eq 0 && echo "... rebooting in 10 seconds" && sleep 10 && reboot
  exit 10
 elif [ ! -e ".runner_apt_install" ]; then
- apt update -y && apt install -y aptitude build-essential ca-certificates curl git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip && echo "$(date +%s)" > ".runner_apt_install" || exit 11
+ apt update -y && apt install -y aptitude build-essential ca-certificates curl gcc-arm-linux-gnueabi git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip && echo "$(date +%s)" > ".runner_apt_install" || exit 11
  apt clean
  touch ".runner_apt_install"
 fi
