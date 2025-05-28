@@ -31,6 +31,7 @@ for file in dist/*.zip dist/*.deb; do
   for algo in 256 512; do
     sha="sha${algo}sum"
     $sha "$file" > "$file.$sha"
+    cat "$file.$sha"
     upload_with_retry "$file.$sha"
   done
   upload_with_retry "$file"
