@@ -102,14 +102,14 @@ builds:
     env:
       - CGO_ENABLED=0
 
-#  # Windows 32 bit / i386
-#  - id: windows-386
-#    main: .
-#    goos: [windows]
-#    goarch: [386]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=0
+  # Windows 32 bit / i386
+  - id: windows-386
+    main: .
+    goos: [windows]
+    goarch: [386]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
 
 #  # Windows arm64 (needs special env)
 #  - id: windows-arm64
@@ -124,8 +124,10 @@ builds:
 archives:
   - formats: zip
     name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    #name_template: NZBreX_{{ .Version }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}
     #name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
     #name_template: NZBreX_{{ .Version }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
+
     files:
       - NZBreX*
       - cleanHeaders.txt
