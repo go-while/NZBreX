@@ -289,5 +289,5 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --skip-sign
+          args: release --clean
 
