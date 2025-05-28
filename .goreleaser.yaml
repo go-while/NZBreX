@@ -121,13 +121,47 @@ builds:
       - CC=arm-linux-gnueabi-gcc # For example: aarch64-w64-mingw32-gcc or arm-linux-gnueabi-gcc
 
 archives:
+  # 1. General archive for all platforms (except special-cased Windows)
   - formats: zip
     name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
-    #name_template: NZBreX_{{ .Version }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}
-    #name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
-    #name_template: NZBreX_{{ .Version }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
-
     files:
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+
+  # 2. Distinct Windows archives with additional files and custom names
+  - id: windows-amd64
+    builds: [windows-amd64]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+
+  - id: windows-386
+    builds: [windows-386]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - NZBreX*
+      - cleanHeaders.txt
+      - provider.sample.json
+      - provider.ygg.json
+
+  - id: windows-arm64
+    builds: [windows-arm64]
+    format: zip
+    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
       - NZBreX*
       - cleanHeaders.txt
       - provider.sample.json
