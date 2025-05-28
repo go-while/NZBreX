@@ -3,9 +3,7 @@ name: GoReleaser Test Build
 on:
   push:
     branches:
-      # - gpt-tests-** # use ** to match any number of directories or subdirectories.
-      - gpt-tests-1748440700
-      - tests**
+      - 'gpt-tests-1748440700'
   release:
     types: [published]
   workflow_dispatch:
