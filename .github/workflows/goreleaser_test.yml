@@ -61,11 +61,11 @@ jobs:
 
       - name: "Set Ref Name Variable"
         run: |
-#          if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-#            ref_name=${GITHUB_SHA::7}
-#          else
-#            ref_name=${{ github.ref_name }}
-#          fi
+          if [ "$GITHUB_EVENT_NAME" != "release" ]; then
+            ref_name=${GITHUB_SHA::7}
+          else
+            ref_name=${{ github.ref_name }}
+          fi
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
           echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
