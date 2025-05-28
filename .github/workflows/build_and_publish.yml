@@ -344,16 +344,16 @@ jobs:
       - name: Build ${{ matrix.name }}
         run: |
           set -euo pipefail
-          VERSION="${{ github.ref_name }}"
-          SHA7="${GITHUB_SHA::7}"
-          OS="${{ matrix.os }}"
-          ARCH="${{ matrix.arch }}"
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
           else
             binary_name=NZBreX
           fi
+          VERSION="$(echo "${{ github.ref_name }}" | sed 's/^v//')"
+          SHA7="${GITHUB_SHA::7}"
+          OS="${{ matrix.os }}"
+          ARCH="${{ matrix.arch }}"
           GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
