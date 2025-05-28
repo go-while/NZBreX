@@ -14,16 +14,16 @@ builds:
     env:
       - CGO_ENABLED=0
 
-  # Linux armv6 target (with correct CC)
-  - id: linux-armv6
-    main: .
-    goos: [linux]
-    goarch: [arm]
-    goarm: [6]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=1
-      - CC=arm-linux-gnueabi-gcc
+#  # Linux armv6 target (with correct CC)
+#  - id: linux-armv6
+#    main: .
+#    goos: [linux]
+#    goarch: [arm]
+#    goarm: [6]
+#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+#    env:
+#      - CGO_ENABLED=1
+#      - CC=arm-linux-gnueabi-gcc
 
   # Linux armv7/arm64 if needed
   - id: linux-armv7
