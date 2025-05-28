@@ -288,15 +288,15 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+#      - name: Cache Go modules
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            ~/.cache/go-build
+#            ~/go/pkg/mod
+#          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+#          restore-keys: |
+#            ${{ runner.os }}-go-
 
       # Run tests with race detector for supported platforms
       - name: Run race detector tests (amd64/linux only)
