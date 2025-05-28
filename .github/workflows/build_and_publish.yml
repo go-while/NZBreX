@@ -337,29 +337,9 @@ jobs:
         run: go test ./...
 
         # REF_NAME, GITHUB_SHA7 and COMPILER we need for GaRuS!
-      - name: "Set Ref Name Variable"
+      - name: "Set GaRuS Variables"
         run: |
-          #if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-          #  ref_name=${GITHUB_SHA::7}
-          #else
-          #  ref_name=${{ github.ref_name }}
-          #fi
-          echo "REF_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
-          echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
-
-      #  set REF_NAME to "branch-name/sha::7" if not release
-      #- name: "Set Ref Name Variable"
-      #  run: |
-      #    if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-      #      ref_name="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}/${GITHUB_SHA::7}"
-      #    else
-      #      ref_name="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}"
-      #    fi
-      #    echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
-      #  #env:
-      #  #  GITHUB_REF_NAME: ${{ github.ref_name }}
-
 
       - name: Build ${{ matrix.name }}
         run: |
@@ -415,8 +395,8 @@ jobs:
               echo "Upload attempt $attempt for $file..."
               if curl -f -F "file=@$file" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
-                   -H "X-Git-Ref: ${{ env.REF_NAME }}" \
-                   -H "X-Git-SHA7: ${{ env.GITHUB_SHA7 }}" \
+                   -H "X-Git-Ref: ${{ github.ref_name }}" \
+                   -H "X-Git-SHA7: ${GITHUB_SHA::7}" \
                    -H "X-Git-Comp: ${{ env.COMPILER }}" \
                    -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
                    http://10.20.0.1:58080/upload.php; then
