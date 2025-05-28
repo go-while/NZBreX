@@ -3,7 +3,7 @@
 set -e
 
 # Packages to install
-INSTALL_PACKAGES="aptitude build-essential ca-certificates curl git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip"
+INSTALL_PACKAGES="aptitude build-essential ca-certificates curl gcc-arm-linux-gnueabi git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip"
 
 CHECK_RUNNERS_URL="https://github.com/go-while/NZBreX/raw/ee7ab8d8bdbc675c32c4dc7044d50092e03c72df/runner/check_runners.sh"
 
