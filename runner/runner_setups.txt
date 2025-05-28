@@ -43,3 +43,5 @@ userdel -r go-while
 ### UBUNTU RUNNERS 001-254
 # ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204" "runner-ubu2204-010" "default"
 
+### goreleaser-dedicated runners
+./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204-gor" "runner-ubu2204-gor-001" "default"
