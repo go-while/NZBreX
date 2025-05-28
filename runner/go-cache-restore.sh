@@ -25,7 +25,7 @@ CACHEDIR="${HOME}/cache_backups"
 START=$(date +%s)
 if [[ -f "$CACHEDIR/$TARFILE" ]]; then
  echo "Restoring ~/.cache/go-build and ~/go/pkg/mod from $CACHEDIR/$TARFILE ..."
- tar xzf "$CACHEDIR/$TARFILE" -C "$HOME"
+ tar xzf "$CACHEDIR/$TARFILE" --keep-newer-files -C "$HOME"
  if [[ $? -gt 0 ]]; then
   echo -n "Error extracting cache file '$DESTDIR/$TARFILE': "
   rm -fv "$DESTDIR/$TARFILE"

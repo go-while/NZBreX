@@ -29,9 +29,10 @@ if [[ -f "$DESTDIR/$TARFILE" ]]; then
  echo -n "$0: File exists "
  rm -fv "$DESTDIR/$TARFILE"
 fi
-echo "Packing ~/.cache/go-build and ~/go/pkg/mod into $DESTDIR/$TARFILE ..."
+TMP_TAR="${TARFILE}.tmp"
+echo "Packing ~/.cache/go-build and ~/go/pkg/mod into $DESTDIR/$TMP_TAR ..."
 START=$(date +%s)
-tar czf "$DESTDIR/$TARFILE" -C "$HOME" .cache/go-build go/pkg/mod
+tar czf "$DESTDIR/$TMP_TAR" -C "$HOME" .cache/go-build go/pkg/mod && mv -v "$DESTDIR/$TMP_TAR" "$DESTDIR/$TARFILE"
  if [[ $? -gt 0 ]]; then
   echo -n "$0: Error packing "
   rm -fv "$DESTDIR/$TARFILE"
@@ -43,7 +44,7 @@ let took="END-START"
 echo "$0: took $took seconds"
 
 echo "Deleting any old cache files..."
-find "$DESTDIR" -type f -mtime +3 -print -delete
+find "$HOME/cache_backups" -type f -mtime +3 -name 'cache-*' -print -delete
 
 END=$(date +%s)
 let took="END-START"
