@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   goreleaser:
+    name: GoReleaser Test
     runs-on: [self-hosted, ubu2204-gor] # or whatever your dedicated runner label is
 
     env:
@@ -44,7 +45,7 @@ jobs:
       #     sudo apt-get update
       #     sudo apt-get install -y musl-tools zip curl dpkg-dev
 
-      - name: Run Test GoReleaser
+      - name: Run GoReleaser (Test Build)
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
