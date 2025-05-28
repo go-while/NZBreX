@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 
+GaRuS="http://10.20.0.1:58080"
+ROUTE="/upload.php"
+
+DELAY=30
+MAX_ATTEMPTS=30
+
 set -e
 
+GARUS_ROUTE="${GaRuS}${ROUTE}"
 upload_with_retry() {
-  local file="$1"
-  local max_attempts=30
   local attempt=1
-  local delay=30
+  local file="$1"
+  local delay=$DELAY
+  local max_attempts=$MAX_ATTEMPTS
   while [ $attempt -le $max_attempts ]; do
     test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
     if curl --silent -f -F "file=@$file" \
@@ -15,8 +22,8 @@ upload_with_retry() {
          -H "X-Git-SHA7: $GITHUB_SHA7" \
          -H "X-Git-Comp: $COMPILER" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
-         http://10.20.0.1:58080/upload.php; then
-      echo "Upload succeeded for $file size=$(du -b $file|cut -f1)"
+         $GARUS_ROUTE; then
+      echo "Upload succeeded for $file size=$(du -b $file|cut -f1) [$(du -h $file|cut -f1)]"
       return 0
     else
       echo "Upload failed for $file. Retrying in $delay seconds..."
@@ -28,7 +35,7 @@ upload_with_retry() {
   return 1
 }
 
-for file in dist/*.zip dist/*.deb; do
+for file in dist/*.zip dist/*.exe dist/*.deb; do
   [ -e "$file" ] || continue
   for algo in 256 512; do
     sha="sha${algo}sum"
@@ -38,3 +45,12 @@ for file in dist/*.zip dist/*.deb; do
   done
   upload_with_retry "$file"
 done
+
+#DIST="dist.tgz"
+#if [ -e "$DIST" ]; then
+#  echo "$DIST already exists. Skipping tar."
+#else
+#  tar -czf "$DIST" dist/
+#  echo "Created $DIST from dist/."
+#fi
+

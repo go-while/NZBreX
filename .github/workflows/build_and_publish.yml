@@ -290,7 +290,7 @@ jobs:
             libc: glibc
 
     steps:
-      - name: Clean build directory
+      - name: "@Start Clean build directory"
         run: rm -rf build dist
 
       - name: Checkout code
@@ -395,7 +395,8 @@ jobs:
           fi
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-          zip -j "NZBreX_${VERSION}-${SHA7}_${OS}-${ARCH}_${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          #zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          zip -j "NZBreX_${VERSION}-${SHA7}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
 
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
@@ -412,7 +413,8 @@ jobs:
             echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.deb
+            #dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
+            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.deb
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
@@ -445,7 +447,8 @@ jobs:
 
           set -e
           for ext in zip deb; do
-            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.${ext}"
+            #file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.${ext}"
+            file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
                 sha="sha${algo}sum"
@@ -470,17 +473,18 @@ jobs:
 #        uses: softprops/action-gh-release@v2
 #        with:
 #          files: |
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.zip
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}_${{ matrix.os }}-${{ matrix.arch }}_${{ matrix.name }}.deb
+#            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.zip
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.zip
+#            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}.deb
 
 #      #  $GITHUB_WORKSPACE only covers the checked-out project for the current job.
 #      #  It does not include global caches or other directories outside the current job’s workspace (like ~/.cache, /tmp, or custom directories).
-
 #      - name: Clean workspace (self-hosted only)
 #        if: runner.os == 'Linux' && runner.name == 'self-hosted'
 #        run: rm -rf "$GITHUB_WORKSPACE"/*
 
-      - name: Clean build directory
+      - name: "@Final Clean build directory"
         run: rm -rf build dist
 
 
