@@ -331,14 +331,17 @@ jobs:
         if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         run: go test ./...
 
-      - name: Set Ref Name Variable
+      #  set REF_NAME to "branch-name/sha::7" if not release
+      - name: "Set Ref Name Variable"
         run: |
           if [ "$GITHUB_EVENT_NAME" != "release" ]; then
-            ref_name=${GITHUB_SHA::7}
+            ref_name="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}/${GITHUB_SHA::7}"
           else
-            ref_name=${{ github.ref_name }}
+            ref_name="${GITHUB_REF_NAME:-${GITHUB_REF##*/}}"
           fi
           echo "REF_NAME=${ref_name}" >> "$GITHUB_ENV"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Build ${{ matrix.name }}
         run: |
