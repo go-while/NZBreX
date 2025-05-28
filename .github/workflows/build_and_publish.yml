@@ -361,15 +361,7 @@ jobs:
 #        run: |
 #          curl -F "file=@path/to/artifact.zip" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" https://git.usenet-server.com/upload.php
 
-#      - name: Upload binary to PHP server
-#        run: |
-#          if [ "${{ matrix.os }}" = "windows" ]; then
-#            curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX.exe" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}"" https://git.usenet-server.com/upload.php
-#          else
-#            curl -F "file=@builds/${{ matrix.name }}/usr/bin/NZBreX" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}"" https://git.usenet-server.com/upload.php
-#          fi
-
-      - name: "Upload binary to GaRuS (Git-actions-Runner-upload-Server)"
+      - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
         run: |
           if [ -e "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" ]; then
             echo "uploading: file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip"
