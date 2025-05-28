@@ -371,8 +371,14 @@ jobs:
 
       - name: "Upload binary to GaRuS (Git-actions-Runner-upload-Server)"
         run: |
-          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
-          curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
+          if [ -e "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" ]; then
+            echo "uploading: file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip"
+            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.zip" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
+          fi
+          if [ -e "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" ]; then
+            echo "uploading: file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb"
+            curl -F "file=@NZBreX_${{ env.REF_NAME }}-${{ matrix.name }}.deb" -H "X-Git-Repo: ${{ github.repository }}" -H "X-Git-Ref: ${{ env.REF_NAME }}" -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" http://10.20.0.1:58080/upload.php
+          fi
 
 #      - name: Upload Build Artifacts to github blob storage
 #        uses: actions/upload-artifact@v4
