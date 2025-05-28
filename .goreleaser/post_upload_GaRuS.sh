@@ -8,7 +8,7 @@ upload_with_retry() {
   local attempt=1
   local delay=30
   while [ $attempt -le $max_attempts ]; do
-    test $attempt -gt 0 && echo "Upload attempt $attempt for $file..."
+    test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
     if curl --silent -f -F "file=@$file" \
          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
