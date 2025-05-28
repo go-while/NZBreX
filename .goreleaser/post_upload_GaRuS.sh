@@ -23,7 +23,7 @@ upload_with_retry() {
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
          -H "X-Git-SHA7: $GITHUB_SHA7" \
          -H "X-Git-Comp: $COMPILER" \
-         -H "X-Git-MATRIX: ${{ env.MATRIX }}" \
+         -H "X-Git-MATRIX: $MATRIX" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
          $GARUS_ROUTE; then
       echo "Upload succeeded for $file size=$size [$human]"
