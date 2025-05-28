@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+#set -euo pipefail
 
 # This script imitates GitHub Actions cache key and packs ~/.cache/go-build and ~/go/pkg/mod into a tarball.
 # Instead of uploading, it moves the tarball to a local backup directory.
@@ -27,12 +27,16 @@ DESTDIR="${HOME}/cache_backups"
 mkdir -p "$DESTDIR"
 echo "Packing ~/.cache/go-build and ~/go/pkg/mod into $DESTDIR/$TARFILE ..."
 
-if [[ -e "$DESTDIR/$TARFILE" ]]; then
+if [[ -f "$DESTDIR/$TARFILE" ]]; then
  rm -fv "$DESTDIR/$TARFILE"
 fi
 
 tar czf "$DESTDIR/$TARFILE" -C "$HOME" .cache/go-build go/pkg/mod
-
+ if [[ $? -gt 0 ]]; then
+  echo -n "Error packing cache file '$DESTDIR/$TARFILE': "
+  rm -fv "$DESTDIR/$TARFILE"
+  exit 1
+ fi
 echo "Cache tarball created: $DESTDIR/$TARFILE"
 
 find "$DESTDIR" -type f -mtime +3 -print -delete

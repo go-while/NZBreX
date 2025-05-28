@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+#set -euo pipefail
 
 # This script restores Go build and module caches from a local tarball created by cache_sim.sh.
 # Usage: ./cache_restore.sh [go.mod] [go.sum]
@@ -25,6 +25,11 @@ CACHEDIR="${HOME}/cache_backups"
 if [[ -f "$CACHEDIR/$TARFILE" ]]; then
  echo "Restoring ~/.cache/go-build and ~/go/pkg/mod from $CACHEDIR/$TARFILE ..."
  tar xzf "$CACHEDIR/$TARFILE" -C "$HOME"
+ if [[ $? -gt 0 ]]; then
+  echo -n "Error extracting cache file '$DESTDIR/$TARFILE': "
+  rm -fv "$DESTDIR/$TARFILE"
+  exit 0
+ fi
  echo -n "Cache restored. "
  rm -fv "$CACHEDIR/$TARFILE"
 else
