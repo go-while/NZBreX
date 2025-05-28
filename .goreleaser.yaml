@@ -111,14 +111,14 @@ builds:
     env:
       - CGO_ENABLED=0
 
-#  # Windows arm64 (needs special env)
-#  - id: windows-arm64
-#    main: .
-#    goos: [windows]
-#    goarch: [arm64]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=1         # Or whatever is needed
+  # Windows arm64 (needs special env)
+  - id: windows-arm64
+    main: .
+    goos: [windows]
+    goarch: [arm64]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=1         # Or whatever is needed
 #      - CC=arm-linux-gnueabi-gcc # For example: aarch64-w64-mingw32-gcc or arm-linux-gnueabi-gcc
 
 archives:
