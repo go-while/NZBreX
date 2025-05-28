@@ -56,18 +56,13 @@ builds:
 
 archives:
   - format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
+    #name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
+    name_template: NZBreX_{{ .Version }}-{{ if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}-{{ if eq .Arch "386" }}i386{{ else if eq .Arch "arm" }}armv{{ .Arm }}{{ else }}{{ .Arch }}{{ end }}{{ if .ID }}-{{ .ID }}{{ end }}
     files:
       - NZBreX*
       - cleanHeaders.txt
       - provider.sample.json
       - provider.ygg.json
-    replacements:
-      darwin: macos
-      386: i386
-      arm: armv{{ .Arm }}
-      linux-glibc: glibc
-      linux-musl: musl
 
 checksum:
   name_template: 'NZBreX_{{ .Version }}_checksums.txt'
@@ -79,9 +74,7 @@ changelog:
 nfpms:
   - id: deb
     formats: [deb]
-    goos: [linux]
-    goarch: [amd64, 386, arm, arm64]
-    goarm: [6, 7]
+    ids: [linux-glibc, linux-musl]
     vendor: NZBreX
     maintainer: "NZBreX <nzbrex@usenet-server.com>"
     description: "NZBreX - a cmd line tool to re-upload articles missing from providers"
@@ -89,6 +82,7 @@ nfpms:
     license: "MIT"
     bindir: /usr/bin
     file_name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}.deb
+
 
 release:
   github:
