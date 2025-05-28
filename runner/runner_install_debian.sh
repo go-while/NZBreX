@@ -16,6 +16,8 @@ RUNNER_SHA256="e8e24a3477da17040b4d6fa6d34c6ecb9a2879e800aa532518ec21e49e21d7b4"
 GITHUB_URL="https://github.com"
 GITREL_URL="${GITHUB_URL}/actions/runner/releases/download"
 
+CHECK_RUNNERS_URL="https://github.com/go-while/NZBreX/raw/ee7ab8d8bdbc675c32c4dc7044d50092e03c72df/runner/check_runners.sh"
+
 test $(whoami) != "root" && echo "error: you are not root" && exit 1
 test $(pwd) != "/root" && echo "error: you are not in /root" && exit 1
 
@@ -38,9 +40,12 @@ fi
 
 test -z "$8" && echo "usage: $0 SYSUSER USERDIR GITNAME GITREPO GATOKEN LABELS" && exit 1
 SYSUSER="$1"; USERDIR="$2"; GITNAME="$3"; GITREPO="$4"; GATOKEN="$5"; LABELS="$6"; NAME="$7" GROUP="$8"
-echo "setup SYSUSER=$SYSUSER USERDIR=$USERDIR GITNAME=$GITNAME GITREPO=$GITREPO GATOKEN=$GATOKEN LABELS=$LABELS NAME=$NAME GROUP=$GROUP"
 if [ ! -e "$USERDIR" ]; then
+ echo "setup SYSUSER=$SYSUSER USERDIR=$USERDIR GITNAME=$GITNAME GITREPO=$GITREPO GATOKEN=$GATOKEN LABELS=$LABELS NAME=$NAME GROUP=$GROUP"
  useradd --create-home --home-dir "$USERDIR" --shell /bin/bash "$SYSUSER" || exit 2
+else
+ echo "ERROR USER $SYSUSER already setup in same $USERDIR!"
+ exit 3
 fi
 cd "$USERDIR" || exit 3
 mkdir -p actions-runner && cd actions-runner || exit 4
@@ -59,8 +64,9 @@ echo "Config: ${USERDIR}"/actions-runner/.runner
 cat "${USERDIR}"/actions-runner/.runner
 
 
-mkdir -p /var/www/html/ga
-cat <<EOF > /root/cron.sh
+if [ ! -e /root/cron.sh ]; then
+  mkdir -p /var/www/html/ga
+  cat <<EOF > /root/cron.sh
 echo -n > /var/www/html/ga/netstats.dat
 echo "rx_bytes:eth0:\$(cat /sys/class/net/eth0/statistics/rx_bytes)" >> /var/www/html/ga/netstats.dat.new
 echo "tx_bytes:eth0:\$(cat /sys/class/net/eth0/statistics/tx_bytes)" >> /var/www/html/ga/netstats.dat.new
@@ -68,20 +74,29 @@ mv /var/www/html/ga/netstats.dat.old.1 /var/www/html/ga/netstats.dat.old.2
 mv /var/www/html/ga/netstats.dat /var/www/html/ga/netstats.dat.old.1
 mv /var/www/html/ga/netstats.dat.new /var/www/html/ga/netstats.dat
 EOF
-chmod +x /root/cron.sh
+  chmod +x /root/cron.sh
+fi
 
-
-cat <<EOF > /var/spool/cron/crontabs/root
+if [ ! -e "/root/check_runners.sh" ]; then
+  wget -q "$CHECK_RUNNERS_URL" -O /root/check_runners.sh.new && \
+   mv -v /root/check_runners.sh.new /root/check_runners.sh && \
+    chmod -v +x /root/check_runners.sh && \
+     cat <<EOF > /var/spool/cron/crontabs/root
 MAILTO=""
-@reboot /home/$SYSUSER/actions-runner/RUN.sh
+* * * * * /root/check_runners.sh
 * * * * * /root/cron.sh
 EOF
+/etc/init.d/cron restart
+fi
 
-cat <<EOF > "/var/spool/cron/crontabs/$SYSUSER"
-MAILTO=""
-@reboot /home/$SYSUSER/actions-runner/run.sh
-EOF
-systemctl restart cron.service
+
+
+#cat <<EOF > "/var/spool/cron/crontabs/$SYSUSER"
+#MAILTO=""
+#* * * * * pidof Runner.Listener || /home/$SYSUSER/actions-runner/run.sh
+#EOF
+
+
 
 exit 0
 
