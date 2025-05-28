@@ -31,7 +31,7 @@ if [[ -e "$DESTDIR/$TARFILE" ]]; then
  rm -fv "$DESTDIR/$TARFILE"
 fi
 
-tar cvzf "$DESTDIR/$TARFILE" -C "$HOME" .cache/go-build go/pkg/mod
+tar czf "$DESTDIR/$TARFILE" -C "$HOME" .cache/go-build go/pkg/mod
 
 echo "Cache tarball created: $DESTDIR/$TARFILE"
 
