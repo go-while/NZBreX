@@ -3,210 +3,33 @@ version: 2
 project_name: NZBreX
 dist: dist
 
-
 builds:
-  # Linux glibc targets (Debian, Ubuntu, etc.) except arm/arm64
-  - id: linux-glibc
+  - id: default
     main: .
-    goos: [linux]
-    goarch: [amd64, 386]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - 386
+    ldflags:
+      - "-s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}"
     env:
       - CGO_ENABLED=0
-
-#  # Linux armv6 target (with correct CC)
-#  - id: linux-armv6
-#    main: .
-#    goos: [linux]
-#    goarch: [arm]
-#    goarm: [6]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=1
-#      - CC=arm-linux-gnueabi-gcc
-
-#  # Linux armv7/arm64 if needed
-#  - id: linux-armv7
-#    main: .
-#    goos: [linux]
-#    goarch: [arm]
-#    goarm: [7]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=0
-
-#  - id: linux-arm64
-#    main: .
-#    goos: [linux]
-#    goarch: [arm64]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=0
-
-
-  # Linux musl (Alpine) targets
-  - id: linux-musl
-    main: .
-    goos: [linux]
-    goarch: [amd64]
-    #goarch: [amd64, 386, arm, arm64]
-    #goarm: [6, 7]
-    #goarm: [7]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=1
-      - CC=musl-gcc
-    binary: NZBreX
-    flags:
-      - -tags=musl
-
-  # BSD targets
-  - id: bsd
-    main: .
-    goos: [freebsd, openbsd, netbsd]
-    goarch: [amd64]
-    #goarch: [amd64, 386, arm, arm64]
-    #goarm: [6, 7]
-    #goarm: [7]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=0
-
-  # macOS (darwin)
-  - id: macos
-    main: .
-    goos: [darwin]
-    #goarch: [amd64, arm64]
-    goarch: [amd64]
-    #goarm: [7]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=0
-
-#  # Windows
-#  - id: windows
-#    main: .
-#    goos: [windows]
-#    goarch: [amd64, 386, arm64]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=0
-
-  # Windows 64 bit / amd64
-  - id: windows-amd64
-    main: .
-    goos: [windows]
-    goarch: [amd64]
-    binary: nzbrex_amd64
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=0
-
-  # Windows 32 bit / i386
-  - id: windows-386
-    main: .
-    goos: [windows]
-    goarch: [386]
-    binary: nzbrex_i386
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=0
-
-  # Windows arm64 (needs special env)
-  - id: windows-arm64
-    main: .
-    goos: [windows]
-    goarch: [arm64]
-    binary: nzbrex_arm64
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=1         # Or whatever is needed
-      - CC=arm-linux-gnueabi-gcc # For example: aarch64-w64-mingw32-gcc or arm-linux-gnueabi-gcc
 
 archives:
-  - id: linux-glibc
-    builds: [linux-glibc]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
-
-  - id: linux-musl
-    builds: [linux-musl]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
-    files:
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
-
-  - id: bsd
-    builds: [bsd]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
-    files:
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
-
-  - id: macos
-    builds: [macos]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}
-    files:
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
-
-  # 2. Distinct Windows archives with additional files and custom names
-  - id: windows-amd64
-    builds: [windows-amd64]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
-    files:
-      - LICENSE
-      - README.md
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
-
-  - id: windows-386
-    builds: [windows-386]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
-    files:
-      - LICENSE
-      - README.md
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
-
-  - id: windows-arm64
-    builds: [windows-arm64]
-    format: zip
-    name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}
-    files:
-      - LICENSE
-      - README.md
-      - NZBreX*
-      - cleanHeaders.txt
-      - provider.sample.json
-      - provider.ygg.json
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - docs/**
 
 checksum:
-  name_template: 'NZBreX_{{ .Version }}_checksums.txt'
-  algorithm: sha256
-
-changelog:
-  sort: asc
+  name_template: "checksums.txt"
 
 nfpms:
   - id: deb
@@ -223,31 +46,13 @@ release:
   github:
     owner: go-while
     name: NZBreX
+  draft: false
+  prerelease: auto
 
-#
-#
-
-#pipeline:
-#  post_upload_manual:
-#    when:
-#      event: manual
-#    cmd: .goreleaser/post_upload_GaRuS.sh
-
-#  post_upload_release:
-#    when:
-#      event: release
-#    cmd: .goreleaser/post_upload_GaRuS.sh
-
-#  post_upload:
-#    when:
-#      event: [release, manual]
-#    cmd: .goreleaser/post_upload_GaRuS.sh
-
-# Supported event: values
-#  release — when running an actual release (e.g., for a new Git tag)
-#  snapshot — when running in snapshot mode (local test build)
-#  pull_request — when triggered by a pull request (in CI)
-#  push — when triggered by a push event (in CI)
-#  manual — when triggered manually (GitHub Actions “workflow_dispatch”)
-#  all — always runs, regardless of event
-
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+  use: github
