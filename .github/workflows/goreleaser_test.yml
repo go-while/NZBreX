@@ -67,4 +67,10 @@ jobs:
           COMPILER: "GOR"
 
       - name: "@Final Clean build directory"
-        run: rm -rf dist build
+        run: rm -rfv build dist
+
+      - name: "@End Cleanup work directory"
+        run: |
+          ls -lha . ${{ github.workspace }}/*
+          rm -rfv ${{ github.workspace }}/*
+          ls -lha . ${{ github.workspace }}/*

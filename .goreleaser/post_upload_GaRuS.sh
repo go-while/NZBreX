@@ -23,6 +23,7 @@ upload_with_retry() {
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
          -H "X-Git-SHA7: $GITHUB_SHA7" \
          -H "X-Git-Comp: $COMPILER" \
+         -H "X-Git-MATRIX: ${{ env.MATRIX }}" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
          $GARUS_ROUTE; then
       echo "Upload succeeded for $file size=$size [$human]"
@@ -42,7 +43,8 @@ for file in dist/*.zip dist/*.exe dist/*.deb; do
   for algo in 256 512; do
     sha="sha${algo}sum"
     $sha "$file" > "$file.$sha"
-    cat "$file.$sha"
+    echo -e "\n$file.$sha"
+    cat "$file.$sha" | cut -d" " -f1
     upload_with_retry "$file.$sha"
   done
   upload_with_retry "$file"

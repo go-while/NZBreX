@@ -363,13 +363,15 @@ jobs:
           SHA7: ${{ env.SHA7 }}
           OS: ${{ matrix.os }}
           ARCH: ${{ matrix.arch }}
+          MATRIX: ${{ matrix.name }}
         run: |
           set -euo pipefail
           test -z "$SHA7" && echo "SHA7 not set" && exit 1
           test -z "$VERSION" && echo "VERSION not set" && exit 1
           test -z "$OS" && echo "VERSION not set" && exit 1
           test -z "$ARCH" && echo "VERSION not set" && exit 1
-          echo "VERSION=$VERSION SHA7=$SHA7 OS=$OS ARCH=$ARCH"
+          test -z "$MATRIX" && echo "MATRIX not set" && exit 1
+          echo "VERSION=$VERSION SHA7=$SHA7 OS=$OS ARCH=$ARCH MATRIX=$MATRIX"
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
@@ -427,6 +429,7 @@ jobs:
                    -H "X-Git-Ref: ${{ github.ref_name }}" \
                    -H "X-Git-SHA7: ${GITHUB_SHA::7}" \
                    -H "X-Git-Comp: ${{ env.COMPILER }}" \
+                   -H "X-Git-MATRIX: ${{ env.MATRIX }}" \
                    -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
                    http://10.20.0.1:58080/upload.php; then
                 echo "Upload succeeded for $file"
@@ -449,7 +452,8 @@ jobs:
               for algo in 256 512; do
                 sha="sha${algo}sum"
                 $sha "$file" > "$file.$sha"
-                cat "$file.$sha"
+                echo -e "\n$file.$sha"
+                cat "$file.$sha" | cut -d" " -f1
                 upload_with_retry "$file.$sha"
               done
               upload_with_retry "$file"
@@ -481,6 +485,10 @@ jobs:
 #        run: rm -rf "$GITHUB_WORKSPACE"/*
 
       - name: "@Final Clean build directory"
-        run: rm -rf build dist
+        run: rm -rfv build dist
 
-
+      - name: "@End Cleanup work directory"
+        run: |
+          ls -lha . ${{ github.workspace }}/*
+          rm -rfv ${{ github.workspace }}/*
+          ls -lha . ${{ github.workspace }}/*
