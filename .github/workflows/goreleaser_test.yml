@@ -57,7 +57,7 @@ jobs:
       - name: Set SHA7
         run: echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      - name: Post-upload artifacts
+      - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
         run: .goreleaser/post_upload_GaRuS.sh
         env:
           BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
