@@ -3,7 +3,7 @@
 
 ## get setup script
 apt -y update && apt -y full-upgrade && apt -y install psmisc vnstat
-wget https://raw.githubusercontent.com/go-while/NZBreX/refs/heads/8-rewrite-workflow-for-nzbrex/runner/runner_install_debian.sh -O /root/runner_install_debian.sh
+wget https://github.com/go-while/NZBreX/raw/refs/heads/gpt-tests-1748319193/runner/runner_install_debian.sh -O /root/runner_install_debian.sh
 chmod +x /root/runner_install_debian.sh
 vnstat --create -i eth0 || vnstat --add -i eth0
 chown -R vnstat:vnstat /var/lib/vnstat
