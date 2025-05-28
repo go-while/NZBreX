@@ -88,41 +88,27 @@ release:
     owner: go-while
     name: NZBreX
 
-hooks:
-  post:
-    - |
-      upload_with_retry() {
-        local file="$1"
-        local max_attempts=30
-        local attempt=1
-        local delay=30
-        while [ $attempt -le $max_attempts ]; do
-          echo "Upload attempt $attempt for $file..."
-          if curl -f -F "file=@$file" \
-               -H "X-Git-Repo: $GITHUB_REPOSITORY" \
-               -H "X-Git-Ref: $GITHUB_REF_NAME" \
-               -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
-               http://10.20.0.1:58080/upload.php; then
-            echo "Upload succeeded for $file"
-            return 0
-          else
-            echo "Upload failed for $file. Retrying in $delay seconds..."
-            sleep $delay
-            attempt=$(( attempt + 1 ))
-          fi
-        done
-        echo "Upload failed for $file after $max_attempts attempts."
-        return 1
-      }
+pipeline:
+  post_upload_manual:
+    when:
+      event: manual
+    cmd: .goreleaser/post_upload_GaRuS.sh
 
-      set -e
-      for file in dist/*.zip dist/*.deb; do
-        [ -e "$file" ] || continue
-        for algo in 256 512; do
-          sha="sha${algo}sum"
-          $sha "$file" > "$file.$sha"
-          upload_with_retry "$file.$sha"
-        done
-        upload_with_retry "$file"
-      done
+#  post_upload_release:
+#    when:
+#      event: release
+#    cmd: .goreleaser/post_upload_GaRuS.sh
+
+#  post_upload:
+#    when:
+#      event: [release, manual]
+#    cmd: .goreleaser/post_upload_GaRuS.sh
+
+# Supported event: values
+#  release — when running an actual release (e.g., for a new Git tag)
+#  snapshot — when running in snapshot mode (local test build)
+#  pull_request — when triggered by a pull request (in CI)
+#  push — when triggered by a push event (in CI)
+#  manual — when triggered manually (GitHub Actions “workflow_dispatch”)
+#  all — always runs, regardless of event
 
