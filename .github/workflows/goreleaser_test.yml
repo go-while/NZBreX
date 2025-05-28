@@ -284,12 +284,12 @@ jobs:
       #     sudo apt-get update
       #     sudo apt-get install -y musl-tools zip curl dpkg-dev
 
-      - name: Run GoReleaser (targeted for ${{ matrix.name }})
+      - name: Run Test GoReleaser (targeted for ${{ matrix.name }})
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --snapshot
         ## Required for GitHub Release Uploads
         #env:
         #  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
