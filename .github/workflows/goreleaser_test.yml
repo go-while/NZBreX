@@ -282,6 +282,6 @@ jobs:
       - name: Run GoReleaser (targeted for ${{ matrix.name }})
         uses: goreleaser/goreleaser-action@v5
         with:
-        version: latest
-        args: release --clean --skip-sign
+          version: latest
+          args: release --clean --skip-sign
 
