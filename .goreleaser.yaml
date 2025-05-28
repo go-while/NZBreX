@@ -25,30 +25,31 @@ builds:
 #      - CGO_ENABLED=1
 #      - CC=arm-linux-gnueabi-gcc
 
-  # Linux armv7/arm64 if needed
-  - id: linux-armv7
-    main: .
-    goos: [linux]
-    goarch: [arm]
-    goarm: [7]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=0
+#  # Linux armv7/arm64 if needed
+#  - id: linux-armv7
+#    main: .
+#    goos: [linux]
+#    goarch: [arm]
+#    goarm: [7]
+#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+#    env:
+#      - CGO_ENABLED=0
 
-  - id: linux-arm64
-    main: .
-    goos: [linux]
-    goarch: [arm64]
-    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-    env:
-      - CGO_ENABLED=0
+#  - id: linux-arm64
+#    main: .
+#    goos: [linux]
+#    goarch: [arm64]
+#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+#    env:
+#      - CGO_ENABLED=0
 
 
   # Linux musl (Alpine) targets
   - id: linux-musl
     main: .
     goos: [linux]
-    goarch: [amd64, 386, arm, arm64]
+    goarch: [amd64, 386]
+    #goarch: [amd64, 386, arm, arm64]
     #goarm: [6, 7]
     goarm: [7]
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
@@ -63,9 +64,10 @@ builds:
   - id: bsd
     main: .
     goos: [freebsd, openbsd, netbsd]
-    goarch: [amd64, 386, arm, arm64]
+    goarch: [amd64, 386]
+    #goarch: [amd64, 386, arm, arm64]
     #goarm: [6, 7]
-    goarm: [7]
+    #goarm: [7]
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -74,8 +76,9 @@ builds:
   - id: macos
     main: .
     goos: [darwin]
-    goarch: [amd64, arm64]
-    goarm: [7]
+    #goarch: [amd64, arm64]
+    goarch: [amd64]
+    #goarm: [7]
     ldflags: ['-s -w -X main.appVersion={{.Version}}']
     env:
       - CGO_ENABLED=0
@@ -89,23 +92,23 @@ builds:
 #    env:
 #      - CGO_ENABLED=0
 
-#  # Windows 64 bit / amd64
-#  - id: windows-amd64
-#    main: .
-#    goos: [windows]
-#    goarch: [amd64, 386]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=0
+  # Windows 64 bit / amd64
+  - id: windows-amd64
+    main: .
+    goos: [windows]
+    goarch: [amd64, 386]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
 
-#  # Windows 32 bit / i386
-#  - id: windows-386
-#    main: .
-#    goos: [windows]
-#    goarch: [amd64, 386]
-#    ldflags: ['-s -w -X main.appVersion={{.Version}}']
-#    env:
-#      - CGO_ENABLED=0
+  # Windows 32 bit / i386
+  - id: windows-386
+    main: .
+    goos: [windows]
+    goarch: [amd64, 386]
+    ldflags: ['-s -w -X main.appVersion={{.Version}}']
+    env:
+      - CGO_ENABLED=0
 
 #  # Windows arm64 (needs special env)
 #  - id: windows-arm64
