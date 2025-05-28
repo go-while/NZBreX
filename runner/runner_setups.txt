@@ -40,5 +40,6 @@ userdel -r go-while
 ## setup runner-ubu2404
 # ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2404" "runner-ubu2404" "default"
 
-
+### UBUNTU RUNNERS 001-254
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204" "runner-ubu2204-010" "default"
 
