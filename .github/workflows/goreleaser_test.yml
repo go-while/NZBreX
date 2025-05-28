@@ -40,7 +40,10 @@ jobs:
             os_name: ubuntu
             os_version: "24.04"
 
-    runs-on: [self-hosted, ${{ matrix.runner }}]
+    runs-on:
+      - self-hosted
+      - ${{ matrix.runner }}
+
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
@@ -62,10 +65,10 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools zip curl dpkg-dev
+#      - name: Install build dependencies
+#        run: |
+#          sudo apt-get update
+#          sudo apt-get install -y musl-tools zip curl dpkg-dev
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v5
