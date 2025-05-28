@@ -1,7 +1,9 @@
 version: 2
 
-project_name: NZBreX
-dist: dist
+project:
+  name: NZBreX
+  dist: dist
+
 
 builds:
   # Linux glibc targets (Debian, Ubuntu, etc.)
@@ -90,7 +92,7 @@ release:
     owner: go-while
     name: NZBreX
 
-pipeline:
+pipelines:
   post_upload_manual:
     when:
       event: manual
