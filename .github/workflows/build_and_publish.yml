@@ -345,9 +345,6 @@ jobs:
       - name: "Set GaRuS Variables"
         id: vars
         env:
-          #OS: ${{ matrix.os }}
-          #ARCH: ${{ matrix.arch }}
-          #MATRIX: ${{ matrix.name }}
           XLIBC: ${{ matrix.libc }}
           GITHUB_REF_TYPE: ${{ github.ref_type }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -365,25 +362,15 @@ jobs:
           VERSION="${VERSION#v}"
           SHA7="${GITHUB_SHA::7}"
           if [ -n "$XLIBC" ]; then
-            LIBC="-$XLIBC"
+            LIBC="-$XLIBC"  # libc or musl is set. prepend a - and use as final string
           else
             LIBC="-purego"
           fi
-          #echo "OS=$OS" >> $GITHUB_ENV
-          #echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "SHA7=$SHA7" >> $GITHUB_ENV
-          #echo "MATRIX=$MATRIX" >> $GITHUB_ENV
           echo "LIBC=$LIBC" >> $GITHUB_ENV
 
       - name: Build ${{ matrix.name }}
-#        env:
-#          #VERSION: ${{ env.VERSION }}
-#          #SHA7: ${{ env.SHA7 }}
-#          #LIBC: "${{ env.LIBC }}"
-#          #MATRIX: ${{ env.MATRIX }}
-#          #OS: ${{ env.OS }}
-#          #ARCH: ${{ env.ARCH }}
         run: |
           set -euo pipefail
           mkdir -p builds/${{ matrix.name }}/usr/bin
@@ -432,8 +419,6 @@ jobs:
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
-        #env:
-        #
         run: |
           upload_with_retry() {
             local file="$1"
@@ -461,7 +446,6 @@ jobs:
             echo "Upload failed for $file after $max_attempts attempts."
             return 1
           }
-
           set -e
           for ext in zip deb; do
             file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.${ext}"
@@ -476,6 +460,8 @@ jobs:
               upload_with_retry "$file"
             fi
           done
+          upload_with_retry builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
+          upload_with_retry builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
 
 #      - name: "Upload Binary to github blob storage"
 #        uses: actions/upload-artifact@v4
