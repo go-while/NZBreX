@@ -73,32 +73,29 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 			//log.Printf("Mapping Provider '%s' to group '%s'", provider.Name, provider.Group)
 
 			globalmux.Lock()
-			if s.segmentChansCheck[provider.Group] != nil {
-				log.Printf("ERROR: segmentChansCheck for group '%s' already exists! This should not happen!", provider.Group)
-				globalmux.Unlock()
-				return
-			}
-			// create channels once if not exists
-			s.segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-			s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-			s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-			// fill check channel for provider group with pointers
-			go func(segmentChanCheck chan *segmentChanItem) {
-				start := time.Now()
-				for _, item := range s.segmentList {
-					segmentChanCheck <- item
-				}
-				for {
-					time.Sleep(time.Second) // wait for check routine to empty out the chan
-					if len(segmentChanCheck) == 0 {
-						break
+			if s.segmentChansCheck[provider.Group] == nil {
+				// create channels once if not exists
+				// since we run concurrently only the first worker hitting the lock will create the channels
+				s.segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				// fill check channel for provider group with pointers
+				go func(segmentChanCheck chan *segmentChanItem) {
+					start := time.Now()
+					for _, item := range s.segmentList {
+						segmentChanCheck <- item
 					}
-				}
-				if cfg.opt.Verbose {
-					log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
-				}
-			}(s.segmentChansCheck[provider.Group])
-
+					for {
+						time.Sleep(time.Second) // wait for check routine to empty out the chan
+						if len(segmentChanCheck) == 0 {
+							break
+						}
+					}
+					if cfg.opt.Verbose {
+						log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
+					}
+				}(s.segmentChansCheck[provider.Group])
+			}
 			globalmux.Unlock()
 			if cfg.opt.Debug {
 				log.Printf("Connecting to Provider '%s' MaxConns=%d SSL=%t", provider.Name, provider.MaxConns, provider.SSL)
