@@ -19,68 +19,65 @@ package main
 
 import (
 
-	//"github.com/Tensai75/cmpb"
-	//"github.com/fatih/color"
+	//"github.com/Tensai75/cmpb" // TODO:FIXME progressbars cfg.opt.Bar, segmentBar, upBar, dlBar
+	//"github.com/fatih/color" // TODO:FIXME progressbars cfg.opt.Bar, segmentBar, upBar, dlBar
 
+	"fmt"
 	"log"
 	"os"
 
 	prof "github.com/go-while/go-cpu-mem-profiler"
 
-	//"path/filepath"
-	//"runtime"
-
-	//"slices"
-	//"strings"
 	"sync"
 	"time"
 )
 
 var (
-	appName    = "NZBreX"
-	appVersion = "-" // Github tag or built date
-	Prof       *prof.Profiler
-	cfg        *Config
-	globalmux  sync.RWMutex
-	stop_chan  chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
-	core_chan  chan struct{} // limits cpu usage
-	memlim     *MemLimiter
-	cache      *Cache
-	cacheON    bool
+	appName    = "NZBreX"      // application name
+	appVersion = "-"           // Github tag or built date
+	Prof       *prof.Profiler  // cpu/mem profiler
+	cfg        *Config         // global config object
+	globalmux  sync.RWMutex    // global mutex for all routines to use
+	stop_chan  chan struct{}   // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
+	core_chan  chan struct{}   // limits cpu usage
+	memlim     *MemLimiter     // limits number of objects in ram
+	cache      *Cache          // cache object
+	cacheON    bool            // will be true if cache is enabled
 	GCounter   *Counter_uint64 // a global counter
-	/*
-		segmentBar   *cmpb.Bar
-		upBar        *cmpb.Bar
-		dlBar        *cmpb.Bar
-		upBarStarted bool
-		dlBarStarted bool
-		BarMutex     sync.Mutex
-		progressBars = cmpb.NewWithParam(&cmpb.Param{
-			Interval:     5000 * time.Millisecond,
-			Out:          color.Output,
-			ScrollUp:     cmpb.AnsiScrollUp,
-			PrePad:       1,
-			KeyWidth:     8,
-			MsgWidth:     8,
-			PreBarWidth:  12,
-			BarWidth:     42,
-			PostBarWidth: 4,
-			Post:         "...",
-			KeyDiv:       ':',
-			LBracket:     '[',
-			RBracket:     ']',
-			Empty:        '-',
-			Full:         '=',
-			Curr:         '>',
-		})
+
+	/* // TODO:FIXME progressbars
+	segmentBar   *cmpb.Bar
+	upBar        *cmpb.Bar
+	dlBar        *cmpb.Bar
+	upBarStarted bool
+	dlBarStarted bool
+	BarMutex     sync.Mutex
+	progressBars = cmpb.NewWithParam(&cmpb.Param{
+		Interval:     5000 * time.Millisecond,
+		Out:          color.Output,
+		ScrollUp:     cmpb.AnsiScrollUp,
+		PrePad:       1,
+		KeyWidth:     8,
+		MsgWidth:     8,
+		PreBarWidth:  12,
+		BarWidth:     42,
+		PostBarWidth: 4,
+		Post:         "...",
+		KeyDiv:       ':',
+		LBracket:     '[',
+		RBracket:     ']',
+		Empty:        '-',
+		Full:         '=',
+		Curr:         '>',
+	})
 	*/
 
-	version  bool   // flag
-	runProf  bool   // flag
-	webProf  string // flag
-	testproc bool   // flag
-	nzbfile  string // flag
-	//booted   time.Time // not a flag
+	booted  time.Time // not a flag
+	version bool      // flag
+	runProf bool      // flag
+	webProf string    // flag
+	nzbfile string    // flag
+
 )
 
 func init() {
@@ -88,104 +85,16 @@ func init() {
 	setupSigusr1Dump()
 	GCounter = NewCounter(10)
 	cfg = &Config{opt: &CFG{}}
-	//booted = time.Now()
+	booted = time.Now()
 } // end func init
 
 func main() {
 	//colors := new(cmpb.BarColors)
 	ParseFlags()
 
-	/*
-		if cfg.opt.Bar && cfg.opt.Colors {
-			colors.Post, colors.KeyDiv, colors.LBracket, colors.RBracket =
-				color.HiCyanString, color.HiCyanString, color.HiCyanString, color.HiCyanString
-			colors.Key = color.HiWhiteString
-			colors.Msg, colors.Empty = color.HiYellowString, color.HiYellowString
-			colors.Full = color.HiGreenString
-			colors.Curr = color.GreenString
-			colors.PreBar, colors.PostBar = color.HiYellowString, color.HiMagentaString
-		}
-	*/
-
-	/*
-		if cfg.opt.Bar {
-			// segment check progressbar
-			segmentBar = progressBars.NewBar("STAT", len(s.segmentList))
-			segmentBar.SetPreBar(cmpb.CalcSteps)
-			segmentBar.SetPostBar(cmpb.CalcTime)
-			if cfg.opt.Colors {
-				progressBars.SetColors(colors)
-			}
-			// start progressbar
-			progressBars.Start()
-			//progressBars.Stop("STAT", "done")
-		}
-	*/
-
-	/* SESSION start
-	// run the go routines
-	waitDivider.Add(1)
-	waitDividerDone.Add(1)
-	workerWGconnEstablish.Add(1)
-	GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, &waitPool, nzbfile.Bytes)
-
-	if cfg.opt.Debug {
-		log.Print("main: workerWGconnEstablish.Wait()")
-	}
-	workerWGconnEstablish.Wait()
-	if cfg.opt.Debug {
-		log.Print("main: workerWGconnEstablish.Wait() released: segmentCheckStartTime=now")
-	}
-
-	setTimerNow(&segmentCheckStartTime)
-	// booting work divider
-	go GoWorkDivider(&waitDivider, &waitDividerDone)
-	if cfg.opt.Debug {
-		log.Print("main: waitDividerDone.Wait()")
-	}
-	waitDividerDone.Wait()
-
-	if cfg.opt.Debug {
-		log.Print("main: waitDividerDone.Wait() released")
-	}
-
-	StopRoutines()
-
-	if cfg.opt.Debug {
-		log.Print("main: waitWorker.Wait()")
-	}
-	waitWorker.Wait()
-	if cfg.opt.Debug {
-		log.Print("main: waitWorker.Wait() released, waiting on waitPool.Wait()")
-	}
-	waitPool.Wait()
-
-	SESSION END */
-
-	/*
-		if cfg.opt.Bar {
-			progressBars.Wait()
-		}
-	*/
-
-	/*
-		if cfg.opt.Debug {
-			log.Print("main: waitPool.Wait() released")
-		}
-
-		result, runtime_info := Results(preparationStartTime)
-
-		YencMerge(nzbhashname, &result)
-
-		log.Print(runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end")
-		//writeCsvFile()
-	*/
-	// SESSION ENDS HERE
-	//log.Printf("// infinite wait!")
-	//select {} // infinite wait!
-
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
+
 	if err := thisProcessor.NewProcessor(); err != nil {
 		log.Printf("ERROR NewProcessor: err='%v'", err)
 		os.Exit(1)
@@ -208,18 +117,14 @@ func main() {
 		}(nzbfile, wg)
 		log.Printf("main: wg.Wait()")
 		wg.Wait()
-		time.Sleep(time.Second)
-
 	}
-
-	log.Printf("NZBreX done!")
-	//log.Printf("// infinite wait!")
-	//select {} // infinite wait!
 
 	if runProf {
 		log.Printf("Prof stop capturing cpu profile")
 		Prof.StopCPUProfile()
-		//time.Sleep(time.Second)
+		time.Sleep(time.Second)
 	}
+	fmt.Printf("%s runtime: %.0f sec (booted: %s)\n", os.Args[0], time.Since(booted).Seconds(), booted.Format(time.RFC3339))
+	/* TODO: print total processed segments, uploaded segments, downloaded segments, etc. */
 	os.Exit(0)
 } // end func main

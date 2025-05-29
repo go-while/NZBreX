@@ -238,9 +238,9 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 				}
 				// If you add more fields to the 'segmentChanItem' struct, the compiler will catch missing initializations here and crash on compilation.
 				item := &segmentChanItem{
-					s, &segment, &file,
+					sync.RWMutex{}, s, &segment, &file,
 					make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)),
-					sync.RWMutex{}, nil, false, false, false, false, false, false, false, false,
+					nil, false, false, false, false, false, false, false, false,
 					0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &s.nzbHash}
 				s.segmentList = append(s.segmentList, item)
 			}
@@ -304,37 +304,12 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		log.Printf("Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
 	}
 
-	var waitWorker sync.WaitGroup
-	var workerWGconnEstablish sync.WaitGroup
-	var waitDivider sync.WaitGroup
-	var waitDividerDone sync.WaitGroup
-	var waitPool sync.WaitGroup
-
-	/* in *SESSION
-	var segmentCheckStartTime time.Time
-	var segmentCheckEndTime   time.Time
-	var segmentCheckTook      time.Duration
-	*/
-	/* TODO: cache boots in main()
-	// boot cache routines
-	if cacheON {
-		cache = NewCache(
-			cfg.opt.Cachedir,
-			cfg.opt.CRW,
-			cfg.opt.CheckOnly,
-			cfg.opt.MaxArtSize,
-			cfg.opt.YencWrite,
-			cfg.opt.DebugCache)
-
-		if cache == nil {
-			log.Printf("ERROR Cache failed... is nil!")
-			os.Exit(1)
-		}
-		if !cache.MkSubDir(s.nzbHash) {
-			return fmt.Errorf("error LaunchSession !cache.MkSubDir(s.nzbHash)")
-		}
-	}
-	*/
+	// setup wait groups
+	var waitWorker sync.WaitGroup            // waitWorker is used to wait for all workers to finish
+	var workerWGconnEstablish sync.WaitGroup // workerWGconnEstablish is used to wait for all connections to be established before starting the work
+	var waitDivider sync.WaitGroup           // waitDivider is used to block GoWorkDivider() until all workers are ready
+	var waitDividerDone sync.WaitGroup       // waitDividerDone is used to signal that GoWorkDivider() has quit
+	var waitPool sync.WaitGroup              // waitPool waits until all workers closed their connections and routines
 
 	/*
 		if cfg.opt.Bar {
@@ -403,7 +378,8 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	result = result + runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end"
 
 	s.results = append(s.results, result)
-	//writeCsvFile()
+
+	s.writeCsvFile()
 
 	return
 } // end func LaunchSession

@@ -13,7 +13,6 @@ import (
 
 func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
-	flag.BoolVar(&testproc, "testproc", false, "testing watchdir processor code")
 	// essentials
 	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")

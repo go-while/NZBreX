@@ -279,14 +279,13 @@ NZBreX in **-verbose** mode prints some statistics while running:
 ---
 
 ## Ideas and more TODOs
+- #0001: watchDir (processor/sessions) almost done!
 - #0010: any bugs? fix all todos in code!
 - #0020: better console output
 - #0030: verify of uploaded articles
 - #0050: config.json does not work
 - #0060: streaming (CHECK/TAKETHIS)
-- #0070: watchDir (processor/sessions)
 - #0080: progressbar (cosmetics)
-- #0090: disabled csv output as i don't need it
 - ...?
 
 ---

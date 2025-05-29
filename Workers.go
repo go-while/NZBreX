@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
-	log.Printf("moved to session...")
-}
-
+// GoBootWorkers boots up all workers for a session
 func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
 	globalmux.Lock()
 	if s == nil {
@@ -27,9 +24,6 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 	}
 	s.preBoot = false
 	s.active = true
-	//s.segmentChansCheck = make(map[string]chan *segmentChanItem)
-	//s.segmentChansDowns = make(map[string]chan *segmentChanItem)
-	//s.segmentChansReups = make(map[string]chan *segmentChanItem)
 	waitWorker.Add(1)
 	globalmux.Unlock()
 
@@ -55,20 +49,21 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 		cfg.opt.ChanSize = DefaultChanSize
 	}
 
+	// loop over the providerList and boot up anonymous workers for each provider
 	for _, provider := range s.providerList {
-		log.Printf("BootWorkers list=%d check provider='%#v' ", len(s.providerList), provider.Name)
+		if cfg.opt.Debug {
+			log.Printf("BootWorkers list=%d check provider='%#v' ", len(s.providerList), provider.Name)
+		}
 		if !provider.Enabled || provider.MaxConns <= 0 {
 			if cfg.opt.Verbose {
-				log.Printf("ignored provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
+				log.Printf("ignored provider: '%s'", provider.Name)
 			}
 			continue
-		}
-		if cfg.opt.Verbose {
-			log.Printf("Connecting provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
 		}
 		globalmux.Lock()
 		workerWGconnEstablish.Add(1)
 		globalmux.Unlock()
+		// boot up a worker for this provider in an anonymous go routine
 		go func(provider *Provider, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup) {
 			defer workerWGconnEstablish.Done()
 			//log.Printf("Boot Provider '%s'", provider.Name)
@@ -78,47 +73,52 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 			//log.Printf("Mapping Provider '%s' to group '%s'", provider.Name, provider.Group)
 
 			globalmux.Lock()
-			if s.segmentChansCheck[provider.Group] == nil {
-				// create channels once if not exists
-				s.segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				// fill check channel for provider group with pointers
-				go func(segmentChanCheck chan *segmentChanItem) {
-					start := time.Now()
-					for _, item := range s.segmentList {
-						segmentChanCheck <- item
-					}
-					for {
-						time.Sleep(time.Second) // wait for check routine to empty out the chan
-						if len(segmentChanCheck) == 0 {
-							break
-						}
-					}
-					if cfg.opt.Verbose {
-						log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
-					}
-				}(s.segmentChansCheck[provider.Group])
-
+			if s.segmentChansCheck[provider.Group] != nil {
+				log.Printf("ERROR: segmentChansCheck for group '%s' already exists! This should not happen!", provider.Group)
+				globalmux.Unlock()
+				return
 			}
-			globalmux.Unlock()
+			// create channels once if not exists
+			s.segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+			s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+			s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+			// fill check channel for provider group with pointers
+			go func(segmentChanCheck chan *segmentChanItem) {
+				start := time.Now()
+				for _, item := range s.segmentList {
+					segmentChanCheck <- item
+				}
+				for {
+					time.Sleep(time.Second) // wait for check routine to empty out the chan
+					if len(segmentChanCheck) == 0 {
+						break
+					}
+				}
+				if cfg.opt.Verbose {
+					log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
+				}
+			}(s.segmentChansCheck[provider.Group])
 
-			//log.Printf("Connecting to Provider '%s' MaxConns=%d srvuri='%s'", provider.Name, provider.MaxConns, srvuri)
+			globalmux.Unlock()
+			if cfg.opt.Debug {
+				log.Printf("Connecting to Provider '%s' MaxConns=%d SSL=%t", provider.Name, provider.MaxConns, provider.SSL)
+			}
+
 			if !cfg.opt.CheckOnly && !provider.NoUpload {
 
-				// check of capabilities
-				//srvtp, conn, err := connectBackend(0, srvuri, provider.SkipSslCheck)
+				// get a connection item from the provider's connection pool
 				connitem, err := provider.Conns.GetConn()
 				if err != nil {
 					log.Printf("ERROR Boot Provider '%s' err='%v'", provider.Name, err)
 					return
 				}
+				// check of capabilities
 				if err := checkCapabilities(provider, connitem); err != nil {
 					log.Printf("WARN Provider '%s' force NoUpload=true err=\"%v\" ", provider.Name, err)
 					provider.NoUpload = true
 				}
 			}
-			if cfg.opt.Verbose {
+			if !cfg.opt.CheckOnly && cfg.opt.Verbose {
 				provider.mux.RLock()
 				//log.Printf("Capabilities: [ IHAVE: %s | POST: %s | CHECK: %s | STREAM: %s ] @ '%s' NoDl=%t NoUp=%t MaxConns=%d",
 				log.Printf("Capabilities: | IHAVE: %s | POST: %s | NoDL: %s | NoUP: %s | MaxC: %3d | @ '%s'",
@@ -152,7 +152,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 	if cfg.opt.Debug {
 		log.Printf("Waiting for Workers to connect")
 	}
-	workerWGconnEstablish.Done() // releases 1 set before calling GoBootWorkers
+	workerWGconnEstablish.Done() // releases 1. had been set before calling GoBootWorkers
 	workerWGconnEstablish.Wait() // waits for the others to release when connections are established
 	// check if we have at least one provider with IHAVE or POST capability
 	if GCounter.GetValue("postProviders") == 0 && !cfg.opt.CheckOnly {
@@ -165,12 +165,12 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 } // end func GoBootWorkers
 
 func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitPool *sync.WaitGroup) {
-	if cfg.opt.BUG {
+	if cfg.opt.Debug {
 		log.Printf("GoWorker (%d) launching routines '%s'", wid, provider.Name)
 	}
 	globalmux.Lock()
-	waitWorker.Add(3)
-	waitPool.Add(1)
+	waitWorker.Add(3) // for the 3 routines per worker
+	waitPool.Add(1)   // for the worker itself
 
 	segCC := s.segmentChansCheck[provider.Group]
 	segCD := s.segmentChansDowns[provider.Group]
@@ -178,15 +178,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	workerWGconnEstablish.Done()
 	globalmux.Unlock()
 
-	// gets a conn once for a worker and shares conn in check, down, reup routines
-	// without parking it back to the pool as long as workers are running
+	// Obtain a connection for this worker and share it among the check, download, and reupload routines.
+	// The connection is not returned to the pool until all three routines have finished.
 	sharedConn := make(chan *ConnItem, 1)
 	connitem, err := provider.Conns.GetConn()
 	if err != nil {
 		log.Printf("ERROR a GoWorker (%d) failed to connect '%s' err='%v'", wid, provider.Name, err)
 		return
 	}
-	sharedConn <- connitem // puts connitem into sharedConn channel
+	sharedConn <- connitem // park the connection in a channel
 
 	/* new worker code CheckRoutine */
 	go func(wid int, provider *Provider, segmentChanCheck chan *segmentChanItem, segmentChanDown chan *segmentChanItem, waitWorker *sync.WaitGroup) {
@@ -285,9 +285,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		log.Printf("GoWorker (%d) no sharedConn?! @ '%s'", wid, provider.Name)
 	}
 
-	waitPool.Done()
-	KillConnPool(provider)
-	waitPool.Wait()
+	waitPool.Done()        // release the worker from the pool
+	KillConnPool(provider) // close the connection pool for this provider
+	waitPool.Wait()        // wait for others to release too
 
 	if cfg.opt.Debug {
 		log.Printf("GoWorker (%d) quit @ '%s'", wid, provider.Name)
@@ -438,6 +438,7 @@ func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup
 	return
 } // end func pushUP
 
+// GoWorkDivider is the main worker loop that processes segments
 func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup) {
 	if cfg.opt.Debug {
 		log.Print("go GoWorkDivider() waitDivider.Wait()")
@@ -505,7 +506,7 @@ forever:
 				cached++
 			}
 
-			if /*!cfg.opt.ByPassSTAT &&*/ item.checkedAt != providersCnt {
+			if /*!cfg.opt.ByPassSTAT &&*/ item.checkedOn != providersCnt {
 				// ignore item, will retry next run
 				item.mux.RUnlock() // RUNLOCKS HERE #824d
 				continue forsegmentList
@@ -513,7 +514,7 @@ forever:
 			if !cfg.opt.ByPassSTAT {
 				checked++
 			} else {
-				checked += uint64(item.checkedAt)
+				checked += uint64(item.checkedOn)
 			}
 
 			// capture statistics of this momemt

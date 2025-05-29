@@ -69,7 +69,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 			item.mux.Lock()
 			item.availableOn[pid] = true
 			delete(item.missingOn, pid)
-			item.checkedAt++
+			item.checkedOn++
 			item.mux.Unlock()
 		}
 		//checkedAt += item.checkedAt // segmentBar
@@ -104,7 +104,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 				if code == 451 {
 					item.dmcaOn[id] = true
 				}
-				item.checkedAt++
+				item.checkedOn++
 			}
 
 			//checkedAt += item.checkedAt // segmentBar
@@ -202,7 +202,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		item.flagisDL = true // FIXME REVIEW should be set to false here if crc32 reports an error but code 220 is still there....
 		item.flaginDL = false
 		if cfg.opt.ByPassSTAT {
-			item.checkedAt++
+			item.checkedOn++
 		}
 		item.mux.Unlock()   // mutex #e96b
 		provider.mux.Lock() // mutex #918f articles.available++/downloaded++

@@ -338,19 +338,20 @@ func (s *SESSION) writeCsvFile() (err error) {
 	return
 } // end func writeCsv
 
-func setTimerNow(timer *time.Time) {
-	globalmux.Lock()
-	*timer = time.Now()
-	globalmux.Unlock()
-}
+/*
+	func setGlobalTimerNow(timer *time.Time) {
+		globalmux.Lock()
+		*timer = time.Now()
+		globalmux.Unlock()
+	}
 
-func getTimeSince(timer time.Time) time.Duration {
-	globalmux.RLock()
-	duration := time.Since(timer)
-	globalmux.RUnlock()
-	return duration
-}
-
+	func getGlobalTimerSince(timer time.Time) time.Duration {
+		globalmux.RLock()
+		duration := time.Since(timer)
+		globalmux.RUnlock()
+		return duration
+	}
+*/
 func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps float64) {
 	if durationSeconds <= 0 {
 		return 0, 0

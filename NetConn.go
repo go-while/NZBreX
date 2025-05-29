@@ -503,6 +503,13 @@ func msg2srv(conn net.Conn, message string) bool {
 } // end func msg2srv
 
 func checkCapabilities(provider *Provider, connitem *ConnItem) error {
+	if cfg.opt.CheckOnly {
+		if cfg.opt.Debug {
+			log.Printf("checkCapabilities: flag checkonly is set, skipping capabilities check")
+		}
+		// if checkonly is set, we don't need to check capabilities
+		return nil
+	}
 	rcode := 101 // expected
 
 	provider.mux.Lock()         // mutex #9b71 checkCapabilities
