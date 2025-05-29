@@ -431,7 +431,7 @@ jobs:
             local max_attempts=30
             local FNstr=""
             if [ -n "$filename" ]; then
-              # filename to use supplied
+              # filename to use has been supplied in $2
               FNstr=";filename=$filename"
             fi
             while [ $attempt -le $max_attempts ]; do
@@ -469,10 +469,15 @@ jobs:
               upload_with_retry "$file"
             fi
           done
+          # catch the hash sums of the binary files for uploading
           sha256file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha256sum"
           sha512file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha512sum"
-          test -f "$sha256file" && upload_with_retry "$sha256file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum" || echo "not found: "$sha256""
-          test -f "$sha512file" && upload_with_retry "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum" || echo "not found: "$sha512""
+          # finally rename the sha sums to good filenames
+          cp -v "$sha256file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
+          cp -v "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
+          upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
+          upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
+
 
 #      - name: "Upload Binary to github blob storage"
 #        uses: actions/upload-artifact@v4
@@ -489,6 +494,8 @@ jobs:
 #          files: |
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
 
 #      - name: "Backup go cache"
 #        run: runner/go-cache-backup.sh
