@@ -345,10 +345,10 @@ jobs:
       - name: "Set GaRuS Variables"
         id: vars
         env:
-          OS: ${{ matrix.os }}
-          ARCH: ${{ matrix.arch }}
-          MATRIX: ${{ matrix.name }}
-          ALIBC: "${{ matrix.libc }}"
+          #OS: ${{ matrix.os }}
+          #ARCH: ${{ matrix.arch }}
+          #MATRIX: ${{ matrix.name }}
+          XLIBC: ${{ matrix.libc }}
           GITHUB_REF_TYPE: ${{ github.ref_type }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
@@ -364,35 +364,28 @@ jobs:
           # Strip leading 'v' if present
           VERSION="${VERSION#v}"
           SHA7="${GITHUB_SHA::7}"
-          if [ -n "$ALIBC" ]; then
-            LIBC="-$ALIBC"
+          if [ -n "$XLIBC" ]; then
+            LIBC="-$XLIBC"
           else
             LIBC="-purego"
           fi
-          echo "OS=$OS" >> $GITHUB_ENV
-          echo "ARCH=$ARCH" >> $GITHUB_ENV
+          #echo "OS=$OS" >> $GITHUB_ENV
+          #echo "ARCH=$ARCH" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "SHA7=$SHA7" >> $GITHUB_ENV
-          echo "MATRIX=$MATRIX" >> $GITHUB_ENV
+          #echo "MATRIX=$MATRIX" >> $GITHUB_ENV
           echo "LIBC=$LIBC" >> $GITHUB_ENV
 
       - name: Build ${{ matrix.name }}
         env:
-          VERSION: ${{ env.VERSION }}
-          SHA7: ${{ env.SHA7 }}
-          LIBC: "${{ env.LIBC }}"
-          MATRIX: ${{ env.MATRIX }}
-          OS: ${{ env.OS }}
-          ARCH: ${{ env.ARCH }}
+          #VERSION: ${{ env.VERSION }}
+          #SHA7: ${{ env.SHA7 }}
+          #LIBC: "${{ env.LIBC }}"
+          #MATRIX: ${{ env.MATRIX }}
+          #OS: ${{ env.OS }}
+          #ARCH: ${{ env.ARCH }}
         run: |
           set -euo pipefail
-          test -z "$SHA7" && echo "SHA7 not set" && exit 21
-          test -z "$VERSION" && echo "VERSION not set" && exit 22
-          test -z "$OS" && echo "VERSION not set" && exit 23
-          test -z "$ARCH" && echo "VERSION not set" && exit 24
-          test -z "$MATRIX" && echo "MATRIX not set" && exit 25
-          test -z "$LIBC" && echo "LIBC not set" && exit 26
-          echo "VERSION=$VERSION SHA7=$SHA7 OS=$OS ARCH=$ARCH MATRIX=$MATRIX LIBC=$LIBC"
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
@@ -414,10 +407,12 @@ jobs:
           fi
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-          #zip -j "NZBreX_${VERSION}-${SHA7}-${OS}-${ARCH}-${{ matrix.name }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
-
-          zip -j "NZBreX_${VERSION}-${SHA7}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
-
+          #
+          # packing the build
+          #
+          zip -j "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          #
+          # done packing
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
           matrix_distro="${{ matrix.distro }}"
@@ -433,11 +428,12 @@ jobs:
             echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
             echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
-            #dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
             dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
           fi
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
+        #env:
+        #
         run: |
           upload_with_retry() {
             local file="$1"
@@ -449,9 +445,9 @@ jobs:
               if curl --silent -f -F "file=@$file" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
                    -H "X-Git-Ref: ${{ github.ref_name }}" \
-                   -H "X-Git-SHA7: ${GITHUB_SHA::7}" \
+                   -H "X-Git-SHA7: ${{ env.SHA7 }}" \
                    -H "X-Git-Comp: ${{ env.COMPILER }}" \
-                   -H "X-Git-MATRIX: ${{ env.MATRIX }}" \
+                   -H "X-Git-MATRIX: ${{ matrix.name }}" \
                    -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
                    http://10.20.0.1:58080/upload.php; then
                 echo "Upload succeeded for $file"
@@ -468,7 +464,6 @@ jobs:
 
           set -e
           for ext in zip deb; do
-            #file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.${ext}"
             file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
@@ -495,9 +490,7 @@ jobs:
 #        uses: softprops/action-gh-release@v2
 #        with:
 #          files: |
-#            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.zip
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
-#            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.name }}.deb
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
 
 #      - name: "Backup go cache"
