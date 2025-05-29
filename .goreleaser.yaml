@@ -10,10 +10,14 @@ builds:
       - linux
       - darwin
       - windows
+      - freebsd
+      - openbsd
+      - netbsd
     goarch:
       - amd64
       - arm64
       - 386
+      - arm
     ldflags:
       #- "-s -w -X main.appVersion={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}"
       - "-s -w -X main.appVersion={{.Version}}"
