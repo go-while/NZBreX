@@ -425,12 +425,18 @@ jobs:
         run: |
           upload_with_retry() {
             local file="$1"
+            local filename="$2"
             local attempt=1
             local delay=30
             local max_attempts=30
+            local FNstr=""
+            if [ -n "$filename" ]; then
+              # filename to use supplied
+              FNstr=";filename=$filename"
+            fi
             while [ $attempt -le $max_attempts ]; do
               test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
-              if curl --silent -f -F "file=@$file" \
+              if curl --silent -f -F "file=@$file$FNstr" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
                    -H "X-Git-Ref: ${{ github.ref_name }}" \
                    -H "X-Git-SHA7: ${{ env.SHA7 }}" \
@@ -463,10 +469,10 @@ jobs:
               upload_with_retry "$file"
             fi
           done
-          sha256="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha256sum"
-          sha512="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha512sum"
-          test -f "$sha256" && upload_with_retry "$sha256" || echo "not found: "$sha256""
-          test -f "$sha512" && upload_with_retry "$sha512" || echo "not found: "$sha512""
+          sha256file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha256sum"
+          sha512file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha512sum"
+          test -f "$sha256file" && upload_with_retry "$sha256file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum" || echo "not found: "$sha256""
+          test -f "$sha512file" && upload_with_retry "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum" || echo "not found: "$sha512""
 
 #      - name: "Upload Binary to github blob storage"
 #        uses: actions/upload-artifact@v4
