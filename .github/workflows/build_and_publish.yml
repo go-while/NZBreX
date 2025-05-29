@@ -379,6 +379,7 @@ jobs:
           else
             binary_name=NZBreX
           fi
+          echo "BINARY=$binary_name" >> $GITHUB_ENV
           GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
@@ -393,7 +394,9 @@ jobs:
             exit 1
           fi
           sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
+          cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
           sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+          cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           #
           # packing the build
           #
@@ -460,8 +463,10 @@ jobs:
               upload_with_retry "$file"
             fi
           done
-          upload_with_retry builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-          upload_with_retry builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+          sha256="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha256sum"
+          sha512="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha512sum"
+          test -f "$sha256" && upload_with_retry "$sha256" || echo "not found: "$sha256""
+          test -f "$sha512" && upload_with_retry "$sha512" || echo "not found: "$sha512""
 
 #      - name: "Upload Binary to github blob storage"
 #        uses: actions/upload-artifact@v4
