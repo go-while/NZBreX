@@ -1,9 +1,5 @@
 package main
 
-/*
- *   still all TODO !
- */
-
 import (
 	"fmt"
 	"log"
@@ -18,18 +14,13 @@ import (
 	"github.com/Tensai75/nzbparser"
 )
 
-/*
-	type File struct {
-		path string
-		open bool
-		mux  sync.RWMutex
-	}
-*/
-
 // PROCESSOR manages NZB file processing.
 // It monitors a directory for NZB files, processes them, and maintains:
 // - a map of active sessions (each representing an NZB file and its segments)
 // - a record of seen files to prevent duplicate processing
+// - the same PROCESSOR instance can handle multiple NZB files concurrently or a single file via cmd line
+// - it provides methods to start new sessions, refresh the directory, and manage the processing state
+// - it is designed to be run as a long-running service, processing files as they appear in the watched directory
 type PROCESSOR struct {
 	IsRunning bool
 	//cfg       *Config // TODO: remove from global scope?
@@ -381,6 +372,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 	s.writeCsvFile()
 
+	s.cleanupSession()
 	return
 } // end func LaunchSession
 
@@ -445,6 +437,43 @@ func (p *PROCESSOR) newssid() uint64 {
 	log.Printf("PROCESSOR.newssid: %d", newSessId)
 	return newSessId
 } // end func p.newssid
+
+func (s *SESSION) cleanupSession() {
+	// cleanup session
+	if cfg.opt.Debug {
+		log.Printf("cleanupSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
+	}
+	s.mux.Lock()
+	s.preBoot = false
+	s.active = false
+	s.mux.Unlock()
+
+	// remove session from processor map
+	s.proc.mux.Lock()
+	delete(s.proc.sessMap, s.sessId)
+	s.proc.mux.Unlock()
+
+	// close all channels.
+	// app will panic if anybody still sends which should not be possible
+	for n, ch := range s.segmentChansCheck {
+		close(ch)
+		s.segmentChansCheck[n] = nil // remove from map
+		s.segmentChansCheck = nil
+	}
+	for n, ch := range s.segmentChansDowns {
+		close(ch)
+		s.segmentChansDowns[n] = nil // remove from map
+		s.segmentChansDowns = nil
+	}
+	for n, ch := range s.segmentChansReups {
+		close(ch)
+		s.segmentChansReups[n] = nil // remove from map
+		s.segmentChansReups = nil
+	}
+	if cfg.opt.Debug {
+		log.Printf("cleanupSession: closed all segment channels")
+	}
+} // end func cleanupSession
 
 /*
 func (p *PROCESSOR) delSession(sessId uint64) {
