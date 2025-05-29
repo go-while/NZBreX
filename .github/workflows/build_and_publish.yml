@@ -467,7 +467,7 @@ jobs:
             return 1
           }
           set -e
-          for ext in zip deb; do
+          for ext in zip deb tgz xz; do
             file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.${ext}"
             if [ -e "$file" ]; then
               for algo in 256 512; do
