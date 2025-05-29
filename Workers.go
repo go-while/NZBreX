@@ -326,6 +326,7 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 			if cfg.opt.CheckFirst {
 				select {
 				case s.memDL[s.providerList[pid].Group] <- item:
+					item.flaginDLMEM = true
 					pushed = true
 				default:
 					// chan is full
@@ -340,15 +341,13 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 			}
 			if pushed {
 				item.flaginDL = true
-				if cfg.opt.CheckFirst {
-					// catch items and release the quaken later
-					item.flaginDLMEM = true
-				}
 			}
 			item.mux.Unlock()
 			if pushed {
-				GCounter.Incr("dlQueueCnt")
-				GCounter.Incr("TOTAL_dlQueueCnt")
+				// item has been pushed to download queue: segmentChansDowns[provider.Group] or is queued in memDL[provider.Group]
+				// if we forget to decrement dlQueueCnt at the right place(es): we will never stop...
+				GCounter.Incr("dlQueueCnt")       // increment temporary dlQueueCnt counter
+				GCounter.Incr("TOTAL_dlQueueCnt") // increment TOTAL_dlQueueCnt counter
 			}
 			return // return after 1st push!
 		} // end for providerDl

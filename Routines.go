@@ -88,8 +88,8 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		if code == 0 && err != nil {
 			// connection problem, closed?
 			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
-			time.Sleep(time.Second * 5)
+			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' retry in %d sec re-queued", item.segment.Id, provider.Name, err, DefaultRequeueDelay)
+			time.Sleep(DefaultRequeueDelay)
 			s.segmentChansCheck[provider.Group] <- item
 			return err
 
@@ -232,11 +232,11 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 			if !isdead && failed <= 5 {
 
-				log.Printf("WARN CMD_ARTICLE failed re-queue in 5 sec: seg.Id='%s' @ '%s' failed=%d isdead=%t code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, failed, isdead, code, msg, err)
+				log.Printf("WARN CMD_ARTICLE failed re-queue in %d sec: seg.Id='%s' @ '%s' failed=%d isdead=%t code=%d msg='%s' err='%v'", DefaultRequeueDelay, item.segment.Id, provider.Name, failed, isdead, code, msg, err)
 				item.mux.Lock() // mutex #ee45
 				item.fails++
 				item.mux.Unlock() // mutex #ee45
-				time.Sleep(time.Second * 5)
+				time.Sleep(DefaultRequeueDelay)
 				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE re-queued':"+who, item)
 				s.segmentChansDowns[provider.Group] <- item
 
@@ -248,7 +248,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			return err
 
 		} else {
-			if code == 99932 {
+			if code == 99932 { // crazy magic number for bad crc32 ! REVIEW	!
 				log.Printf("CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 			}
 			// downloading article failed from provider
@@ -375,8 +375,8 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 				memlim.MemReturn("MemRetOnERR 'CMD_POST':"+who, item)
 				// connection problem, closed?
 				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-				log.Printf("WARN CMD_POST failed seg.Id='%s' @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
-				time.Sleep(time.Second * 5)
+				log.Printf("WARN CMD_POST failed retry in %d sec seg.Id='%s' @ '%s' err='%v' re-queued", DefaultRequeueDelay, item.segment.Id, provider.Name, err)
+				time.Sleep(DefaultRequeueDelay)
 				s.segmentChansReups[provider.Group] <- item
 				return err
 			}
@@ -408,8 +408,8 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 				// connection problem, closed?
 				memlim.MemReturn("MemRetOnERR 'CMD_IHAVE':"+who, item)
 				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-				log.Printf("WARN CMD_IHAVE failed seg.Id='%s' @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
-				time.Sleep(time.Second * 5)
+				log.Printf("WARN CMD_IHAVE failed retry in %d sec seg.Id='%s' @ '%s' err='%v' re-queued", DefaultRequeueDelay, item.segment.Id, provider.Name, err)
+				time.Sleep(DefaultRequeueDelay)
 				s.segmentChansReups[provider.Group] <- item
 				return err
 			}

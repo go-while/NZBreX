@@ -95,7 +95,10 @@ func loadConfigFile(path string) (*CFG, error) {
 } // end func loadConfigFile
 */
 
-func (s *SESSION) loadProviderList() error {
+// loadProviderList loads the provider list from the configuration file.
+// It reads the JSON file specified in cfg.opt.ProvFile, unmarshals it into the cfg.providers slice,
+// and initializes each provider with a connection pool.
+func (cfg *Config) loadProviderList(s *SESSION) error {
 	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
 		return err
 	} else {
@@ -156,6 +159,12 @@ func (s *SESSION) loadProviderList() error {
 	return nil
 } // end func loadProviderList
 
+// LoadHeadersFromFile loads headers from a file and returns them as a slice of strings.
+// It ignores empty lines and checks for specific headers that should not be present.
+// If the file does not exist or cannot be opened, it returns an error.
+// If the file is empty or contains only empty lines, it returns nil.
+// If the "Date:" header is not present, it adds it to the list of headers.
+// If any of the headers in needHeaders are found, it logs an error and exits the program.
 func LoadHeadersFromFile(path string) ([]string, error) {
 	if path == "" {
 		// ignore silenty because flag is empty / not set
@@ -200,7 +209,20 @@ func LoadHeadersFromFile(path string) ([]string, error) {
 	return lines, nil
 } // end func LoadHeadersFromFile
 
+// AppendFileBytes appends null bytes to the end of a file.
+// It opens the file in append mode, creates it if it does not exist, and writes the specified number of null bytes.
+// If nullbytes is 0, it does nothing.
+// If nullbytes is negative, it returns an error.
+// If the file does not exist, it creates a new file with the specified number of null bytes.
+// If the file exists, it appends the specified number of null bytes to the end of the file.
 func AppendFileBytes(nullbytes int, dstPath string) error {
+	if nullbytes <= 0 {
+		return fmt.Errorf("error AppendFileBytes nullbytes=%d must be greater than 0", nullbytes)
+	}
+	if dstPath == "" {
+		return fmt.Errorf("error AppendFileBytes dstPath='%s' empty", dstPath)
+	}
+
 	// Open destination file in append mode, create if not exists
 	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
@@ -217,6 +239,14 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	return nil
 } // end func AppendFileBytes
 
+// AppendFile appends (merges) the file contents of srcPath to dstPath.
+// If delsrc is true, it deletes the source file after appending.
+// If srcPath or dstPath is empty, it returns an error.
+// It opens the source file for reading and the destination file in append mode, creating it if it does not exist.
+// It reads the source file in chunks and writes them to the destination file.
+// If the source file does not exist, it returns an error.
+// If the destination file does not exist, it creates a new file.
+// If the source file is empty, it does nothing.
 func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	if srcPath == "" || dstPath == "" {
 		return fmt.Errorf("error Appendfile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
@@ -282,6 +312,7 @@ func SHA256SumFile(path string) (string, error) {
 
 // writeCsvFile writes the fileStat to a CSV file in the current directory.
 func (s *SESSION) writeCsvFile() (err error) {
+	// not tested since rewrite
 	if !cfg.opt.Csv {
 		return
 	}

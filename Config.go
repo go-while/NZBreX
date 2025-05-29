@@ -20,6 +20,7 @@ const (
 	DefaultMaxArticleSize         = 1 * 1024 * 1024
 	DefaultConnectTimeout         = 9 * time.Second
 	DefaultConnectErrSleep        = 9 * time.Second
+	DefaultRequeueDelay           = 1 * time.Second
 )
 
 type Config struct {

@@ -259,7 +259,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 	// re-load the provider list
 	s.providerList = nil
-	if err := s.loadProviderList(); err != nil {
+	if err := cfg.loadProviderList(s); err != nil {
 		log.Printf("ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
 		return err
 	}
