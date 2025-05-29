@@ -2,13 +2,13 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
-	"github.com/Tensai75/nzbparser"
 	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Tensai75/nzbparser"
 )
 
 const (
@@ -158,6 +158,7 @@ var (
 	}
 )
 
+/*
 // TODO!
 func loadConfigFile(path string) (*CFG, error) {
 	if file, err := os.ReadFile(path); err != nil {
@@ -171,6 +172,7 @@ func loadConfigFile(path string) (*CFG, error) {
 		}
 	}
 } // end func loadConfigFile
+*/
 
 func ReadHeadersFromFile(path string) ([]string, error) {
 	if path == "" {

@@ -5,13 +5,15 @@ import (
 	//"bytes"
 	"compress/gzip"
 	"fmt"
-	"github.com/Tensai75/nzbparser"
 	"io"
 	"log"
 	"os"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Tensai75/nzbparser"
+
 	//"encoding/csv"
 	"encoding/json"
 	//"sort"
@@ -156,7 +158,7 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 
 func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("ERROR Appendfile srcPath='%s' or dstPath='%s' empty!", srcPath, dstPath)
+		return fmt.Errorf("error Appendfile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
 	}
 
 	// Open source file for reading
@@ -191,7 +193,7 @@ func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	}
 	if delsrc {
 		if err := os.Remove(srcPath); err != nil {
-			return fmt.Errorf("ERROR Yenc AppendFile Remove err='%v'", err)
+			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
 		}
 	}
 	return nil

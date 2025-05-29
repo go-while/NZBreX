@@ -3,17 +3,17 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+
+	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 )
 
 type Cache struct {
-	mux               sync.RWMutex
+	//mux               sync.RWMutex
 	cachedir          string
 	checkOnly         bool
 	crw               int
@@ -125,73 +125,66 @@ func (c *Cache) ReadCache(item *segmentChanItem) (n int) {
 
 func (c *Cache) GoCacheChecker(cid int) {
 	for {
-		select {
-		case item := <-c.cache_check_chan:
-			if item == nil {
-				c.cache_check_chan <- nil
-				return
-			}
-			filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
-			exists := FileExists(filename)
-			if c.debug {
-				log.Printf("GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
-			}
-			if exists {
-				item.mux.Lock()
-				item.cached = true
-				item.mux.Unlock()
-			}
-			item.checkChan <- exists // notify
+		item := <-c.cache_check_chan
+		if item == nil {
+			c.cache_check_chan <- nil
+			return
 		}
+		filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
+		exists := FileExists(filename)
+		if c.debug {
+			log.Printf("GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
+		}
+		if exists {
+			item.mux.Lock()
+			item.cached = true
+			item.mux.Unlock()
+		}
+		item.checkChan <- exists // notify
 	}
 } // end func c.GoCacheChecker
 
 func (c *Cache) GoCacheReader(cid int) {
 	//var read_bytes uint64
 	for {
-		select {
-		case item := <-c.cache_reader_chan:
-			if item == nil {
-				c.cache_reader_chan <- nil
-				return
-			}
-			size := c.CacheReader(item)
-			if c.debug {
-				log.Printf("GoCacheReader size=%d id='%s'", size, item.hashedId)
-			}
-			//read_bytes += uint64(size)
-			item.readChan <- size // notify
+		item := <-c.cache_reader_chan
+		if item == nil {
+			c.cache_reader_chan <- nil
+			return
 		}
+		size := c.CacheReader(item)
+		if c.debug {
+			log.Printf("GoCacheReader size=%d id='%s'", size, item.hashedId)
+		}
+		//read_bytes += uint64(size)
+		item.readChan <- size // notify
 	}
 } // end func c.GoCacheReader
 
 func (c *Cache) GoCacheWriter(cid int) {
 	var wrote_bytes uint64
 	for {
-		select {
-		case item := <-c.cache_writer_chan:
-			if item == nil {
-				c.cache_writer_chan <- nil
-				return
-			}
-			n := c.CacheWriter(item)
-			wrote_bytes += uint64(n)
-		} // end select
+		item := <-c.cache_writer_chan
+		if item == nil {
+			c.cache_writer_chan <- nil
+			return
+		}
+		n := c.CacheWriter(item)
+		wrote_bytes += uint64(n)
 	}
 } // end func c.GoCacheWriter
 
 func (c *Cache) GoYencWriter(cid int) {
 	var wrote_bytes uint64
 	for {
-		select {
-		case yitem := <-c.yenc_writer_chan:
-			if yitem == nil {
-				c.yenc_writer_chan <- nil
-				return
-			}
-			n := c.YencWriter(yitem)
-			wrote_bytes += uint64(n)
-		} // end select
+
+		yitem := <-c.yenc_writer_chan
+		if yitem == nil {
+			c.yenc_writer_chan <- nil
+			return
+		}
+		n := c.YencWriter(yitem)
+		wrote_bytes += uint64(n)
 	}
 } // end func c.GoCacheWriter
 

@@ -6,7 +6,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/Tensai75/nzbparser"
+
 	//"io/fs"
 	//"io/ioutil"
 	"log"
@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Tensai75/nzbparser"
 )
 
 type File struct {
@@ -53,10 +55,10 @@ func (p *PROCESSOR) NewProcessor(nzbDir string, refresh int64) error {
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	if p.nzbDir != "" {
-		return fmt.Errorf("Error NewProcessor: is already setup!")
+		return fmt.Errorf("error NewProcessor: is already setup")
 	}
 	if nzbDir == "" {
-		return fmt.Errorf("Error NewProcessor: nzbdir empty")
+		return fmt.Errorf("error NewProcessor: nzbdir empty")
 	}
 	p.nzbDir = nzbDir
 	p.sessMap = make(map[uint64]*SESSION, 128)
@@ -93,6 +95,7 @@ func (p *PROCESSOR) newSession(nzbName string) {
 	log.Printf("PROCESSOR.newSession: sessId=%d nzbName='%s'", s.sessId, nzbName)
 } // end func newSession
 
+/*
 func (p *PROCESSOR) delSession(sessId uint64) {
 	p.mux.Lock()
 	defer p.mux.Unlock()
@@ -103,6 +106,7 @@ func (p *PROCESSOR) delSession(sessId uint64) {
 		log.Printf("PROCESSOR.delSession: %d", sessId)
 	}
 } // end func p.deleteSession
+*/
 
 func (p *PROCESSOR) newssid() uint64 {
 	p.mux.Lock()
@@ -117,11 +121,9 @@ func (p *PROCESSOR) thread() {
 	// TODO: watch nzbdir, load nzbs and distribute work here
 forever:
 	for {
-		select {
-		case nul := <-p.stop_chan:
-			p.stop_chan <- nul
-			break forever
-		}
+		nul := <-p.stop_chan
+		p.stop_chan <- nul
+		break forever
 	}
 	log.Printf("Quit PROCESSOR '%s'", p.nzbDir)
 } // end func p.thread
