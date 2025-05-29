@@ -400,7 +400,18 @@ jobs:
           #
           # packing the build
           #
+          # .zio
           zip -j "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
+          #
+          # .tgz (tar + gzip)
+          tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
+            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
+            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
+          #
+          # .xz (tar + xz)
+          tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
+            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
+            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
           #
           # done packing
           # Only make .deb packages for Linux with glibc
