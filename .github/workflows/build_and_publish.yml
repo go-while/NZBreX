@@ -349,6 +349,10 @@ jobs:
           ARCH: ${{ matrix.arch }}
           MATRIX: ${{ matrix.name }}
           ALIBC: "${{ matrix.libc }}"
+          GITHUB_REF_TYPE: ${{ github.ref_type }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
         run: |
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
           # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
@@ -371,11 +375,6 @@ jobs:
           echo "SHA7=$SHA7" >> $GITHUB_ENV
           echo "MATRIX=$MATRIX" >> $GITHUB_ENV
           echo "LIBC=$LIBC" >> $GITHUB_ENV
-        env:
-          GITHUB_REF_TYPE: ${{ github.ref_type }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_SHA: ${{ github.sha }}
 
       - name: Build ${{ matrix.name }}
         env:
