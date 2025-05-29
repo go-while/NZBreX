@@ -81,11 +81,11 @@ forever:
 
 func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, error) {
 	if connitem.srvtp == nil {
-		return 0, fmt.Errorf("ERROR CMD_STAT srvtp=nil")
+		return 0, fmt.Errorf("error CMD_STAT srvtp=nil")
 	}
 	id, err := connitem.srvtp.Cmd("STAT <%s>", item.segment.Id)
 	if err != nil {
-		log.Printf("Error checkMessageID @ '%s' srvtp.Cmd err='%v'", provider.Name, err)
+		log.Printf("ERROR checkMessageID @ '%s' srvtp.Cmd err='%v'", provider.Name, err)
 		return 0, err
 	}
 	connitem.srvtp.StartResponse(id)
@@ -104,12 +104,12 @@ func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		//log.Printf("CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, provider.Name, msg)
 		return code, nil
 	}
-	return code, fmt.Errorf("Error CMD_STAT returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
+	return code, fmt.Errorf("error CMD_STAT returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
 } // end func CMD_STAT
 
 func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, string, error) {
 	if connitem.srvtp == nil {
-		return 0, "", fmt.Errorf("ERROR CMD_ARTICLE srvtp=nil")
+		return 0, "", fmt.Errorf("error CMD_ARTICLE srvtp=nil")
 	}
 	id, err := connitem.srvtp.Cmd("ARTICLE <%s>", item.segment.Id)
 	if err != nil {
@@ -150,12 +150,12 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 	default:
 		// returns the unknown code with an error!
 	}
-	return code, msg, fmt.Errorf("Error CMD_ARTICLE returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
+	return code, msg, fmt.Errorf("error CMD_ARTICLE returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
 } // end func CMD_ARTICLE
 
 func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, uint64, error) {
 	if connitem.srvtp == nil {
-		return 0, 0, fmt.Errorf("ERROR CMD_IHAVE srvtp=nil")
+		return 0, 0, fmt.Errorf("error CMD_IHAVE srvtp=nil")
 	}
 	/*
 	 * IHAVE
@@ -199,7 +199,7 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 			return code, 0, nil
 	*/
 	default:
-		return code, 0, fmt.Errorf("ERROR CMD_IHAVE unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
+		return code, 0, fmt.Errorf("error CMD_IHAVE unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
 	}
 	var txb uint64
 
@@ -216,15 +216,15 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 		for _, line := range item.lines {
 			n, err := io.WriteString(connitem.writer, line+CRLF)
 			if err != nil {
-				return 0, txb, fmt.Errorf("ERROR CMD_IHAVE WriteString writer @ '%s' err='%v'", provider.Name, err)
+				return 0, txb, fmt.Errorf("error CMD_IHAVE WriteString writer @ '%s' err='%v'", provider.Name, err)
 			}
 			txb += uint64(n)
 		}
 		if _, err := io.WriteString(connitem.writer, DOT+CRLF); err != nil {
-			return 0, txb, fmt.Errorf("ERROR CMD_IHAVE writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
+			return 0, txb, fmt.Errorf("error CMD_IHAVE writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
 		}
 		if err := connitem.writer.Flush(); err != nil {
-			return 0, txb, fmt.Errorf("ERROR CMD_IHAVE writer.Flush @ '%s' err='%v'", provider.Name, err)
+			return 0, txb, fmt.Errorf("error CMD_IHAVE writer.Flush @ '%s' err='%v'", provider.Name, err)
 		}
 	} // end switch wireformat
 
@@ -241,12 +241,12 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 		return code, txb, nil
 	}
 
-	return code, txb, fmt.Errorf("Uncatched ERROR in CMD_IHAVE code=%d msg='%s' err='%v'", code, msg, err)
+	return code, txb, fmt.Errorf("error in CMD_IHAVE uncatched return: code=%d msg='%s' err='%v'", code, msg, err)
 } // end func CMD_IHAVE
 
 func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, uint64, error) {
 	if connitem.srvtp == nil {
-		return 0, 0, fmt.Errorf("ERROR CMD_POST srvtp=nil")
+		return 0, 0, fmt.Errorf("error CMD_POST srvtp=nil")
 	}
 	id, err := connitem.srvtp.Cmd("POST")
 	if err != nil {
@@ -280,15 +280,15 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 	for _, line := range item.lines {
 		n, err := io.WriteString(connitem.writer, line+CRLF)
 		if err != nil {
-			return 0, txb, fmt.Errorf("ERROR CMD_POST WriteString writer @ '%s' err='%v'", provider.Name, err)
+			return 0, txb, fmt.Errorf("error CMD_POST WriteString writer @ '%s' err='%v'", provider.Name, err)
 		}
 		txb += uint64(n)
 	}
 	if _, err := io.WriteString(connitem.writer, DOT+CRLF); err != nil {
-		return 0, txb, fmt.Errorf("ERROR CMD_POST writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
+		return 0, txb, fmt.Errorf("error CMD_POST writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
 	}
 	if err := connitem.writer.Flush(); err != nil {
-		return 0, txb, fmt.Errorf("ERROR CMD_POST writer.Flush @ '%s' err='%v'", provider.Name, err)
+		return 0, txb, fmt.Errorf("error CMD_POST writer.Flush @ '%s' err='%v'", provider.Name, err)
 	}
 	code, msg, err = connitem.srvtp.ReadCodeLine(240)
 	switch code {
@@ -300,12 +300,12 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		return code, txb, nil
 	}
 
-	return code, txb, fmt.Errorf("Uncatched ERROR in CMD_POST code=%d msg='%s' err='%v'", code, msg, err)
+	return code, txb, fmt.Errorf("error in CMD_POST uncatched return: code=%d msg='%s' err='%v'", code, msg, err)
 } // end func CMD_POST
 
 func readArticleDotLines(provider *Provider, item *segmentChanItem, srvtp *textproto.Conn) (badcrc bool, err error) {
 	if srvtp == nil {
-		return false, fmt.Errorf("ERROR readArticleDotLines conn or srvtp nil @ '%s'", provider.Name)
+		return false, fmt.Errorf("error readArticleDotLines conn or srvtp nil @ '%s'", provider.Name)
 	}
 	rxb, i := 0, 0
 	var parseHeader bool = true // initial
@@ -328,7 +328,7 @@ readlines:
 
 		rxb += len(line)
 		if rxb > cfg.opt.MaxArtSize {
-			err = fmt.Errorf("ERROR readArticleDotLines > maxartsize=%d seg.Id='%s'", cfg.opt.MaxArtSize, item.segment.Id)
+			err = fmt.Errorf("error readArticleDotLines > maxartsize=%d seg.Id='%s'", cfg.opt.MaxArtSize, item.segment.Id)
 			log.Print(err)
 			return
 		}
@@ -510,15 +510,15 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	defer provider.Conns.CloseConn(connitem, nil)
 
 	if !msg2srv(connitem.conn, "CAPABILITIES") {
-		return fmt.Errorf("ERROR '%s' checkCapabilities", provider.Name)
+		return fmt.Errorf("error '%s' checkCapabilities", provider.Name)
 	}
 	code, rmsg, err := connitem.srvtp.ReadCodeLine(rcode)
 	if code != rcode {
-		return fmt.Errorf("ERROR '%s' checkCapabilities ReadCodeLine code=%d != 101 rmsg='%s' err='%v'", provider.Name, code, rmsg, err)
+		return fmt.Errorf("error '%s' checkCapabilities ReadCodeLine code=%d != 101 rmsg='%s' err='%v'", provider.Name, code, rmsg, err)
 	}
 	lines, err := connitem.srvtp.ReadDotLines()
 	if err != nil {
-		return fmt.Errorf("ERROR '%s' checkCapabilities ReadDotLines err='%v'", provider.Name, err)
+		return fmt.Errorf("error '%s' checkCapabilities ReadDotLines err='%v'", provider.Name, err)
 	}
 	setpostProviders := 0
 	//log.Printf("Read %d CAPAS from Provider %s", len(lines), provider.Name)
@@ -542,7 +542,7 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 		}
 	}
 	if !msg2srv(connitem.conn, "QUIT") {
-		return fmt.Errorf("ERROR checkCapabilities QUIT")
+		return fmt.Errorf("error checkCapabilities QUIT")
 	}
 	if setpostProviders > 0 {
 		GCounter.Incr("postProviders")

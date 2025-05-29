@@ -16,14 +16,20 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 
 func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
 	globalmux.Lock()
-	if s.segmentChansCheck != nil {
+	if s == nil {
+		log.Printf("Error in GoBootWorkers: session is nil... preBoot=%t ", s.preBoot)
 		globalmux.Unlock()
-		log.Print("Error in GoBootWorkers: already booted session or did not cleanup?!")
+		return
+	} else if s.active || !s.preBoot {
+		log.Printf("Error in GoBootWorkers: session %d already booted... s.preBoot=%t s.active=%t", s.sessId, s.preBoot, s.active)
+		globalmux.Unlock()
 		return
 	}
-	s.segmentChansCheck = make(map[string]chan *segmentChanItem)
-	s.segmentChansDowns = make(map[string]chan *segmentChanItem)
-	s.segmentChansReups = make(map[string]chan *segmentChanItem)
+	s.preBoot = false
+	s.active = true
+	//s.segmentChansCheck = make(map[string]chan *segmentChanItem)
+	//s.segmentChansDowns = make(map[string]chan *segmentChanItem)
+	//s.segmentChansReups = make(map[string]chan *segmentChanItem)
 	waitWorker.Add(1)
 	globalmux.Unlock()
 
@@ -50,12 +56,15 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 	}
 
 	for _, provider := range s.providerList {
-		log.Printf("BootWorkers list=%d provider='%#v' ", len(s.providerList), provider.Name)
+		log.Printf("BootWorkers list=%d check provider='%#v' ", len(s.providerList), provider.Name)
 		if !provider.Enabled || provider.MaxConns <= 0 {
 			if cfg.opt.Verbose {
-				log.Printf("!enabled provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
+				log.Printf("ignored provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
 			}
 			continue
+		}
+		if cfg.opt.Verbose {
+			log.Printf("Connecting provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
 		}
 		globalmux.Lock()
 		workerWGconnEstablish.Add(1)
@@ -184,34 +193,30 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		defer waitWorker.Done()
 	forGoCheckRoutine:
 		for {
-			select {
-			case item := <-segmentChanCheck:
-				if item == nil {
-					if cfg.opt.Debug {
-						log.Print("CheckRoutine received a nil pointer to quit")
-					}
-					segmentChanCheck <- nil // refill the nil so others will die too
-					break forGoCheckRoutine
+			item := <-segmentChanCheck
+			if item == nil {
+				if cfg.opt.Debug {
+					log.Print("CheckRoutine received a nil pointer to quit")
 				}
-				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
-				item.mux.Unlock()
+				segmentChanCheck <- nil // refill the nil so others will die too
+				break forGoCheckRoutine
+			}
 
-				switch cfg.opt.ByPassSTAT {
-				case false:
-					if cfg.opt.Debug {
-						log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
-					}
-					if err := s.GoCheckRoutine(wid, provider, item, sharedConn); err != nil { // re-queue?
-						log.Printf("ERROR in GoCheckRoutine err='%v'", err)
-					}
-				case true:
-					item.mux.Lock()
-					item.flaginDL = true
-					item.mux.Unlock()
-					GCounter.Incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
-					GCounter.Incr("TOTAL_dlQueueCnt") //cfg.opt.ByPassSTAT
-					segmentChanDown <- item
+			switch cfg.opt.ByPassSTAT {
+			case false:
+				if cfg.opt.Debug {
+					log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 				}
+				if err := s.GoCheckRoutine(wid, provider, item, sharedConn); err != nil { // re-queue?
+					log.Printf("ERROR in GoCheckRoutine err='%v'", err)
+				}
+			case true:
+				item.mux.Lock()
+				item.flaginDL = true
+				item.mux.Unlock()
+				GCounter.Incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
+				GCounter.Incr("TOTAL_dlQueueCnt") //cfg.opt.ByPassSTAT
+				segmentChanDown <- item
 			}
 			continue forGoCheckRoutine
 		} // end forGoCheckRoutine
@@ -222,23 +227,19 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		defer waitWorker.Done()
 	forGoDownsRoutine:
 		for {
-			select {
-			case item := <-segmentChanDowns:
-				if item == nil {
-					if cfg.opt.Debug {
-						log.Print("DownsRoutine received a nil pointer to quit")
-					}
-					segmentChanDowns <- nil // refill the nil so others will die too
-					break forGoDownsRoutine
-				}
-				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
-				item.mux.Unlock()
+			item := <-segmentChanDowns
+			if item == nil {
 				if cfg.opt.Debug {
-					log.Printf("WorkerDown: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+					log.Print("DownsRoutine received a nil pointer to quit")
 				}
-				if err := s.GoDownsRoutine(wid, provider, item, sharedConn); err != nil {
-					log.Printf("ERROR in GoDownsRoutine err='%v'", err)
-				}
+				segmentChanDowns <- nil // refill the nil so others will die too
+				break forGoDownsRoutine
+			}
+			if cfg.opt.Debug {
+				log.Printf("WorkerDown: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			}
+			if err := s.GoDownsRoutine(wid, provider, item, sharedConn); err != nil {
+				log.Printf("ERROR in GoDownsRoutine err='%v'", err)
 			}
 			continue forGoDownsRoutine
 		} // end forGoDownsRoutine
@@ -249,23 +250,19 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		defer waitWorker.Done()
 	forGoReupsRoutine:
 		for {
-			select {
-			case item := <-segmentChanReups:
-				if item == nil {
-					if cfg.opt.Debug {
-						log.Print("ReupsRoutine received a nil pointer to quit")
-					}
-					segmentChanReups <- nil // refill the nil so others will die too
-					break forGoReupsRoutine
-				}
-				item.mux.Lock() // we might get an item still locked, so we lock too and wait for upper layer to release first.
-				item.mux.Unlock()
+			item := <-segmentChanReups
+			if item == nil {
 				if cfg.opt.Debug {
-					log.Printf("WorkerReup: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+					log.Print("ReupsRoutine received a nil pointer to quit")
 				}
-				if err := s.GoReupsRoutine(wid, provider, item, sharedConn); err != nil {
-					log.Printf("ERROR in GoReupsRoutine err='%v'", err)
-				}
+				segmentChanReups <- nil // refill the nil so others will die too
+				break forGoReupsRoutine
+			}
+			if cfg.opt.Debug {
+				log.Printf("WorkerReup: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			}
+			if err := s.GoReupsRoutine(wid, provider, item, sharedConn); err != nil {
+				log.Printf("ERROR in GoReupsRoutine err='%v'", err)
 			}
 			continue forGoReupsRoutine
 		} // end forGoReupsRoutine

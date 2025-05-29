@@ -27,9 +27,7 @@ func (c *Counter_uint64) ClearCounter() {
 	c.mux.Lock()
 	clear(c.m)
 	c.mux.Unlock()
-	return
 } // end func Counter.ResetCounter
-
 
 func (c *Counter_uint64) Init(k string) (retbool bool) {
 	c.mux.Lock()

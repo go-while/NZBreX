@@ -3,21 +3,23 @@ package main
 import (
 	//"bufio"
 	//"bytes"
+	"bufio"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/csv"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"github.com/Tensai75/nzbparser"
 	"io"
 	"log"
 	"os"
-	"runtime"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"time"
-	"encoding/csv"
-	"encoding/json"
-	"sort"
-	"crypto/sha256"
-	"encoding/hex"
+
+	"github.com/Tensai75/nzbparser"
 )
 
 func getCoreLimiter() {
@@ -77,6 +79,22 @@ func loadNzbFile(path string) (*nzbparser.Nzb, error) {
 	return nzbfile, nil
 } // end func loadNzbFile
 
+/*
+// TODO!
+func loadConfigFile(path string) (*CFG, error) {
+	if file, err := os.ReadFile(path); err != nil {
+		return nil, err
+	} else {
+		var loadedconfig CFG
+		if err := json.Unmarshal(file, &loadedconfig); err != nil {
+			return nil, err
+		} else {
+			return &loadedconfig, nil
+		}
+	}
+} // end func loadConfigFile
+*/
+
 func (s *SESSION) loadProviderList() error {
 	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
 		return err
@@ -87,14 +105,17 @@ func (s *SESSION) loadProviderList() error {
 		id := 0
 		providernames := make(map[string]bool)          // tmp map to check unique/duped provider names
 		providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
-		for n, _ := range cfg.providers {
+		for n := range cfg.providers {
 			if !cfg.providers[n].Enabled {
+				if cfg.opt.Debug {
+					log.Printf("CFG Skipped Provider (id=%d) '%s' because not enabled", id, cfg.providers[n].Name)
+				}
 				continue
 			}
 			Name := cfg.providers[n].Name
 			if providernames[Name] {
 				// duplicate provider Name
-				return fmt.Errorf("ERROR: loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
+				return fmt.Errorf("error in loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
 			}
 			providernames[Name] = true
 			Group := cfg.providers[n].Group
@@ -135,6 +156,50 @@ func (s *SESSION) loadProviderList() error {
 	return nil
 } // end func loadProviderList
 
+func LoadHeadersFromFile(path string) ([]string, error) {
+	if path == "" {
+		// ignore silenty because flag is empty / not set
+		return nil, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) > 0 {
+			lines = append(lines, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	hasDate := false
+	for _, line := range lines {
+		for _, hdr := range needHeaders {
+			if strings.HasPrefix(line, hdr) {
+				log.Printf("ERROR can not load header '%s' to cleanup!", hdr)
+				os.Exit(1)
+			}
+		}
+		if strings.HasPrefix(line, "Date:") {
+			hasDate = true
+		}
+	}
+	if !hasDate {
+		// we have to cleanup the Date header because we supply a new one!
+		lines = append(lines, "Date:")
+	}
+	return lines, nil
+} // end func LoadHeadersFromFile
+
 func AppendFileBytes(nullbytes int, dstPath string) error {
 	// Open destination file in append mode, create if not exists
 	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
@@ -154,7 +219,7 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 
 func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("ERROR Appendfile srcPath='%s' or dstPath='%s' empty!", srcPath, dstPath)
+		return fmt.Errorf("error Appendfile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
 	}
 
 	// Open source file for reading
@@ -189,7 +254,7 @@ func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	}
 	if delsrc {
 		if err := os.Remove(srcPath); err != nil {
-			return fmt.Errorf("ERROR Yenc AppendFile Remove err='%v'", err)
+			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
 		}
 	}
 	return nil
@@ -215,7 +280,7 @@ func SHA256SumFile(path string) (string, error) {
 	return strings.ToLower(hex.EncodeToString(hash.Sum(nil))), nil
 } // end func SHA256SumFile (written by AI! GPT-4o)
 
-
+// writeCsvFile writes the fileStat to a CSV file in the current directory.
 func (s *SESSION) writeCsvFile() (err error) {
 	if !cfg.opt.Csv {
 		return
@@ -272,7 +337,6 @@ func (s *SESSION) writeCsvFile() (err error) {
 	log.Printf("writeCsv: done")
 	return
 } // end func writeCsv
-
 
 func setTimerNow(timer *time.Time) {
 	globalmux.Lock()
@@ -384,8 +448,26 @@ func yesno(input bool) string {
 	return "?"
 } // end func yesno
 
+/*
 func dlog(anyflag bool, format string, a ...any) {
 	if anyflag {
 		log.Printf(format, a...)
 	}
 } // end dlog
+*/
+
+/*
+func getUptime(what string, booted time.Time) (uptime float64) {
+	switch what {
+	case "Seconds":
+		uptime = time.Since(booted).Seconds()
+	case "Minutes":
+		uptime = time.Since(booted).Minutes()
+	case "Hours":
+		uptime = time.Since(booted).Hours()
+	default:
+		uptime = -1
+	}
+	return
+} // end func getUptime
+*/

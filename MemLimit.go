@@ -65,7 +65,7 @@ func (m *MemLimiter) Usage() (int, int) {
 
 func (m *MemLimiter) ViewData() (data []string) {
 	m.mux.RLock()
-	for item, _ := range m.memdata {
+	for item := range m.memdata {
 		data = append(data, item.segment.Id)
 	}
 	m.mux.RUnlock()

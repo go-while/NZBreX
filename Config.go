@@ -1,11 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
-	"log"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -169,61 +164,3 @@ var (
 		"Organization:",
 	}
 )
-
-// TODO!
-func loadConfigFile(path string) (*CFG, error) {
-	if file, err := os.ReadFile(path); err != nil {
-		return nil, err
-	} else {
-		var loadedconfig CFG
-		if err := json.Unmarshal(file, &loadedconfig); err != nil {
-			return nil, err
-		} else {
-			return &loadedconfig, nil
-		}
-	}
-} // end func loadConfigFile
-
-func ReadHeadersFromFile(path string) ([]string, error) {
-	if path == "" {
-		// ignore silenty because flag is empty / not set
-		return nil, nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) > 0 {
-			lines = append(lines, line)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	hasDate := false
-	for _, line := range lines {
-		for _, hdr := range needHeaders {
-			if strings.HasPrefix(line, hdr) {
-				log.Printf("ERROR can not load header '%s' to cleanup!", hdr)
-				os.Exit(1)
-			}
-		}
-		if strings.HasPrefix(line, "Date:") {
-			hasDate = true
-		}
-	}
-	if !hasDate {
-		// we have to cleanup the Date header because we supply a new one!
-		lines = append(lines, "Date:")
-	}
-	return lines, nil
-} // end func ReadHeadersFromFile

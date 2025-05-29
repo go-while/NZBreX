@@ -3,10 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/go-while/go-cpu-mem-profiler"
+	"io"
 	"log"
 	"os"
 	"runtime"
+
+	prof "github.com/go-while/go-cpu-mem-profiler"
 )
 
 func ParseFlags() {
@@ -82,5 +84,53 @@ func ParseFlags() {
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 2 {
 			cfg.opt.YencTest = 2
 		}
+	}
+
+	// setup debug modes
+	if cfg.opt.Debug || cfg.opt.BUG {
+		if !cfg.opt.Debug {
+			cfg.opt.Debug = true
+		}
+		if !cfg.opt.Verbose {
+			cfg.opt.Verbose = true
+		}
+		if !cfg.opt.DebugCache {
+			cfg.opt.DebugCache = true
+		}
+	} else {
+		if cfg.opt.Discard {
+			log.SetOutput(io.Discard) // DEBUG
+		}
+	} // end debugs
+
+	cacheON = (cfg.opt.Cachedir != "" && cfg.opt.CRW > 0)
+	if cacheON {
+		cache = NewCache(
+			cfg.opt.Cachedir,
+			cfg.opt.CRW,
+			cfg.opt.CheckOnly,
+			cfg.opt.MaxArtSize,
+			cfg.opt.YencWrite,
+			cfg.opt.DebugCache)
+
+		if cache == nil {
+			log.Printf("ERROR Cache failed... is nil!")
+			os.Exit(1)
+		}
+		if !cache.MkSubDir("test") {
+			os.Exit(1)
+		}
+	}
+
+	if headers, err := LoadHeadersFromFile(cfg.opt.CleanHeadersFile); headers != nil {
+		cleanHeader = headers
+		log.Printf("Loaded %d headers from '%s' ==> cleanHeader='%#v'", len(headers), cfg.opt.CleanHeadersFile, cleanHeader)
+	} else if err != nil {
+		log.Printf("ERROR loading headers failed file='%s' err='%v'", cfg.opt.CleanHeadersFile, err)
+		os.Exit(1)
+	}
+
+	if cfg.opt.Verbose {
+		log.Printf("Settings: '%#v'", *cfg.opt)
 	}
 } // end func ParseFlags

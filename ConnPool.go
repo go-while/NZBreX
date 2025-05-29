@@ -170,7 +170,7 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 
 	if c.provider.MaxConnErrors >= 0 && retry > c.provider.MaxConnErrors {
 		// set provider.MaxConnErrors to -1 to retry infinite
-		return nil, fmt.Errorf("ERROR connect MaxConnErrors '%s'", c.provider.Name)
+		return nil, fmt.Errorf("error connect MaxConnErrors > %d '%s'", c.provider.MaxConnErrors, c.provider.Name)
 	} else if c.provider.MaxConnErrors < 0 && retry > 0 {
 		retry = -1
 	}
@@ -203,14 +203,12 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 		}
 	} // end switch
 
-	if err != nil || conn == nil {
-		if conn != nil {
-			conn.Close()
-		}
+	if err != nil {
+		defer conn.Close()
 		if isNetworkUnreachable(err) {
-			return nil, fmt.Errorf("ERROR connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
+			return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
 		}
-		log.Printf("ERROR connect Dial rserver=%s wants_ssl=%t err='%v' retry in %.0fs", c.rserver, c.provider.SSL, err, DefaultConnectErrSleep.Seconds())
+		log.Printf("ERROR connect Dial '%s' retry in %.0fs wants_ssl=%t err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), c.provider.SSL, err)
 		time.Sleep(DefaultConnectErrSleep)
 		retry++
 		return c.connect(retry)
@@ -221,10 +219,8 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 	code, msg, err := srvtp.ReadCodeLine(20)
 
 	if code < 200 || code > 201 {
-		if conn != nil {
-			conn.Close()
-		}
-		log.Printf("ERROR connect '%s' code=%d msg='%s' err='%v' retry in %.0fs", c.provider.Name, code, msg, err, DefaultConnectErrSleep.Seconds())
+		defer conn.Close()
+		log.Printf("ERROR connect welcome '%s' retry in %.0fs code=%d msg='%s' err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, msg, err)
 		time.Sleep(DefaultConnectErrSleep)
 		retry++
 		return c.connect(retry)
@@ -237,10 +233,8 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 	// send auth sequence
 	id, err := srvtp.Cmd("AUTHINFO USER %s", c.provider.Username)
 	if err != nil {
-		if conn != nil {
-			conn.Close()
-		}
-		log.Printf("ERROR AUTH1 FAILED '%s' err='%v' retry in %.0fs", c.provider.Name, err, DefaultConnectErrSleep.Seconds())
+		defer conn.Close()
+		log.Printf("ERROR AUTH#1 Cmd(AUTHINFO USER ...) '%s' retry in %.0fs err='%v' ", c.provider.Name, DefaultConnectErrSleep.Seconds(), err)
 		time.Sleep(DefaultConnectErrSleep)
 		retry++
 		return c.connect(retry)
@@ -249,10 +243,8 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 	code, _, err = srvtp.ReadCodeLine(381)
 	srvtp.EndResponse(id)
 	if err != nil {
-		if conn != nil {
-			conn.Close()
-		}
-		log.Printf("ERROR AUTH2 FAILED '%s' err='%v' retry in %.0fs", c.provider.Name, err, DefaultConnectErrSleep.Seconds())
+		defer conn.Close()
+		log.Printf("ERROR AUTH#2 ReadCodeLine(381) step#2 '%s' retry in %.0fs code=%d err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, err)
 		time.Sleep(DefaultConnectErrSleep)
 		retry++
 		return c.connect(retry)
@@ -260,10 +252,8 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 
 	id, err = srvtp.Cmd("AUTHINFO PASS %s", c.provider.Password)
 	if err != nil {
-		if conn != nil {
-			conn.Close()
-		}
-		log.Printf("ERROR AUTH3 FAILED '%s' err='%v' retry in %.0fs", c.provider.Name, err, DefaultConnectErrSleep.Seconds())
+		defer conn.Close()
+		log.Printf("ERROR AUTH#3 Cmd(AUTHINFO PASS ...) '%s' retry in %.0fs err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), err)
 		time.Sleep(DefaultConnectErrSleep)
 		retry++
 		return c.connect(retry)
@@ -272,10 +262,8 @@ func (c *ProviderConns) connect(retry int) (connitem *ConnItem, err error) {
 	code, _, err = srvtp.ReadCodeLine(281)
 	srvtp.EndResponse(id)
 	if err != nil {
-		if conn != nil {
-			conn.Close()
-		}
-		log.Printf("ERROR AUTH4 FAILED '%s' err='%v' retry in %.0fs", c.provider.Name, err, DefaultConnectErrSleep.Seconds())
+		defer conn.Close()
+		log.Printf("ERROR AUTH#4 ReadCodeLine(281) '%s' retry in %.0fs code=%d err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, err)
 		time.Sleep(DefaultConnectErrSleep)
 		retry++
 		return c.connect(retry)
@@ -311,7 +299,7 @@ getConnFromPool:
 				continue getConnFromPool // until chan rans empty
 
 			} else if connitem.parked > 0 && connitem.parked+DefaultConnExpireSeconds < time.Now().Unix() {
-				buf := make([]byte, 1, 1)
+				buf := make([]byte, 1)
 				// some provider have short timeout values.
 				// try reading from conn. check takes some µs
 				connitem.conn.SetReadDeadline(readDeadConn)
@@ -338,7 +326,7 @@ getConnFromPool:
 			// should be impossible to trigger
 			c.mux.RLock()
 			if c.openConns > c.provider.MaxConns {
-				err = fmt.Errorf("ERROR in GetConn: %d openConns > provider.MaxConns=%d @ '%s'", c.openConns, c.provider.Name)
+				err = fmt.Errorf("error in GetConn: %d openConns > provider.MaxConns=%d @ '%s'", c.openConns, c.provider.MaxConns, c.provider.Name)
 				c.mux.RUnlock()
 				return
 			}
@@ -386,7 +374,7 @@ getConnFromPool:
 		} // end select
 	} // end for
 	// vet says: unreachable code
-	//return nil, fmt.Errorf("ERROR in ConnPool GetConn: uncatched return! wid=%d", wid)
+	//return nil, fmt.Errorf("error in ConnPool GetConn: uncatched return! wid=%d", wid)
 } // end func GetConn
 
 func (c *ProviderConns) ParkConn(connitem *ConnItem) {
