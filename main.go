@@ -72,11 +72,12 @@ var (
 	})
 	*/
 
-	booted  time.Time // not a flag
-	version bool      // flag
-	runProf bool      // flag
-	webProf string    // flag
-	nzbfile string    // flag
+	booted   time.Time // not a flag
+	version  bool      // flag
+	runProf  bool      // flag
+	webProf  string    // flag
+	nzbfile  string    // flag
+	testmode bool      // flag: used to test compilation
 
 )
 
