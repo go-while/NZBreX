@@ -471,8 +471,8 @@ jobs:
           done
           sha256file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha256sum"
           sha512file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha512sum"
-          test -f "$sha256file" && upload_with_retry "$sha256file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum" || echo "not found: "$sha256""
-          test -f "$sha512file" && upload_with_retry "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum" || echo "not found: "$sha512""
+          test -f "$sha256file" && upload_with_retry "$sha256file" "NZBreX_binary_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum" || echo "not found: "$sha256""
+          test -f "$sha512file" && upload_with_retry "$sha512file" "NZBreX_binary_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum" || echo "not found: "$sha512""
 
 #      - name: "Upload Binary to github blob storage"
 #        uses: actions/upload-artifact@v4
