@@ -17,7 +17,7 @@ upload_with_retry() {
   while [ $attempt -le $max_attempts ]; do
     test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
     size=$(du -b $file|cut -f1)
-    human=$(du -h $file|cut -f1)
+    human=$(du -h $file)
     if curl --silent -f -F "file=@$file" \
          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
          -H "X-Git-Ref: $GITHUB_REF_NAME" \

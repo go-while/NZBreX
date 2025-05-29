@@ -414,6 +414,7 @@ jobs:
             -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
           #
           # done packing
+          #
           # Only make .deb packages for Linux with glibc
           matrix_libc="${{ matrix.libc }}"
           matrix_distro="${{ matrix.distro }}"
@@ -445,6 +446,8 @@ jobs:
               # filename to use has been supplied in $2
               FNstr=";filename=$filename"
             fi
+            size=$(du -b $file|cut -f1)
+            human=$(du -h $file)
             while [ $attempt -le $max_attempts ]; do
               test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
               if curl --silent -f -F "file=@$file$FNstr" \
@@ -455,7 +458,7 @@ jobs:
                    -H "X-Git-MATRIX: ${{ matrix.name }}" \
                    -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
                    http://10.20.0.1:58080/upload.php; then
-                echo "Upload succeeded for $file"
+                echo "Upload succeeded for $file size=$size [$human]"
                 return 0
               else
                 echo "Upload failed for $file. Retrying in $delay seconds..."
