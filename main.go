@@ -21,44 +21,33 @@ import (
 	"fmt"
 	//"github.com/Tensai75/cmpb"
 	//"github.com/fatih/color"
-	"github.com/go-while/go-cpu-mem-profiler"
 	"io"
 	"log"
 	"os"
-	//"os/signal"
-	"path/filepath"
-	"runtime"
+
+	prof "github.com/go-while/go-cpu-mem-profiler"
+
+	//"path/filepath"
+	//"runtime"
 	"runtime/pprof"
-	"slices"
-	"strings"
+	//"slices"
+	//"strings"
 	"sync"
-	//"syscall"
 	"time"
 )
 
 var (
-	appName               = "NZBreX"
-	appVersion            = "-"       // Github tag or built date
-	nzbgroups             []string    // informative
-	providerList          []*Provider // the parsed provider list structure
-	Prof                  *prof.Profiler
-	cfg                   = &Config{opt: &CFG{}}
-	globalmux             sync.RWMutex
-	stop_chan             chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
-	core_chan             chan struct{} // limits cpu usage
-	memlim                *MemLimiter
-	cache                 *Cache
-	cacheON               bool
-	segmentList           []*segmentChanItem
-	segmentChansCheck     map[string]chan *segmentChanItem
-	segmentChansDowns     map[string]chan *segmentChanItem
-	segmentChansReups     map[string]chan *segmentChanItem
-	memDL                 map[string]chan *segmentChanItem // with -checkfirst queues items here
-	memUP                 map[string]chan *segmentChanItem // TODO: process uploads after downloads (possible only with cacheON)
-	Counter               *Counter_uint64
-	segmentCheckStartTime time.Time
-	segmentCheckEndTime   time.Time
-	segmentCheckTook      time.Duration
+	appName    = "NZBreX"
+	appVersion = "-" // Github tag or built date
+	Prof       *prof.Profiler
+	cfg        = &Config{opt: &CFG{}}
+	globalmux  sync.RWMutex
+	stop_chan  chan struct{} // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
+	core_chan  chan struct{} // limits cpu usage
+	memlim     *MemLimiter
+	cache      *Cache
+	cacheON    bool
+	GCounter   *Counter_uint64 // a global counter
 	/*
 		segmentBar   *cmpb.Bar
 		upBar        *cmpb.Bar
@@ -86,13 +75,12 @@ var (
 		})
 	*/
 
-	//fileStat     = make(filesStatistic)
-	//fileStatLock sync.Mutex
-	D        = "3"  // prints stats numbers zero (0003) padded or whitespace padded (  3). default to: 000
-	version  bool   // flag
-	runProf  bool   // flag
-	webProf  string // flag
-	testproc bool   // flag
+	version  bool      // flag
+	runProf  bool      // flag
+	webProf  string    // flag
+	testproc bool      // flag
+	nzbfile  string    // flag
+	booted   time.Time // not a flag
 )
 
 func dumpGoroutines() {
@@ -109,43 +97,30 @@ func dumpGoroutines() {
 
 func init() {
 	stop_chan = make(chan struct{}, 1)
-	// Set up signal handler
 	setupSigusr1Dump()
-	Counter = NewCounter()
-	Prof = prof.NewProf()
+	GCounter = NewCounter(10)
+	booted = time.Now()
 } // end func init
 
-func main() {
-	//colors := new(cmpb.BarColors)
-	var err error
-	ParseFlags()
-	if version {
-		fmt.Printf("%s version: [%s]\n", appName, appVersion)
-		os.Exit(0)
+func getUptime(what string) (uptime float64) {
+	switch what {
+	case "Seconds":
+		uptime = time.Since(booted).Seconds()
+	case "Minutes":
+		uptime = time.Since(booted).Minutes()
+	case "Hours":
+		uptime = time.Since(booted).Hours()
+	default:
+		uptime = -1
 	}
-	if runProf {
-		RunProf()
-	}
+	return
+} // end func getUptime
 
-	// experimental test of processor/sessions
-	if testproc {
-		processor := &PROCESSOR{}
-		nzbdir := "nzbs"
-		var refreshEvery int64 = 15 // seconds
-		if DirExists(nzbdir) {
-			if err := processor.NewProcessor(nzbdir, refreshEvery); err != nil {
-				log.Printf("Error NewProcessor err='%v'", err)
-				os.Exit(1)
-			}
-			time.Sleep(3 * time.Second)
-			log.Printf("that's it! you hit an infinite wait! nothing more will happen!")
-			log.Printf("put new files in the folder and see them coming up...")
-			log.Printf("connecting this to the rest of the source ... ")
-			select {} // infinite wait!
-		} else {
-			log.Printf("watchDir not found: '%s'", nzbdir)
-		}
-	}
+func main() {
+	booted = time.Now()
+
+	//colors := new(cmpb.BarColors)
+	ParseFlags()
 
 	if cfg.opt.Debug {
 		log.Printf("loadedConfig flag.Parse cfg.opt='%#v'", cfg.opt)
@@ -182,6 +157,14 @@ func main() {
 		}
 	} // end debugs
 
+	if cfg.opt.Verbose {
+		log.Printf("Settings: '%#v'", *cfg.opt)
+	}
+
+	// NEWSESSION starts here
+
+	/* SESSION START
+	// create log file: /path/nzb.log
 	if cfg.opt.Log {
 		logFileName := strings.TrimSuffix(filepath.Base(cfg.opt.NZBfilepath), filepath.Ext(filepath.Base(cfg.opt.NZBfilepath))) + ".log"
 		f, err := os.Create(logFileName)
@@ -193,9 +176,8 @@ func main() {
 		log.SetOutput(f) //DEBUG
 	}
 
-	if cfg.opt.Verbose {
-		log.Printf("Settings: '%#v'", *cfg.opt)
-	}
+
+
 
 	preparationStartTime := time.Now()
 	if cfg.opt.Debug {
@@ -230,7 +212,7 @@ func main() {
 			}
 			log.Printf("NewsGroups: %v", nzbgroups)
 		}
-		// filling segmentList
+		// filling s.segmentList
 		for _, segment := range file.Segments {
 			if cfg.opt.BUG {
 				log.Printf("reading nzb: Id='%s' file='%s'", segment.Id, file.Filename)
@@ -241,14 +223,15 @@ func main() {
 				&segment, &file,
 				make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)), make(map[int]bool, len(providerList)),
 				sync.RWMutex{}, nil, false, false, false, false, false, false, false, false, 0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &nzbhashname} // fixme TODO processor/sessions
-			segmentList = append(segmentList, item)
+			s.segmentList = append(s.segmentList, item)
 		}
 	}
 
 	mibsize := float64(nzbfile.Bytes) / 1024 / 1024
-	artsize := mibsize / float64(len(segmentList)) * 1024
+	artsize := mibsize / float64(len(s.segmentList)) * 1024
 
-	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
+	log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, cfg.opt.NZBfilepath, len(s.segmentList), nzbfile.TotalSegments, mibsize, artsize)
+	SESSION END */
 
 	if headers, err := ReadHeadersFromFile(cfg.opt.CleanHeadersFile); headers != nil {
 		cleanHeader = headers
@@ -259,48 +242,54 @@ func main() {
 	}
 
 	// cosmetics
-	if cfg.opt.Bar {
-		cfg.opt.Verbose = false
-	}
+	//if cfg.opt.Bar {
+	//	cfg.opt.Verbose = false
+	//}
 	// left-padding for log output
-	digStr := fmt.Sprintf("%d", len(segmentList))
-	D = fmt.Sprintf("%d", len(digStr))
+	//digStr := fmt.Sprintf("%d", len(s.segmentList))
+	//D = fmt.Sprintf("%d", len(digStr))
+	/*
+		// load the provider list
+		if err := loadProviderList(cfg.opt.ProvFile); err != nil {
+			log.Printf("ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
+			os.Exit(1)
+		}
+		totalMaxConns := 0
+		for _, provider := range providerList {
+			totalMaxConns += provider.MaxConns
+		}
+	*/
 
-	// load the provider list
-	if err := loadProviderList(cfg.opt.ProvFile); err != nil {
-		log.Printf("ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
-		os.Exit(1)
-	}
-	totalMaxConns := 0
-	for _, provider := range providerList {
-		totalMaxConns += provider.MaxConns
-	}
+	/*
+		// set memory slots
+		if cfg.opt.MemMax <= 0 && totalMaxConns > 0 {
+			cfg.opt.MemMax = totalMaxConns * 2
+		}
+		memlim = NewMemLimiter(cfg.opt.MemMax)
 
-	// set memory slots
-	if cfg.opt.MemMax <= 0 && totalMaxConns > 0 {
-		cfg.opt.MemMax = totalMaxConns * 2
-	}
-	memlim = NewMemLimiter(cfg.opt.MemMax)
 
-	// limits crc32 and yenc processing
-	if cfg.opt.YencCpu <= 0 {
-		cfg.opt.YencCpu = runtime.NumCPU()
-	}
-	core_chan = make(chan struct{}, cfg.opt.YencCpu)
-	for i := 1; i <= cfg.opt.YencCpu; i++ {
-		core_chan <- struct{}{} // fill chan with empty structs to suck out and return
-	}
+		// limits crc32 and yenc processing
+		if cfg.opt.YencCpu <= 0 {
+			cfg.opt.YencCpu = runtime.NumCPU()
+		}
+		core_chan = make(chan struct{}, cfg.opt.YencCpu)
+		for i := 1; i <= cfg.opt.YencCpu; i++ {
+			core_chan <- struct{}{} // fill chan with empty structs to suck out and return
+		}
 
-	if cfg.opt.Debug {
-		log.Printf("Loaded providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(providerList), time.Since(preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
-	}
 
-	var waitWorker sync.WaitGroup
-	var workerWGconnEstablish sync.WaitGroup
-	var waitDivider sync.WaitGroup
-	var waitDividerDone sync.WaitGroup
-	var waitPool sync.WaitGroup
+		if cfg.opt.Debug {
+			log.Printf("Loaded providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(providerList), time.Since(preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
+		}
+	*/
 
+	/*
+		var waitWorker sync.WaitGroup
+		var workerWGconnEstablish sync.WaitGroup
+		var waitDivider sync.WaitGroup
+		var waitDividerDone sync.WaitGroup
+		var waitPool sync.WaitGroup
+	*/
 	// boot cache routines
 	if cacheON {
 		cache = NewCache(
@@ -315,7 +304,7 @@ func main() {
 			log.Printf("ERROR Cache failed... is nil!")
 			os.Exit(1)
 		}
-		if !cache.MkSubDir(nzbhashname) { // fixme TODO processor/sessions
+		if !cache.MkSubDir("test") {
 			os.Exit(1)
 		}
 	}
@@ -323,7 +312,7 @@ func main() {
 	/*
 		if cfg.opt.Bar {
 			// segment check progressbar
-			segmentBar = progressBars.NewBar("STAT", len(segmentList))
+			segmentBar = progressBars.NewBar("STAT", len(s.segmentList))
 			segmentBar.SetPreBar(cmpb.CalcSteps)
 			segmentBar.SetPostBar(cmpb.CalcTime)
 			if cfg.opt.Colors {
@@ -335,6 +324,7 @@ func main() {
 		}
 	*/
 
+	/* SESSION start
 	// run the go routines
 	waitDivider.Add(1)
 	waitDividerDone.Add(1)
@@ -371,21 +361,63 @@ func main() {
 		log.Print("main: waitWorker.Wait() released, waiting on waitPool.Wait()")
 	}
 	waitPool.Wait()
+
+	SESSION END */
+
 	/*
 		if cfg.opt.Bar {
 			progressBars.Wait()
 		}
 	*/
-	if cfg.opt.Debug {
-		log.Print("main: waitPool.Wait() released")
+
+	/*
+		if cfg.opt.Debug {
+			log.Print("main: waitPool.Wait() released")
+		}
+
+		result, runtime_info := Results(preparationStartTime)
+
+		YencMerge(nzbhashname, &result)
+
+		log.Print(runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end")
+		//writeCsvFile()
+	*/
+	// SESSION ENDS HERE
+	//log.Printf("// infinite wait!")
+	//select {} // infinite wait!
+
+	wg := new(sync.WaitGroup)
+	thisProcessor := &PROCESSOR{}
+	if err := thisProcessor.NewProcessor(); err != nil {
+		log.Printf("ERROR NewProcessor: err='%v'", err)
+		os.Exit(1)
+	} else {
+		if cfg.opt.NzbDir != "" {
+			thisProcessor.SetDirRefresh(cfg.opt.DirRefresh)
+			log.Printf("// infinite wait!")
+			select {} // infinite wait!
+		}
 	}
 
-	result, runtime_info := Results(preparationStartTime)
+	if cfg.opt.NzbDir == "" && nzbfile != "" {
+		wg.Add(1)
+		go func(nzbfile string, wg *sync.WaitGroup) {
+			log.Printf("pre:thisProcessor.LaunchSession: nzbfile='%s'", nzbfile)
+			if err := thisProcessor.LaunchSession(nil, nzbfile, wg); err != nil {
+				log.Printf("ERROR NewProcessor.LaunchSession: nzbfile='%s' err='%v'", nzbfile, err)
+				os.Exit(1)
+			}
+		}(nzbfile, wg)
+		log.Printf("main: wg.Wait()")
+		wg.Wait()
+		time.Sleep(time.Second)
 
-	YencMerge(nzbhashname, &result)
+	}
 
-	log.Print(runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end")
-	//writeCsvFile()
+	log.Printf("NZBreX done!")
+	//log.Printf("// infinite wait!")
+	//select {} // infinite wait!
+
 	if runProf {
 		log.Printf("Prof stop capturing cpu profile")
 		Prof.StopCPUProfile()

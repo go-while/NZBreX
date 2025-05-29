@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/go-while/go-cpu-mem-profiler"
 	"log"
 	"os"
 	"runtime"
@@ -12,7 +13,7 @@ func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
 	flag.BoolVar(&testproc, "testproc", false, "testing watchdir processor code")
 	// essentials
-	flag.StringVar(&cfg.opt.NZBfilepath, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
+	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
 	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
 	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
@@ -57,6 +58,15 @@ func ParseFlags() {
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
 	//flag.StringVar(&configfile, "configfile", "config.json", "use this config file") // FIXME TODO
 	flag.Parse()
+
+	if version {
+		fmt.Printf("%s version: [%s]\n", appName, appVersion)
+		os.Exit(0)
+	}
+	if runProf {
+		Prof = prof.NewProf()
+		RunProf()
+	}
 
 	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
 		log.Printf("ERROR: you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")

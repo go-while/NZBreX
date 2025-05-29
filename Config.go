@@ -3,12 +3,13 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"github.com/Tensai75/nzbparser"
 	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Tensai75/nzbparser"
 )
 
 const (
@@ -32,7 +33,9 @@ type Config struct {
 }
 
 type CFG struct {
-	NZBfilepath      string
+	//NZBfilepath      string  // only supplied from cmd line
+	NzbDir           string `json:"NzbDir"`
+	DirRefresh       int64  `json:"DirRefresh"`
 	ProvFile         string `json:"Provider"`
 	Cachedir         string `json:"Cachedir"`
 	CheckCacheOnBoot bool   `json:"CheckCacheOnBoot"`
@@ -106,6 +109,7 @@ type Provider struct {
 } // end Provider struct
 
 type segmentChanItem struct {
+	s           *SESSION // links to where it belongs
 	segment     *nzbparser.NzbSegment
 	file        *nzbparser.NzbFile
 	missingOn   map[int]bool // [provider.id]bool
@@ -137,6 +141,14 @@ type segmentChanItem struct {
 	retryIn     int64
 	nzbhashname *string
 } // end segmentChanItem struct
+
+type fileStatistic struct {
+	available     providerStatistic
+	missing       providerStatistic
+	totalSegments uint64
+}
+type filesStatistic map[string]*fileStatistic
+type providerStatistic map[string]uint64
 
 var (
 	needHeaders = []string{

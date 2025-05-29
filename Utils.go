@@ -10,11 +10,12 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"path/filepath"
 	"strings"
 	"time"
-	//"encoding/csv"
+	"encoding/csv"
 	"encoding/json"
-	//"sort"
+	"sort"
 	"crypto/sha256"
 	"encoding/hex"
 )
@@ -76,11 +77,8 @@ func loadNzbFile(path string) (*nzbparser.Nzb, error) {
 	return nzbfile, nil
 } // end func loadNzbFile
 
-func loadProviderList(path string) error {
-	globalmux.Lock()
-	defer globalmux.Unlock()
-
-	if file, err := os.ReadFile(path); err != nil {
+func (s *SESSION) loadProviderList() error {
+	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
 		return err
 	} else {
 		if err := json.Unmarshal(file, &cfg.providers); err != nil {
@@ -127,7 +125,7 @@ func loadProviderList(path string) error {
 			// provider is ready to connect
 			NewConnPool(p)
 			p.id = id
-			providerList = append(providerList, p)
+			s.providerList = append(s.providerList, p)
 			if cfg.opt.Debug {
 				log.Printf("CFG Loaded Provider (id=%d) '%s'", id, p.Name)
 			}
@@ -217,62 +215,64 @@ func SHA256SumFile(path string) (string, error) {
 	return strings.ToLower(hex.EncodeToString(hash.Sum(nil))), nil
 } // end func SHA256SumFile (written by AI! GPT-4o)
 
-/*
-func writeCsvFile() {
-	if cfg.opt.Csv {
-		csvFileName := strings.TrimSuffix(filepath.Base(argsNZBpath), filepath.Ext(filepath.Base(argsNZBpath))) + ".csv"
-		f, err := os.Create(csvFileName)
-		if err != nil {
-			exit(fmt.Errorf("unable to open csv file: %v", err))
-		}
-		log.Println("writing csv file...")
-		fmt.Print("Writing csv file... ")
-		csvWriter := csv.NewWriter(f)
-		firstLine := true
-		// make sorted provider name slice
-		providers := make([]string, 0, len(providerList))
-		for n := range providerList {
-			providers = append(providers, providerList[n].Name)
-		}
-		sort.Strings(providers)
-		for fileName, file := range fileStat {
-			// write first line
-			if firstLine {
-				line := make([]string, len(providers)+2)
-				line[0] = "Filename"
-				line[1] = "Total segments"
-				for n, providerName := range providers {
-					line[n+2] = providerName
-				}
-				if err := csvWriter.Write(line); err != nil {
-					exit(fmt.Errorf("unable to write to the csv file: %v", err))
-				}
-				firstLine = false
-			}
-			// write line
+
+func (s *SESSION) writeCsvFile() (err error) {
+	if !cfg.opt.Csv {
+		return
+	}
+	csvFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".csv"
+	f, err := os.Create(csvFileName)
+	if err != nil {
+		return fmt.Errorf("unable to open csv file: %v", err)
+	}
+	log.Println("writing csv file...")
+	fmt.Print("Writing csv file... ")
+	csvWriter := csv.NewWriter(f)
+	firstLine := true
+	// make sorted provider name slice
+	providers := make([]string, 0, len(s.providerList))
+	for n := range s.providerList {
+		providers = append(providers, s.providerList[n].Name)
+	}
+	sort.Strings(providers)
+	for fileName, file := range s.fileStat {
+		// write first line
+		if firstLine {
 			line := make([]string, len(providers)+2)
-			line[0] = fileName
-			line[1] = fmt.Sprintf("%v", file.totalSegments)
+			line[0] = "Filename"
+			line[1] = "Total segments"
 			for n, providerName := range providers {
-				if value, ok := file.available[providerName]; ok {
-					line[n+2] = fmt.Sprintf("%v", value)
-				} else {
-					line[n+2] = "0"
-				}
+				line[n+2] = providerName
 			}
 			if err := csvWriter.Write(line); err != nil {
-				exit(fmt.Errorf("unable to write to the csv file: %v", err))
+				return fmt.Errorf("unable to write to the csv file: %v", err)
+			}
+			firstLine = false
+		}
+		// write line
+		line := make([]string, len(providers)+2)
+		line[0] = fileName
+		line[1] = fmt.Sprintf("%v", file.totalSegments)
+		for n, providerName := range providers {
+			if value, ok := file.available[providerName]; ok {
+				line[n+2] = fmt.Sprintf("%v", value)
+			} else {
+				line[n+2] = "0"
 			}
 		}
-		csvWriter.Flush()
-		if err := csvWriter.Error(); err != nil {
-			exit(fmt.Errorf("unable to write to the csv file: %v", err))
+		if err := csvWriter.Write(line); err != nil {
+			return fmt.Errorf("unable to write to the csv file: %v", err)
 		}
-		f.Close()
-		fmt.Print("done")
 	}
-}
-*/
+	csvWriter.Flush()
+	if err := csvWriter.Error(); err != nil {
+		return fmt.Errorf("unable to write to the csv file: %v", err)
+	}
+	f.Close()
+	log.Printf("writeCsv: done")
+	return
+} // end func writeCsv
+
 
 func setTimerNow(timer *time.Time) {
 	globalmux.Lock()
@@ -383,3 +383,9 @@ func yesno(input bool) string {
 	}
 	return "?"
 } // end func yesno
+
+func dlog(anyflag bool, format string, a ...any) {
+	if anyflag {
+		log.Printf(format, a...)
+	}
+} // end dlog

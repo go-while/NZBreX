@@ -49,6 +49,15 @@ func NewMemLimiter(value int) *MemLimiter {
 	return memlim
 } // end func NewMemLimiter
 
+func (m *MemLimiter) SetMaxMem(newmax int) {
+	if newmax <= 0 {
+		newmax = 1 // can't have 0 objects in ram...
+	}
+	m.mux.Lock()
+	m.mem_max = newmax
+	m.mux.Unlock()
+} // end func SetMaxMem
+
 func (m *MemLimiter) Usage() (int, int) {
 	used_slots := m.mem_max - len(m.memchan)
 	return used_slots, m.mem_max
@@ -65,7 +74,7 @@ func (m *MemLimiter) ViewData() (data []string) {
 
 func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 	if cfg.opt.Debug {
-		Counter.incr("TOTAL_MemCheckWait")
+		GCounter.Incr("TOTAL_MemCheckWait")
 	}
 
 	m.mux.Lock()
@@ -101,7 +110,7 @@ func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	if cfg.opt.Debug {
-		Counter.incr("WAIT_MemReturn")
+		GCounter.Incr("WAIT_MemReturn")
 	}
 	select {
 	case m.memchan <- struct{}{}: // return mem slot into chan
@@ -114,8 +123,8 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	delete(m.memdata, item)
 	m.mux.Unlock()
 	if cfg.opt.Debug {
-		Counter.decr("WAIT_MemReturn")
-		Counter.incr("TOTAL_MemReturned")
+		GCounter.Decr("WAIT_MemReturn")
+		GCounter.Incr("TOTAL_MemReturned")
 	}
 	//log.Printf("MemReturned who='%s'", who)
 } // end func memlim.MemReturn

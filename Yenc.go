@@ -9,9 +9,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 )
 
-func YencMerge(nzbhashname string, result *string) {
+type yenc_item struct {
+	item  *segmentChanItem
+	yPart *yenc.Part
+	//	s *SESSION
+}
+
+func (s *SESSION) YencMerge(result *string) {
 	if !cfg.opt.YencMerge || !cacheON {
 		return
 	}
@@ -19,7 +27,7 @@ func YencMerge(nzbhashname string, result *string) {
 	mergeStart := time.Now().Unix()
 	log.Printf("Experimental YencWrite: try merging files....")
 	filenames := []string{}
-	for _, item := range segmentList {
+	for _, item := range s.segmentList {
 		if !slices.Contains(filenames, item.file.Filename) {
 			filenames = append(filenames, item.file.Filename)
 		}
@@ -32,7 +40,7 @@ func YencMerge(nzbhashname string, result *string) {
 		go func(filename string, waitMerge *sync.WaitGroup) {
 			defer returnCoreLimiter()
 			defer waitMerge.Done()
-			target := filepath.Join(cfg.opt.Cachedir, nzbhashname, "yenc", filename)
+			target := filepath.Join(cfg.opt.Cachedir, s.nzbHash, "yenc", filename)
 			if FileExists(target) {
 				log.Printf("YencMerge: exists target='%s'", target)
 				return
@@ -40,7 +48,7 @@ func YencMerge(nzbhashname string, result *string) {
 			var items []*segmentChanItem
 			// capture all items for our filename
 		loopItems:
-			for _, item := range segmentList {
+			for _, item := range s.segmentList {
 				if item.file.Filename != filename {
 					continue loopItems
 				}
@@ -56,7 +64,7 @@ func YencMerge(nzbhashname string, result *string) {
 				*/
 
 				items = append(items, item)
-			} // end for segmentList
+			} // end for s.segmentList
 			if len(items) == 0 {
 				log.Printf("ERROR YencMerge: no items found to merge? fn='%s'", filename)
 				return

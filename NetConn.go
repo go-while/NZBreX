@@ -4,11 +4,13 @@ import (
 	//"bytes"
 	//"bufio"
 	"fmt"
-	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 	"io"
 	"log"
 	"net"
 	"net/textproto"
+
+	"github.com/go-while/yenc" // fork of chrisfarms with little mods
+
 	//"os"
 	//"path/filepath"
 	"strings"
@@ -44,7 +46,7 @@ forever:
 			break forever
 
 		case <-cron:
-			tmp_rxb, tmp_txb := Counter.getReset("TMP_RXbytes"), Counter.getReset("TMP_TXbytes")
+			tmp_rxb, tmp_txb := GCounter.GetReset("TMP_RXbytes"), GCounter.GetReset("TMP_TXbytes")
 			logStr, logStr_RX, logStr_TX = "", "", ""
 			if tmp_rxb > 0 {
 				TOTAL_RXbytes += tmp_rxb
@@ -266,7 +268,7 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		provider.mux.Lock()
 		provider.capabilities.post = false
 		provider.mux.Unlock()
-		Counter.decr("postProviders")
+		GCounter.Decr("postProviders")
 		log.Printf("ERROR code=%d in CMD_POST @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
 		return code, 0, nil
 	default:
@@ -465,7 +467,7 @@ readlines:
 				}
 			*/
 			item.mux.Unlock()
-			Counter.decr("dlQueueCnt") // FIXME NEEDS REVIEW
+			GCounter.Decr("dlQueueCnt") // FIXME NEEDS REVIEW
 			log.Printf("ERROR readArticleDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 			return true, nil
 		}
@@ -543,7 +545,7 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 		return fmt.Errorf("ERROR checkCapabilities QUIT")
 	}
 	if setpostProviders > 0 {
-		Counter.incr("postProviders")
+		GCounter.Incr("postProviders")
 	}
 	// provider.NoUpload will be set to true if none capa is available
 	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)

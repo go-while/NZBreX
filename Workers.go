@@ -11,15 +11,19 @@ import (
 )
 
 func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
+	log.Printf("moved to session...")
+}
+
+func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
 	globalmux.Lock()
-	if segmentChansCheck != nil {
+	if s.segmentChansCheck != nil {
 		globalmux.Unlock()
-		log.Print("Error in GoBootWorkers: already booted?!")
+		log.Print("Error in GoBootWorkers: already booted session or did not cleanup?!")
 		return
 	}
-	segmentChansCheck = make(map[string]chan *segmentChanItem)
-	segmentChansDowns = make(map[string]chan *segmentChanItem)
-	segmentChansReups = make(map[string]chan *segmentChanItem)
+	s.segmentChansCheck = make(map[string]chan *segmentChanItem)
+	s.segmentChansDowns = make(map[string]chan *segmentChanItem)
+	s.segmentChansReups = make(map[string]chan *segmentChanItem)
 	waitWorker.Add(1)
 	globalmux.Unlock()
 
@@ -28,25 +32,25 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 
 	if cacheON && cfg.opt.CheckCacheOnBoot {
 		cached := 0
-		for _, item := range segmentList {
+		for _, item := range s.segmentList {
 			if cache.CheckCache(item) {
 				cached++
 				//log.Printf("Cached: seg.Id='%s'", item.segment.Id)
 			}
 		}
-		log.Printf("Cached: %d/%d", cached, len(segmentList))
+		log.Printf("Cached: %d/%d", cached, len(s.segmentList))
 	}
 
 	if cfg.opt.ChanSize > 0 {
-		if len(segmentList) < cfg.opt.ChanSize {
-			cfg.opt.ChanSize = len(segmentList)
+		if len(s.segmentList) < cfg.opt.ChanSize {
+			cfg.opt.ChanSize = len(s.segmentList)
 		}
 	} else {
 		cfg.opt.ChanSize = DefaultChanSize
 	}
 
-	for _, provider := range providerList {
-		//log.Printf("BootWorkers list=%d provider='%#v' ", providersCnt, provider)
+	for _, provider := range s.providerList {
+		log.Printf("BootWorkers list=%d provider='%#v' ", len(s.providerList), provider.Name)
 		if !provider.Enabled || provider.MaxConns <= 0 {
 			if cfg.opt.Verbose {
 				log.Printf("!enabled provider: '%s' MaxConns=%d", provider.Name, provider.MaxConns)
@@ -65,15 +69,15 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 			//log.Printf("Mapping Provider '%s' to group '%s'", provider.Name, provider.Group)
 
 			globalmux.Lock()
-			if segmentChansCheck[provider.Group] == nil {
+			if s.segmentChansCheck[provider.Group] == nil {
 				// create channels once if not exists
-				segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				s.segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+				s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				// fill check channel for provider group with pointers
 				go func(segmentChanCheck chan *segmentChanItem) {
 					start := time.Now()
-					for _, item := range segmentList {
+					for _, item := range s.segmentList {
 						segmentChanCheck <- item
 					}
 					for {
@@ -83,9 +87,9 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 						}
 					}
 					if cfg.opt.Verbose {
-						log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(segmentList), provider.Group, time.Since(start).Seconds())
+						log.Printf(" | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
 					}
-				}(segmentChansCheck[provider.Group])
+				}(s.segmentChansCheck[provider.Group])
 
 			}
 			globalmux.Unlock()
@@ -128,21 +132,21 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 				workerWGconnEstablish.Add(1)
 				globalmux.Unlock()
 				// GoWorker connecting....
-				go GoWorker(wid, provider, waitWorker, workerWGconnEstablish, waitPool)
+				go s.GoWorker(wid, provider, waitWorker, workerWGconnEstablish, waitPool)
 				// all providers boot up at the same time
 				// give workers some space in time to start and connect
 				// 50 conns on a provider will need up to 2.5s to boot
 				time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
 			}
 		}(provider, workerWGconnEstablish, waitWorker, waitPool) // end go func
-	} // end for providerList
+	} // end for s.providerList
 	if cfg.opt.Debug {
 		log.Printf("Waiting for Workers to connect")
 	}
 	workerWGconnEstablish.Done() // releases 1 set before calling GoBootWorkers
 	workerWGconnEstablish.Wait() // waits for the others to release when connections are established
 	// check if we have at least one provider with IHAVE or POST capability
-	if Counter.get("postProviders") == 0 && !cfg.opt.CheckOnly {
+	if GCounter.GetValue("postProviders") == 0 && !cfg.opt.CheckOnly {
 		cfg.opt.CheckOnly = true
 		log.Print("WARN: no provider has IHAVE or POST capability: force CheckOnly")
 	}
@@ -151,7 +155,7 @@ func GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstablish *sync.Wait
 	}
 } // end func GoBootWorkers
 
-func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitPool *sync.WaitGroup) {
+func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitPool *sync.WaitGroup) {
 	if cfg.opt.BUG {
 		log.Printf("GoWorker (%d) launching routines '%s'", wid, provider.Name)
 	}
@@ -159,9 +163,9 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 	waitWorker.Add(3)
 	waitPool.Add(1)
 
-	segCC := segmentChansCheck[provider.Group]
-	segCD := segmentChansDowns[provider.Group]
-	segCR := segmentChansReups[provider.Group]
+	segCC := s.segmentChansCheck[provider.Group]
+	segCD := s.segmentChansDowns[provider.Group]
+	segCR := s.segmentChansReups[provider.Group]
 	workerWGconnEstablish.Done()
 	globalmux.Unlock()
 
@@ -197,15 +201,15 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 					if cfg.opt.Debug {
 						log.Printf("WorkerCheck: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 					}
-					if err := GoCheckRoutine(wid, provider, item, sharedConn); err != nil { // re-queue?
+					if err := s.GoCheckRoutine(wid, provider, item, sharedConn); err != nil { // re-queue?
 						log.Printf("ERROR in GoCheckRoutine err='%v'", err)
 					}
 				case true:
 					item.mux.Lock()
 					item.flaginDL = true
 					item.mux.Unlock()
-					Counter.incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
-					Counter.incr("TOTAL_dlQueueCnt") //cfg.opt.ByPassSTAT
+					GCounter.Incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
+					GCounter.Incr("TOTAL_dlQueueCnt") //cfg.opt.ByPassSTAT
 					segmentChanDown <- item
 				}
 			}
@@ -232,7 +236,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				if cfg.opt.Debug {
 					log.Printf("WorkerDown: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 				}
-				if err := GoDownsRoutine(wid, provider, item, sharedConn); err != nil {
+				if err := s.GoDownsRoutine(wid, provider, item, sharedConn); err != nil {
 					log.Printf("ERROR in GoDownsRoutine err='%v'", err)
 				}
 			}
@@ -259,7 +263,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 				if cfg.opt.Debug {
 					log.Printf("WorkerReup: (%d) process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
 				}
-				if err := GoReupsRoutine(wid, provider, item, sharedConn); err != nil {
+				if err := s.GoReupsRoutine(wid, provider, item, sharedConn); err != nil {
 					log.Printf("ERROR in GoReupsRoutine err='%v'", err)
 				}
 			}
@@ -294,7 +298,7 @@ func GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGc
 
 } // end func GoWorker
 
-func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
+func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 	if !allowDl {
 		return
 	}
@@ -310,31 +314,31 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 			}
 			if item.ignoreDlOn[pid] {
 				if cfg.opt.Debug {
-					log.Printf(" | [DV] ignoreDlOn seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
+					log.Printf(" | [DV] ignoreDlOn seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
 				}
 				continue providerDl
 			}
-			if providerList[pid].NoDownload {
+			if s.providerList[pid].NoDownload {
 				nodl++
 				item.ignoreDlOn[pid] = true
 				continue providerDl
 			}
 			if cfg.opt.Debug {
-				log.Printf(" | [DV] push chan <- down seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
+				log.Printf(" | [DV] push chan <- down seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
 			}
 			/* push download request only to 1.
 			 * this one should get it and update availableOn/missingOn list
 			 */
 			if cfg.opt.CheckFirst {
 				select {
-				case memDL[providerList[pid].Group] <- item:
+				case s.memDL[s.providerList[pid].Group] <- item:
 					pushed = true
 				default:
 					// chan is full
 				}
 			} else if !cfg.opt.ByPassSTAT {
 				select {
-				case segmentChansDowns[providerList[pid].Group] <- item:
+				case s.segmentChansDowns[s.providerList[pid].Group] <- item:
 					pushed = true
 				default:
 					// chan is full
@@ -349,8 +353,8 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 			}
 			item.mux.Unlock()
 			if pushed {
-				Counter.incr("dlQueueCnt")
-				Counter.incr("TOTAL_dlQueueCnt")
+				GCounter.Incr("dlQueueCnt")
+				GCounter.Incr("TOTAL_dlQueueCnt")
 			}
 			return // return after 1st push!
 		} // end for providerDl
@@ -359,7 +363,7 @@ func pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
 	return
 } // end func pushDL
 
-func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inretry uint64) {
+func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inretry uint64) {
 	if !allowUp {
 		return
 	}
@@ -374,9 +378,9 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 			if !miss {
 				continue providerUp
 			}
-			providerList[pid].mux.RLock() // FIXME TODO #b8bd287b: dynamic capas
-			flagNoUp := (providerList[pid].NoUpload || (!providerList[pid].capabilities.ihave && !providerList[pid].capabilities.post))
-			providerList[pid].mux.RUnlock()
+			s.providerList[pid].mux.RLock() // FIXME TODO #b8bd287b: dynamic capas
+			flagNoUp := (s.providerList[pid].NoUpload || (!s.providerList[pid].capabilities.ihave && !s.providerList[pid].capabilities.post))
+			s.providerList[pid].mux.RUnlock()
 
 			if flagNoUp {
 				noup++
@@ -395,7 +399,7 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 				}
 			}
 			if cfg.opt.Debug {
-				log.Printf(" | [DV] push chan <- reup seg.Id='%s' @ '%s'", item.segment.Id, providerList[pid].Name)
+				log.Printf(" | [DV] push chan <- reup seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
 			}
 
 			/* push upload request only to 1.
@@ -403,7 +407,7 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 			*/
 			if cfg.opt.UploadLater && cacheON {
 				select {
-				case memUP[providerList[pid].Group] <- item:
+				case s.memUP[s.providerList[pid].Group] <- item:
 					// pass
 					pushed = true
 				default:
@@ -411,7 +415,7 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 				}
 			} else {
 				select {
-				case segmentChansReups[providerList[pid].Group] <- item:
+				case s.segmentChansReups[s.providerList[pid].Group] <- item:
 					// pass
 					pushed = true
 				default:
@@ -427,8 +431,8 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 			}
 			item.mux.Unlock()
 			if pushed {
-				Counter.incr("upQueueCnt")
-				Counter.incr("TOTAL_upQueueCnt")
+				GCounter.Incr("upQueueCnt")
+				GCounter.Incr("TOTAL_upQueueCnt")
 			}
 			return // return after 1st push!
 		} // end for providerUp
@@ -437,7 +441,7 @@ func pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inre
 	return
 } // end func pushUP
 
-func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup) {
+func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup) {
 	if cfg.opt.Debug {
 		log.Print("go GoWorkDivider() waitDivider.Wait()")
 	}
@@ -450,23 +454,23 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 
 	segcheckdone := false
 	closeWait, closeCase := 1, ""
-	todo := uint64(len(segmentList))
-	providersCnt := len(providerList)
+	todo := uint64(len(s.segmentList))
+	providersCnt := len(s.providerList)
 
 	if cfg.opt.CheckFirst {
-		memDL = make(map[string]chan *segmentChanItem)
-		for _, provider := range providerList {
-			if memDL[provider.Group] == nil {
-				memDL[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+		s.memDL = make(map[string]chan *segmentChanItem)
+		for _, provider := range s.providerList {
+			if s.memDL[provider.Group] == nil {
+				s.memDL[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 			}
 		}
 	} // end if cfg.opt.CheckFirst
 
 	if cfg.opt.UploadLater {
-		memUP = make(map[string]chan *segmentChanItem)
-		for _, provider := range providerList {
-			if memUP[provider.Group] == nil {
-				memUP[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+		s.memUP = make(map[string]chan *segmentChanItem)
+		for _, provider := range s.providerList {
+			if s.memUP[provider.Group] == nil {
+				s.memUP[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 			}
 		}
 	} // end if cfg.opt.UploadLater
@@ -478,13 +482,13 @@ func GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup)
 	// strings
 	var logstring, log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99 string
 
-	// loops forever over the segmentList and checks if there is anything to do for an item
+	// loops forever over the s.segmentList and checks if there is anything to do for an item
 forever:
 	for {
 		time.Sleep(time.Duration((lastRunTook.Milliseconds() * 2)) + (2555 * time.Millisecond))
 		globalmux.RLock()
 		allowDl := (!cfg.opt.CheckOnly)
-		allowUp := (!cfg.opt.CheckOnly && Counter.get("postProviders") > 0)
+		allowUp := (!cfg.opt.CheckOnly && GCounter.GetValue("postProviders") > 0)
 		globalmux.RUnlock()
 
 		// uint64
@@ -497,7 +501,7 @@ forever:
 		startLoop := time.Now()
 
 	forsegmentList:
-		for _, item := range segmentList {
+		for _, item := range s.segmentList {
 
 			item.mux.RLock() // RLOCKS HERE #824d
 			if item.cached {
@@ -545,7 +549,7 @@ forever:
 			}
 
 			//if len(item.availableOn) == 0 && len(item.missingOn) == providersCnt {
-			if IsSegmentStupid(item) { // check me bug? NoDownload-flag !
+			if s.IsSegmentStupid(item, false) { // check me bug? NoDownload-flag !
 				// segment is not available to download on any provider...
 				dead++
 				doContinue = true
@@ -566,12 +570,12 @@ forever:
 			}
 			item.mux.RUnlock() // RUNLOCKS HERE #824d
 
-			pushedUp, nNoUp, nInRetry := pushUP(allowUp, item)
+			pushedUp, nNoUp, nInRetry := s.pushUP(allowUp, item)
 			noup += nNoUp
 			//Tnoup += len(item.ignoreDlOn)
 			inretry += nInRetry
 			if allowDl && !pushedUp {
-				pushedDl, nNoDl := pushDL(allowDl, item)
+				pushedDl, nNoDl := s.pushDL(allowDl, item)
 				nodl += nNoDl
 				Tnodl += uint64(len(item.ignoreDlOn))
 				if pushedDl {
@@ -589,8 +593,8 @@ forever:
 
 		if !cfg.opt.CheckOnly && cfg.opt.CheckFirst && segcheckdone && checked == todo {
 			//log.Printf("release the DL quaken")
-			for _, provider := range providerList {
-				dlq := len(memDL[provider.Group])
+			for _, provider := range s.providerList {
+				dlq := len(s.memDL[provider.Group])
 				if dlq > 0 {
 					if cfg.opt.Verbose {
 						log.Printf(" | [DV] | Feeding %d Downs to '%s'", dlq, provider.Group)
@@ -598,8 +602,8 @@ forever:
 				feedDL:
 					for {
 						select {
-						case item := <-memDL[provider.Group]:
-							segmentChansDowns[provider.Group] <- item
+						case item := <-s.memDL[provider.Group]:
+							s.segmentChansDowns[provider.Group] <- item
 						default:
 							// chan ran empty
 							break feedDL
@@ -614,8 +618,8 @@ forever:
 
 		if cacheON && !cfg.opt.CheckOnly && cfg.opt.UploadLater && ((isdl == todo) || (cached == todo)) {
 			//log.Printf("release the UL quaken")
-			for _, provider := range providerList {
-				upq := len(memUP[provider.Group])
+			for _, provider := range s.providerList {
+				upq := len(s.memUP[provider.Group])
 				if upq > 0 {
 					if cfg.opt.Verbose {
 						log.Printf(" | [DV] | Feeding %d Reups to '%s'", upq, provider.Group)
@@ -623,8 +627,8 @@ forever:
 				feedUP:
 					for {
 						select {
-						case item := <-memUP[provider.Group]:
-							segmentChansReups[provider.Group] <- item
+						case item := <-s.memUP[provider.Group]:
+							s.segmentChansReups[provider.Group] <- item
 						default:
 							// chan ran empty
 							break feedUP
@@ -634,15 +638,15 @@ forever:
 			}
 		} // end if argUploadLater
 
-		upQ = Counter.get("upQueueCnt")
-		TupQ := Counter.get("TOTAL_upQueueCnt")
-		dlQ = Counter.get("dlQueueCnt")
-		TdlQ := Counter.get("TOTAL_dlQueueCnt")
-		yeQ = Counter.get("yencQueueCnt")
-		TyeQ := Counter.get("TOTAL_yencQueueCnt")
+		upQ = GCounter.GetValue("upQueueCnt")
+		TupQ := GCounter.GetValue("TOTAL_upQueueCnt")
+		dlQ = GCounter.GetValue("dlQueueCnt")
+		TdlQ := GCounter.GetValue("TOTAL_dlQueueCnt")
+		yeQ = GCounter.GetValue("yencQueueCnt")
+		TyeQ := GCounter.GetValue("TOTAL_yencQueueCnt")
 		// print some stats and check if we're done
 		if !cfg.opt.Bar && (cfg.opt.Verbose || cfg.opt.Debug) {
-			CNTc, CNTd, CNTu := Counter.get("GoCheckRoutines"), Counter.get("GoDownsRoutines"), Counter.get("GoReupsRoutines")
+			CNTc, CNTd, CNTu := GCounter.GetValue("GoCheckRoutines"), GCounter.GetValue("GoDownsRoutines"), GCounter.GetValue("GoReupsRoutines")
 			cache_perc := float64(cached) / float64(todo) * 100
 			check_perc := float64(checked) / float64(todo) * 100
 			segm_perc := float64(segm) / float64(todo) * 100
@@ -659,24 +663,24 @@ forever:
 
 			if (cfg.opt.CheckFirst || cfg.opt.CheckOnly) || (checked > 0 && checked != segm && checked != done) {
 				if check_perc != 100 {
-					log01 = fmt.Sprintf(" | STAT:[%03.1f%%] (%"+D+"d)", check_perc, checked)
+					log01 = fmt.Sprintf(" | STAT:[%03.1f%%] (%"+s.D+"d)", check_perc, checked)
 				} else {
-					log01 = fmt.Sprintf(" | STAT:[done] (%"+D+"d)", checked)
+					log01 = fmt.Sprintf(" | STAT:[done] (%"+s.D+"d)", checked)
 				}
 			}
 			if done > 0 {
 				if !cfg.opt.Debug {
-					log02 = fmt.Sprintf(" | DONE:[%03.3f%%] (%"+D+"d/%d)", done_perc, done, todo)
+					log02 = fmt.Sprintf(" | DONE:[%03.3f%%] (%"+s.D+"d/%d)", done_perc, done, todo)
 				} else {
 					if done_perc >= 99 && done_perc < 100 {
-						log02 = fmt.Sprintf(" | DONE:[%03.9f%%] (%"+D+"d)", done_perc, done)
+						log02 = fmt.Sprintf(" | DONE:[%03.9f%%] (%"+s.D+"d)", done_perc, done)
 					} else {
-						log02 = fmt.Sprintf(" | DONE:[%03.5f%%] (%"+D+"d)", done_perc, done)
+						log02 = fmt.Sprintf(" | DONE:[%03.5f%%] (%"+s.D+"d)", done_perc, done)
 					}
 				}
 			}
 			if segm > 0 && segm != done {
-				log03 = fmt.Sprintf(" | SEGM:[%03.3f%%] (%"+D+"d)", segm_perc, segm)
+				log03 = fmt.Sprintf(" | SEGM:[%03.3f%%] (%"+s.D+"d)", segm_perc, segm)
 				if nodl > 0 {
 					log03 = log03 + fmt.Sprintf(" nodl=%d/%d", nodl, Tnodl)
 				}
@@ -685,30 +689,30 @@ forever:
 				}
 			}
 			if yenc_perc > 0 && yenc_perc != cache_perc {
-				log04 = fmt.Sprintf(" | YENC:[%03.3f%%] (%"+D+"d / %"+D+"d Q:%d←%d)", yenc_perc, isyenc, TyeQ, inyenc, yeQ)
+				log04 = fmt.Sprintf(" | YENC:[%03.3f%%] (%"+s.D+"d / %"+s.D+"d Q:%d←%d)", yenc_perc, isyenc, TyeQ, inyenc, yeQ)
 			}
 			if dead > 0 {
-				log05 = fmt.Sprintf(" | DEAD:[%03.3f%%] (%"+D+"d)", dead_perc, dead)
+				log05 = fmt.Sprintf(" | DEAD:[%03.3f%%] (%"+s.D+"d)", dead_perc, dead)
 			}
 			if dmca > 0 {
-				log06 = fmt.Sprintf(" | DMCA:[%03.3f%%] (%"+D+"d)", dmca_perc, dmca)
+				log06 = fmt.Sprintf(" | DMCA:[%03.3f%%] (%"+s.D+"d)", dmca_perc, dmca)
 			}
 			if inretry > 0 {
-				log07 = fmt.Sprintf(" | ERRS:(%"+D+"d)", inretry)
+				log07 = fmt.Sprintf(" | ERRS:(%"+s.D+"d)", inretry)
 			}
 			if indl > 0 || isdl > 0 || dlQ > 0 || TdlQ > 0 {
-				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d=%d)", isdl_perc, isdl, TdlQ, dlQ, indl)
+				log08 = fmt.Sprintf(" | DL:[%03.3f%%] (%"+s.D+"d / %"+s.D+"d  Q:%d=%d)", isdl_perc, isdl, TdlQ, dlQ, indl)
 			}
 			if cached > 0 {
-				log09 = fmt.Sprintf(" | HD:[%03.3f%%] (%"+D+"d)", cache_perc, cached)
+				log09 = fmt.Sprintf(" | HD:[%03.3f%%] (%"+s.D+"d)", cache_perc, cached)
 			}
 			if inup > 0 || isup > 0 || upQ > 0 || TupQ > 0 {
-				log10 = fmt.Sprintf(" | UP:[%03.3f%%] (%"+D+"d / %"+D+"d  Q:%d←%d)", isup_perc, isup, TupQ, upQ, inup)
+				log10 = fmt.Sprintf(" | UP:[%03.3f%%] (%"+s.D+"d / %"+s.D+"d  Q:%d←%d)", isup_perc, isup, TupQ, upQ, inup)
 			}
 
 			if cfg.opt.Verbose && !cfg.opt.Debug {
 				openConns, idleConns := 0, 0
-				for _, prov := range providerList {
+				for _, prov := range s.providerList {
 					oc, ic := prov.Conns.GetStats()
 					openConns += oc
 					idleConns += ic
@@ -717,10 +721,10 @@ forever:
 
 			} else if cfg.opt.Debug {
 
-				CNTmw, CNTmr, CNTwmr := Counter.get("TOTAL_MemCheckWait"), Counter.get("TOTAL_MemReturned"), Counter.get("WAIT_MemReturn")
+				CNTmw, CNTmr, CNTwmr := GCounter.GetValue("TOTAL_MemCheckWait"), GCounter.GetValue("TOTAL_MemReturned"), GCounter.GetValue("WAIT_MemReturn")
 				CNTmo := CNTmw - CNTmr
 
-				CNTnc, CNTgc, CNTdc, CNTpc, CNTwc := Counter.get("TOTAL_NewConns"), Counter.get("TOTAL_GetConns"), Counter.get("TOTAL_DisConns"), Counter.get("TOTAL_ParkedConns"), Counter.get("WaitingGetConns")
+				CNTnc, CNTgc, CNTdc, CNTpc, CNTwc := GCounter.GetValue("TOTAL_NewConns"), GCounter.GetValue("TOTAL_GetConns"), GCounter.GetValue("TOTAL_DisConns"), GCounter.GetValue("TOTAL_ParkedConns"), GCounter.GetValue("WaitingGetConns")
 				CNToc := CNTnc - CNTdc
 				memdata := memlim.ViewData()
 				log11 = fmt.Sprintf("\n memdata=%d:\n %#v \n  | MEM:%d/%d [Cr=%d|Dr=%d|Ur=%d] [CNTmemWait=%d|CNTmemRet=%d|MemOpen=%d|MemWaitReturn=%d] (indl=%d|inup=%d) CP:(parked=%d|get=%d|new=%d|dis=%d|open=%d|wait=%d)",
@@ -736,11 +740,11 @@ forever:
 		} // print some stats
 
 		if !segcheckdone && checked == todo {
-			setTimerNow(&segmentCheckEndTime)
-			took := getTimeSince(segmentCheckStartTime)
-			globalmux.Lock()
-			segmentCheckTook = took
-			globalmux.Unlock()
+			s.mux.Lock()
+			s.segmentCheckEndTime = time.Now()
+			took := time.Since(s.segmentCheckStartTime)
+			s.segmentCheckTook = took
+			s.mux.Unlock()
 			segcheckdone = true
 			/*
 				if cfg.opt.Bar {
@@ -808,7 +812,7 @@ forever:
 		globalmux.RLock()
 		closeCase0 := (done == todo)
 		closeCase1 := (cfg.opt.CheckOnly)
-		closeCase2 := (cacheON && (Counter.get("postProviders") == 0 && cached == todo))
+		closeCase2 := (cacheON && (GCounter.GetValue("postProviders") == 0 && cached == todo))
 		closeCase3 := (cacheON && (dead+cached == todo && dead+isup == todo))
 		closeCase4 := (isup == todo)
 		closeCase5 := (dead+isup == todo)
@@ -863,19 +867,19 @@ forever:
 	} // end forever
 
 	/*
-	if !cfg.opt.Bar && logstring != "" { // always prints final logstring
-		log.Print("Final: "+logstring)
-	}
+		if !cfg.opt.Bar && logstring != "" { // always prints final logstring
+			log.Print("Final: "+logstring)
+		}
 	*/
 	if cfg.opt.Debug {
 		log.Printf("%s\n   WorkDivider quit: closeCase='%s'", logstring, closeCase)
 	}
 } // end func WorkDivider
 
-func SharedConnGet(sharedCC chan *ConnItem) (connitem *ConnItem) {
+func (s *SESSION) SharedConnGet(sharedCC chan *ConnItem) (connitem *ConnItem) {
 	return <-sharedCC
 } // end func SharedConnGet
 
-func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
+func (s *SESSION) SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
 	sharedCC <- connitem
 } // end func SharedConnReturn
