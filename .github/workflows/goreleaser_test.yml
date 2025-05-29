@@ -1,4 +1,4 @@
-name: GoReleaser Test Build
+name: "Self-Hosted GoReleaser"
 
 on:
   push:
@@ -15,19 +15,16 @@ on:
       #- main
       - testing
 
-
 permissions:
   contents: write
   packages: read
 
 jobs:
   goreleaser:
-    name: GoReleaser Test
+    name: "GoReleaser Test Build"
     runs-on: [self-hosted, ubu2204-gor]
-
 #    env:
 #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
       - name: "@Start Clean directory"
         run: |
