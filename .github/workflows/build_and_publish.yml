@@ -377,13 +377,13 @@ jobs:
           echo "LIBC=$LIBC" >> $GITHUB_ENV
 
       - name: Build ${{ matrix.name }}
-        env:
-          #VERSION: ${{ env.VERSION }}
-          #SHA7: ${{ env.SHA7 }}
-          #LIBC: "${{ env.LIBC }}"
-          #MATRIX: ${{ env.MATRIX }}
-          #OS: ${{ env.OS }}
-          #ARCH: ${{ env.ARCH }}
+#        env:
+#          #VERSION: ${{ env.VERSION }}
+#          #SHA7: ${{ env.SHA7 }}
+#          #LIBC: "${{ env.LIBC }}"
+#          #MATRIX: ${{ env.MATRIX }}
+#          #OS: ${{ env.OS }}
+#          #ARCH: ${{ env.ARCH }}
         run: |
           set -euo pipefail
           mkdir -p builds/${{ matrix.name }}/usr/bin
