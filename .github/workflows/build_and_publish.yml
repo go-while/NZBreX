@@ -3,7 +3,7 @@ name: "Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'gpt-tests-1748497999'
+      - 'sessions-1748529200'
     tags:
       - "test*"
   release:
