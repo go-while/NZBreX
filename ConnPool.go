@@ -311,6 +311,8 @@ getConnFromPool:
 				}
 				connitem.conn.SetReadDeadline(noDeadLine)
 				buf = nil
+				log.Printf("INFO ConnPool GetConn: got long idle=(%d sec) '%s'", time.Now().Unix()-connitem.parked, c.provider.Name)
+
 				// conn should be fine. take that!
 			}
 

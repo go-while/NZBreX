@@ -429,11 +429,11 @@ readlines:
 			}
 		}
 		if cfg.opt.BUG {
-			log.Printf("readArticleDotLines: line=%d rxb=%d lines=%d", i, rxb, len(item.lines))
+			log.Printf("readArticleDotLines: seg.Id='%s' lineNum=%d len(line)=%d rxb=%d article_lines=%d", item.segment.Id, i, len(line), rxb, len(article))
 		}
 	} // end for
 	if cfg.opt.Debug {
-		log.Printf("readArticleDotLines: seg.Id='%s' rxb=%d lines=%d", item.segment.Id, rxb, len(item.lines))
+		log.Printf("readArticleDotLines: seg.Id='%s' rxb=%d article_lines=%d", item.segment.Id, rxb, len(article))
 	}
 
 	if cfg.opt.YencCRC {
