@@ -113,7 +113,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 			if !cfg.opt.CheckOnly && !provider.NoUpload {
 
 				// get a connection item from the provider's connection pool
-				connitem, err := provider.Conns.GetConn()
+				connitem, err := provider.ConnPool.GetConn()
 				if err != nil {
 					log.Printf("ERROR Boot Provider '%s' err='%v'", provider.Name, err)
 					return
@@ -188,14 +188,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		log.Printf("ERROR GoWorker (%d) failed to get shared connection channel for '%s' err='%v'", wid, provider.Name, err)
 		return
 	}
-	/*
-			connitem, err := provider.Conns.GetConn() // get a connection from the pool
-			if err != nil {
-				log.Printf("ERROR a GoWorker (%d) failed to connect '%s' err='%v'", wid, provider.Name, err)
-				return
-			}
-		sharedCC <- connitem // park the connection in a channel
-	*/
+
 	/* new worker code CheckRoutine */
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem) {
 		defer waitWorker.Done()
@@ -209,18 +202,21 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				s.segmentChansCheck[provider.Group] <- nil // refill the nil so others will die too
 				break forGoCheckRoutine
 			}
-			// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
-			// this is not a bug but maybe a deadlock! worked fine until we removed it...
-			item.mux.Lock()
-			if cfg.opt.DebugWorker {
-				log.Printf("WorkerCheck: (%d) locked seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			if cfg.opt.BUG {
+				// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
+				// this is not a bug but maybe a deadlock! worked fine until we removed it...
+				start := time.Now()
+				item.mux.Lock()
+				if cfg.opt.DebugWorker {
+					log.Printf("WorkerCheck: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				}
+				item.mux.Unlock()
+				if cfg.opt.DebugWorker {
+					log.Printf("WorkerCheck: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
+				}
 			}
-			item.mux.Unlock()
 			switch cfg.opt.ByPassSTAT {
 			case false:
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerCheck: (%d) unlocked, process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
-				}
 				if err := s.GoCheckRoutine(wid, provider, item, sharedCC); err != nil { // re-queue?
 					log.Printf("ERROR in GoCheckRoutine err='%v'", err)
 				}
@@ -249,13 +245,18 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				s.segmentChansDowns[provider.Group] <- nil // refill the nil so others will die too
 				break forGoDownsRoutine
 			}
-			// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
-			// this is not a bug but maybe a deadlock! worked fine until we removed it...
-			item.mux.Lock()
-			log.Printf("WorkerDown: (%d) locked seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
-			item.mux.Unlock()
-			if cfg.opt.DebugWorker {
-				log.Printf("WorkerDown: (%d) unlocked, process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			if cfg.opt.BUG {
+				// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
+				// this is not a bug but maybe a deadlock! worked fine until we removed it...
+				start := time.Now()
+				item.mux.Lock()
+				if cfg.opt.DebugWorker {
+					log.Printf("WorkerDown: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				}
+				item.mux.Unlock()
+				if cfg.opt.DebugWorker {
+					log.Printf("WorkerDown: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
+				}
 			}
 			if err := s.GoDownsRoutine(wid, provider, item, sharedCC); err != nil {
 				log.Printf("ERROR in GoDownsRoutine err='%v'", err)
@@ -277,13 +278,18 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				s.segmentChansReups[provider.Group] <- nil // refill the nil so others will die too
 				break forGoReupsRoutine
 			}
-			// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
-			// this is not a bug but maybe a deadlock! worked fine until we removed it...
-			item.mux.Lock()
-			log.Printf("WorkerReup: (%d) locked seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
-			item.mux.Unlock()
-			if cfg.opt.DebugWorker {
-				log.Printf("WorkerReup: (%d) unlocked, process seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			if cfg.opt.BUG {
+				// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
+				// this is not a bug but maybe a deadlock! worked fine until we removed it...
+				start := time.Now()
+				item.mux.Lock()
+				if cfg.opt.DebugWorker {
+					log.Printf("WorkerReup: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+				}
+				item.mux.Unlock()
+				if cfg.opt.DebugWorker {
+					log.Printf("WorkerReup: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
+				}
 			}
 			if err := s.GoReupsRoutine(wid, provider, item, sharedCC); err != nil {
 				log.Printf("ERROR in GoReupsRoutine err='%v'", err)
@@ -301,7 +307,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	case connitem := <-sharedCC:
 		if connitem != nil {
 			//log.Printf("GoWorker (%d) parked sharedConn @ '%s'", wid, provider.Name)
-			provider.Conns.ParkConn(connitem)
+			provider.ConnPool.ParkConn(connitem)
 		}
 	default:
 		// no conn there?
@@ -734,7 +740,7 @@ forever:
 			if cfg.opt.Verbose && !cfg.opt.Debug {
 				openConns, idleConns := 0, 0
 				for _, prov := range s.providerList {
-					oc, ic := prov.Conns.GetStats()
+					oc, ic := prov.ConnPool.GetStats()
 					openConns += oc
 					idleConns += ic
 				}

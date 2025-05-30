@@ -95,14 +95,20 @@ func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 	switch code {
 	case 223:
 		// article exists... or should!
-		log.Printf("CMD_STAT +OK+ seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		if cfg.opt.DebugSTAT {
+			log.Printf("CMD_STAT +OK+ seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		}
 		return code, nil
 	case 430:
 		// "430 No Such Article"
-		log.Printf("CMD_STAT -NO- seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		if cfg.opt.DebugSTAT {
+			log.Printf("CMD_STAT -NO- seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		}
 		return code, nil
 	case 451:
-		log.Printf("CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, provider.Name, msg)
+		if cfg.opt.DebugSTAT {
+			log.Printf("CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, provider.Name, msg)
+		}
 		return code, nil
 	}
 	return code, fmt.Errorf("error CMD_STAT returned unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
@@ -138,7 +144,9 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 			// to set flags in the right place!
 			code = 99932
 		}
-		log.Printf("CMD_ARTICLE seg.Id='%s' @ '%s' msg='%s' rxb=%d lines=%d badcrc=%t dlcnt=%d fails=%d", item.segment.Id, provider.Name, msg, item.size, len(item.lines), bad_crc, item.dlcnt, item.fails)
+		if cfg.opt.DebugARTICLE {
+			log.Printf("CMD_ARTICLE seg.Id='%s' @ '%s' msg='%s' rxb=%d lines=%d badcrc=%t dlcnt=%d fails=%d", item.segment.Id, provider.Name, msg, item.size, len(item.lines), bad_crc, item.dlcnt, item.fails)
+		}
 		return code, msg, nil
 
 	case 430:
@@ -193,11 +201,20 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 	case 335:
 		// Send article to be transferred
 		// pass
+		if cfg.opt.DebugIHAVE {
+			log.Printf("CMD_IHAVE 335 sendit seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		}
 	case 435:
 		// Article not wanted
+		if cfg.opt.DebugIHAVE {
+			log.Printf("CMD_IHAVE 435 unwanted seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
+		}
 		return code, 0, nil
 	case 436:
 		// Transfer not possible; try again later
+		if cfg.opt.DebugIHAVE {
+			log.Printf("CMD_IHAVE 436 retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
+		}
 		return code, 0, nil
 	/*
 		case 502:
@@ -246,12 +263,21 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 	switch code {
 	case 235:
 		//Article transferred OK
+		if cfg.opt.DebugIHAVE {
+			log.Printf("CMD_IHAVE 235 OK seg.Id='%s' @ '%s' msg='%s' txb=%d", item.segment.Id, provider.Name, msg, txb)
+		}
 		return code, txb, nil
 	case 436:
 		// Transfer failed; try again later
+		if cfg.opt.DebugIHAVE {
+			log.Printf("CMD_IHAVE 436 transfer failed, retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
+		}
 		return code, txb, nil
 	case 437:
 		//  Transfer rejected; do not retry
+		if cfg.opt.DebugIHAVE {
+			log.Printf("CMD_IHAVE 437 transfer rejected, no retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
+		}
 		return code, txb, nil
 	}
 
@@ -428,11 +454,12 @@ readlines:
 				}
 			}
 		}
-		if cfg.opt.BUG {
+		if cfg.opt.BUG && cfg.opt.DebugPOST {
 			log.Printf("readArticleDotLines: seg.Id='%s' lineNum=%d len(line)=%d rxb=%d article_lines=%d", item.segment.Id, i, len(line), rxb, len(article))
 		}
 	} // end for
-	if cfg.opt.Debug {
+
+	if cfg.opt.DebugPOST {
 		log.Printf("readArticleDotLines: seg.Id='%s' rxb=%d article_lines=%d", item.segment.Id, rxb, len(article))
 	}
 
@@ -528,7 +555,7 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 
 	provider.mux.Lock()         // mutex #9b71 checkCapabilities
 	defer provider.mux.Unlock() // mutex #9b71 checkCapabilities
-	defer provider.Conns.CloseConn(connitem, nil)
+	defer provider.ConnPool.CloseConn(connitem, nil)
 
 	if !msg2srv(connitem.conn, "CAPABILITIES") {
 		return fmt.Errorf("error '%s' checkCapabilities", provider.Name)

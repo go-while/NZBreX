@@ -66,14 +66,19 @@ type CFG struct {
 	DebugCR          bool   `json:"DebugCR"`          // if true, enable check routine debug output
 	DebugDR          bool   `json:"DebugDR"`          // if true, enable downs routine debug output
 	DebugUR          bool   `json:"DebugUR"`          // if true, enable reups routine debug output
-	Verbose          bool   `json:"Verbose"`          // if true, enable verbose output
-	Bar              bool   `json:"Bar"`              // if true, show progress bar
-	Colors           bool   `json:"Colors"`           // if true, enable colored output
-	MaxArtSize       int    `json:"MaxArtSize"`       // maximum article size in bytes
-	SloMoC           int    `json:"SloMoC"`           // slow motion for checking articles
-	SloMoD           int    `json:"SloMoD"`           // slow motion for downloading articles
-	SloMoU           int    `json:"SloMoU"`           // slow motion for uploading articles
-	SessThreshold    int    `json:"SessThreshold"`    // max number of sessions a processor keeps open
+	DebugSTAT        bool   `json:"DebugSTAT"`        // if true, enable STAT debug output
+	DebugARTICLE     bool   `json:"DebugARTICLE"`     // if true, enable ARTICLE debug output
+	DebugIHAVE       bool   `json:"DebugIHAVE"`       // if true, enable IHAVE debug output
+	DebugPOST        bool   `json:"DebugPOST"`        // if true, enable POST debug output
+	//DebugSTREAM       bool   `json:"DebugSTREAM"`      // if true, enable STREAM debug output
+	Verbose       bool `json:"Verbose"`       // if true, enable verbose output
+	Bar           bool `json:"Bar"`           // if true, show progress bar
+	Colors        bool `json:"Colors"`        // if true, enable colored output
+	MaxArtSize    int  `json:"MaxArtSize"`    // maximum article size in bytes
+	SloMoC        int  `json:"SloMoC"`        // slow motion for checking articles
+	SloMoD        int  `json:"SloMoD"`        // slow motion for downloading articles
+	SloMoU        int  `json:"SloMoU"`        // slow motion for uploading articles
+	SessThreshold int  `json:"SessThreshold"` // max number of sessions a processor keeps open
 } // end CFG struct
 
 type Provider struct {
@@ -94,7 +99,7 @@ type Provider struct {
 	TCPMode       string         // TCP mode to use (tcp, tcp4, tcp6)
 	PreferIHAVE   bool           // if true, prefer IHAVE over POST method
 	MaxConnErrors int            // maximum number of errors before giving up on a connection
-	Conns         *ProviderConns // a pool of connections from this provider connections
+	ConnPool      *ProviderConns // the pool of connections for this provider
 	mux           sync.RWMutex   // mutex to protect the provider struct
 	id            int            // will be set in loadProviderList
 	// flags
