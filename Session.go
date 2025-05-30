@@ -248,8 +248,9 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	s.D = fmt.Sprintf("%d", len(s.digStr))
 
 	// re-load the provider list
+	var workerWGconnEstablish sync.WaitGroup // workerWGconnEstablish is used to wait for all connections to be established before starting the work
 	s.providerList = nil
-	if err := cfg.loadProviderList(s); err != nil {
+	if err := cfg.loadProviderList(s, &workerWGconnEstablish); err != nil {
 		log.Printf("ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
 		return err
 	}
@@ -270,10 +271,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 	// set memory slots or update maxmem on reload
 	if cfg.opt.MemMax <= 0 && totalMaxConns > 0 {
-		if cfg.opt.MemMax != totalMaxConns*2 {
-			cfg.opt.MemMax = totalMaxConns * 2
+		if cfg.opt.MemMax != totalMaxConns {
+			cfg.opt.MemMax = totalMaxConns
 			if memlim != nil {
-				memlim.SetMaxMem(totalMaxConns * 2)
+				memlim.SetMaxMem(totalMaxConns)
 			}
 		}
 	}
@@ -295,11 +296,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	}
 
 	// setup wait groups
-	var waitWorker sync.WaitGroup            // waitWorker is used to wait for all workers to finish
-	var workerWGconnEstablish sync.WaitGroup // workerWGconnEstablish is used to wait for all connections to be established before starting the work
-	var waitDivider sync.WaitGroup           // waitDivider is used to block GoWorkDivider() until all workers are ready
-	var waitDividerDone sync.WaitGroup       // waitDividerDone is used to signal that GoWorkDivider() has quit
-	var waitPool sync.WaitGroup              // waitPool waits until all workers closed their connections and routines
+	var waitWorker sync.WaitGroup      // waitWorker is used to wait for all workers to finish
+	var waitDivider sync.WaitGroup     // waitDivider is used to block GoWorkDivider() until all workers are ready
+	var waitDividerDone sync.WaitGroup // waitDividerDone is used to signal that GoWorkDivider() has quit
+	var waitPool sync.WaitGroup        // waitPool waits until all workers closed their connections and routines
 
 	/*
 		if cfg.opt.Bar {
@@ -322,13 +322,16 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	workerWGconnEstablish.Add(1)
 	s.GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, &waitPool, s.nzbFile.Bytes)
 
-	if cfg.opt.Debug {
-		log.Print("sess: workerWGconnEstablish.Wait()")
-	}
-	workerWGconnEstablish.Wait()
-	if cfg.opt.Debug {
-		log.Print("sess: workerWGconnEstablish.Wait() released: segmentCheckStartTime=now")
-	}
+	/*
+		if cfg.opt.Debug {
+			log.Print("sess: workerWGconnEstablish.Wait()")
+		}
+		workerWGconnEstablish.Wait() // CHECKME ! REVIEW !
+		// wait for all connections to be established before starting the work, or not?
+		if cfg.opt.Debug {
+			log.Print("sess: workerWGconnEstablish.Wait() released: segmentCheckStartTime=now")
+		}
+	*/
 
 	s.segmentCheckStartTime = time.Now()
 	// booting work divider

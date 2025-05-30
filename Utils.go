@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tensai75/nzbparser"
@@ -98,7 +99,7 @@ func loadConfigFile(path string) (*CFG, error) {
 // loadProviderList loads the provider list from the configuration file.
 // It reads the JSON file specified in cfg.opt.ProvFile, unmarshals it into the cfg.providers slice,
 // and initializes each provider with a connection pool.
-func (cfg *Config) loadProviderList(s *SESSION) error {
+func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.WaitGroup) error {
 	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
 		return err
 	} else {
@@ -147,7 +148,7 @@ func (cfg *Config) loadProviderList(s *SESSION) error {
 			// link to this provider
 			p := &cfg.providers[n]
 			// provider is ready to connect
-			NewConnPool(p)
+			NewConnPool(p, workerWGconnEstablish)
 			p.id = id
 			s.providerList = append(s.providerList, p)
 			if cfg.opt.Debug {
