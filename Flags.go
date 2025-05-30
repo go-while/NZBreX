@@ -47,6 +47,12 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.BUG, "bug", false, "[true|false] full debug (default: false)")
 	flag.BoolVar(&cfg.opt.Debug, "debug", false, "[true|false] part debug (default: false)")
 	flag.BoolVar(&cfg.opt.DebugCache, "debugcache", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.DebugConnPool, "debugconnpool", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.DebugSharedCC, "debugsharedcc", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.DebugWorker, "debugworker", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.DebugCR, "debugcr", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.DebugDR, "debugdr", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.DebugUR, "debugur", false, "[true|false] (default: false)")
 	// rate limiter
 	flag.IntVar(&cfg.opt.SloMoC, "slomoc", 0, "SloMo'C' limiter sleeps N milliseconds before checking")
 	flag.IntVar(&cfg.opt.SloMoD, "slomod", 0, "SloMo'D' limiter sleeps N milliseconds before downloading")
@@ -92,9 +98,6 @@ func ParseFlags() {
 		}
 		if !cfg.opt.Verbose {
 			cfg.opt.Verbose = true
-		}
-		if !cfg.opt.DebugCache {
-			cfg.opt.DebugCache = true
 		}
 	} else {
 		if cfg.opt.Discard {

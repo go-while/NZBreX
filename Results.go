@@ -3,13 +3,16 @@ package main
 import (
 	"fmt"
 	"log"
+
 	//"path/filepath"
 	"slices"
 	"time"
 )
 
 func (s *SESSION) Results(preparationStartTime time.Time) (result string, runtime_info string) {
-	defer log.Printf("Results: returned!")
+	if cfg.opt.Verbose {
+		defer log.Printf("func Results() returned sessId=%d", s.sessId)
+	}
 
 	transferTook := time.Since(s.segmentCheckStartTime)
 	if cfg.opt.CheckFirst {

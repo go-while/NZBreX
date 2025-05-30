@@ -53,11 +53,8 @@ type SESSION struct {
 	nzbFile   *nzbparser.Nzb  // the parsed NZB file structure
 	nzbSize   int64           // the byte size of all the files in the nzb. will be > 0 if nzbFile is loaded or has been loaded before
 	nzbGroups []string        // informative
-	//lastRun               int64                            // time.Now().Unix()
-	//nextRun               int64                            // time.Now().Unix()
-	results               []string                         // stores the results from Results()
-	digStr                string                           // cosmetics for results print
-	D                     string                           // cosmetics for results print
+	//lastRun               time.Time                  	   // lastRun is the time when the session was last run
+	//nextRun               time.Time                      // nextRun is the time when the session is scheduled to run next
 	segmentList           []*segmentChanItem               // list holds the segments from parsed nzbFile
 	segmentChansCheck     map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansDowns     map[string]chan *segmentChanItem // map[provider.Group]chan
@@ -66,15 +63,17 @@ type SESSION struct {
 	memUP                 map[string]chan *segmentChanItem // TODO: process uploads after downloads (possible only with cacheON)
 	preBoot               bool                             // will be set to false before workers start
 	active                bool                             // will be set to true when processing starts // REVIEW!TODO!FIXME: set to false is missing!!
-	preparationStartTime  time.Time
-	segmentCheckStartTime time.Time
-	segmentCheckEndTime   time.Time
-	segmentCheckTook      time.Duration
-	providerList          []*Provider
-	fileStat              filesStatistic
-	fileStatLock          sync.Mutex
-
-	//waitSession        *sync.WaitGroup // this links to p.waitSessionMap // TODO?REVIEW
+	preparationStartTime  time.Time                        // flag // time when the session was started
+	segmentCheckStartTime time.Time                        // flag // time when the segment check started
+	segmentCheckEndTime   time.Time                        // flag // time when the segment check ended
+	segmentCheckTook      time.Duration                    // time it took to check all segments
+	providerList          []*Provider                      // list of providers to use for this session
+	fileStat              filesStatistic                   // fileStat is a map of file statistics for each file in the NZB
+	fileStatLock          sync.Mutex                       // fileStatLock is used to lock the fileStat map for concurrent access
+	results               []string                         // stores the results from Results()
+	digStr                string                           // cosmetics for results print
+	D                     string                           // cosmetics for results print
+	closed                time.Time                        // closed is the time when the session was closed
 } // end type SESSION struct
 
 func (p *PROCESSOR) NewProcessor() error {
@@ -372,7 +371,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 	s.writeCsvFile()
 
-	s.cleanupSession()
+	s.clearSession() // goes to remove session if threshold is reached, otherwise park it which keeps some vars loaded
 	return
 } // end func LaunchSession
 
@@ -396,12 +395,7 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	// nzbName is the name of the nzb file, e.g. "test.nzb" or "test.nzb.gz"
 	//
 	s := &SESSION{
-		proc:                 p,                                         // the parent processor
-		segmentChansCheck:    make(map[string]chan *segmentChanItem, 8), // items to be checked will be sent to these channels. the key string is provider.Group
-		segmentChansDowns:    make(map[string]chan *segmentChanItem, 8), // items to be downloaded will be sent to these channels. the key string is provider.Group
-		segmentChansReups:    make(map[string]chan *segmentChanItem, 8), // items to be re-uploaded will be sent to these channels. the key string is provider.Group
-		memDL:                make(map[string]chan *segmentChanItem, 8), // with -checkfirst queues items here
-		memUP:                make(map[string]chan *segmentChanItem, 8), // TODO: process uploads after downloads (possible only with cacheON)
+		proc:                 p, // the parent processor
 		preparationStartTime: time.Now(),
 		providerList:         make([]*Provider, 0, 8), // will be filled later
 		sessId:               p.newssid(),
@@ -438,55 +432,99 @@ func (p *PROCESSOR) newssid() uint64 {
 	return newSessId
 } // end func p.newssid
 
-func (s *SESSION) cleanupSession() {
-	// cleanup session
-	if cfg.opt.Debug {
-		log.Printf("cleanupSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
+// If the session map exceeds the threshold, it removes the session from the processor map.
+// If the session is below the threshold, it closes the session partly.
+func (s *SESSION) clearSession() {
+	if len(s.proc.sessMap) > cfg.opt.SessThreshold {
+		s.proc.removeSession(s.sessId, s) // remove session from processor map
+		return
 	}
-	s.mux.Lock()
-	s.preBoot = false
-	s.active = false
-	s.mux.Unlock()
+	s.closeSession()
+} // end func clearSession
 
-	// remove session from processor map
-	s.proc.mux.Lock()
-	delete(s.proc.sessMap, s.sessId)
-	s.proc.mux.Unlock()
+func (s *SESSION) closeSession() {
+	// close session partly, keeps the session in the processor map
+	// and some vars loaded
+	// since processing the watchDir is not working yet this is just a idea for the future
+	// we always have only 1 session running at a time and then quit... stop here!
 
-	// close all channels.
+	if cfg.opt.Debug {
+		log.Printf("closeSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
+	}
+
+	// close all channels in segmentChansCheck, segmentChansDowns, segmentChansReup
 	// app will panic if anybody still sends which should not be possible
 	for n, ch := range s.segmentChansCheck {
 		close(ch)
 		s.segmentChansCheck[n] = nil // remove from map
-		s.segmentChansCheck = nil
 	}
 	for n, ch := range s.segmentChansDowns {
 		close(ch)
 		s.segmentChansDowns[n] = nil // remove from map
-		s.segmentChansDowns = nil
 	}
 	for n, ch := range s.segmentChansReups {
 		close(ch)
 		s.segmentChansReups[n] = nil // remove from map
-		s.segmentChansReups = nil
 	}
+
+	s.segmentChansCheck = nil
+	s.segmentChansDowns = nil
+	s.segmentChansReups = nil
+
+	s.segmentChansCheck = make(map[string]chan *segmentChanItem)
+	s.segmentChansDowns = make(map[string]chan *segmentChanItem)
+	s.segmentChansReups = make(map[string]chan *segmentChanItem)
+
+	// todo cleanup memDL and memUP
+	for n, ch := range s.memDL {
+		close(ch)
+		s.memDL[n] = nil // remove from map
+	}
+	for n, ch := range s.memUP {
+		close(ch)
+		s.memUP[n] = nil // remove from map
+	}
+	s.memDL = nil
+	s.memUP = nil
+	s.memDL = make(map[string]chan *segmentChanItem)
+	s.memUP = make(map[string]chan *segmentChanItem)
+
 	if cfg.opt.Debug {
-		log.Printf("cleanupSession: closed all segment channels")
+		log.Printf("cleanupSession: closed all segment channels for sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 	}
+
+	s.mux.Lock()      // lock the session for cleanup
+	s.active = false  // set active to false, we are no longer processing
+	s.nzbFile = nil   // reset nzbFile to nil
+	s.preBoot = false // reset preBoot to false
+	log.Printf("session closed: sessId=%d nzbName='%s' nzbPath='%s' runtime=[%v]", s.sessId, s.nzbName, s.nzbPath, time.Since(s.preparationStartTime).Seconds())
+	s.preparationStartTime = time.Time{} // reset preparationStartTime to zero value
+	s.fileStat = make(filesStatistic)    // reset fileStat to empty map
+	s.closed = time.Now()                // set end time to now
+	s.sessId = s.proc.newssid()          // reset sessId to next one
+	s.mux.Unlock()
 } // end func cleanupSession
 
-/*
-func (p *PROCESSOR) delSession(sessId uint64) {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-
-	if p.sessMap[sessId].nzbFile != nil {
-		p.sessMap[sessId].nzbFile = nil
-		delete(p.sessMap, sessId)
-		log.Printf("PROCESSOR.delSession: %d", sessId)
+// removeSession removes a session from the PROCESSOR's session map.
+// It is called when a session is no longer needed, e.g., after processing is complete.
+func (p *PROCESSOR) removeSession(sessId uint64, s *SESSION) {
+	if s == nil {
+		log.Printf("removeSession: sessId=%d s is nil, nothing to remove", sessId)
+		return
 	}
-} // end func p.deleteSession
-*/
+	// threshold reached, we removed the session from the processor map
+	p.mux.Lock()
+	delete(p.sessMap, sessId)
+	p.mux.Unlock()
+
+	s.mux.Lock()        // lock the session for cleanup
+	s.nzbGroups = nil   // reset nzbGroups
+	s.fileStat = nil    // reset fileStat
+	s.segmentList = nil // reset segmentList
+	s.mux.Unlock()      // unlock the session
+	s = nil             // set session to nil to free memory
+	log.Printf("PROCESSOR.removeSession: sessId=%d", sessId)
+} // end func p.removeSession
 
 func (p *PROCESSOR) processorThread() {
 	// watchDir is running concurrently

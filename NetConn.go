@@ -83,6 +83,7 @@ func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 	if connitem.srvtp == nil {
 		return 0, fmt.Errorf("error CMD_STAT srvtp=nil")
 	}
+	start := time.Now()
 	id, err := connitem.srvtp.Cmd("STAT <%s>", item.segment.Id)
 	if err != nil {
 		log.Printf("ERROR checkMessageID @ '%s' srvtp.Cmd err='%v'", provider.Name, err)
@@ -94,30 +95,31 @@ func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 	switch code {
 	case 223:
 		// article exists... or should!
-		//log.Printf("CMD_STAT +OK+ seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		log.Printf("CMD_STAT +OK+ seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		return code, nil
 	case 430:
 		// "430 No Such Article"
-		//log.Printf("CMD_STAT -NO- seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		log.Printf("CMD_STAT -NO- seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		return code, nil
 	case 451:
-		//log.Printf("CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, provider.Name, msg)
+		log.Printf("CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, provider.Name, msg)
 		return code, nil
 	}
-	return code, fmt.Errorf("error CMD_STAT returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
+	return code, fmt.Errorf("error CMD_STAT returned unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
 } // end func CMD_STAT
 
 func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, string, error) {
 	if connitem.srvtp == nil {
-		return 0, "", fmt.Errorf("error CMD_ARTICLE srvtp=nil")
+		return 0, "", fmt.Errorf("error in CMD_ARTICLE srvtp=nil")
 	}
-	id, err := connitem.srvtp.Cmd("ARTICLE <%s>", item.segment.Id)
-	if err != nil {
-		log.Printf("ERROR CMD_ARTICLE srvtp.Cmd @ '%s' err='%v'", provider.Name, err)
-		return 0, "", err
+	start := time.Now()
+	id, aerr := connitem.srvtp.Cmd("ARTICLE <%s>", item.segment.Id)
+	if aerr != nil {
+		log.Printf("ERROR in CMD_ARTICLE srvtp.Cmd @ '%s' err='%v'", provider.Name, aerr)
+		return 0, "", aerr
 	}
 	connitem.srvtp.StartResponse(id)
-	code, msg, _ := connitem.srvtp.ReadCodeLine(220)
+	code, msg, err := connitem.srvtp.ReadCodeLine(220)
 	connitem.srvtp.EndResponse(id)
 	switch code {
 	case 220:
@@ -127,7 +129,7 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 		// and decoding yenc on the fly
 		bad_crc, err := readArticleDotLines(provider, item, connitem.srvtp)
 		if !bad_crc && err != nil {
-			log.Printf("ERROR CMD_ARTICLE srvtp.ReadDotLines @ '%s' err='%v'", provider.Name, err)
+			log.Printf("ERROR in CMD_ARTICLE srvtp.ReadDotLines @ '%s' err='%v'", provider.Name, err)
 			return code, msg, err
 		}
 		if bad_crc {
@@ -136,27 +138,35 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 			// to set flags in the right place!
 			code = 99932
 		}
-		return code, "", nil
+		log.Printf("CMD_ARTICLE seg.Id='%s' @ '%s' msg='%s' rxb=%d lines=%d badcrc=%t dlcnt=%d fails=%d", item.segment.Id, provider.Name, msg, item.size, len(item.lines), bad_crc, item.dlcnt, item.fails)
+		return code, msg, nil
 
 	case 430:
-		if cfg.opt.Debug {
+		if cfg.opt.Verbose {
 			log.Printf("INFO CMD_ARTICLE:430 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, provider.Name, msg, err, item.dlcnt, item.fails)
 		}
-		return code, msg, nil
+		return code, msg, nil // not an error, just no such article
 
 	case 451:
-		return code, msg, nil
+		if cfg.opt.Verbose {
+			log.Printf("INFO CMD_ARTICLE:451 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, provider.Name, msg, err, item.dlcnt, item.fails)
+		}
+		return code, msg, nil // not an error, just DMCA
 
 	default:
 		// returns the unknown code with an error!
 	}
-	return code, msg, fmt.Errorf("error CMD_ARTICLE returned unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
+	return code, msg, fmt.Errorf("error in CMD_ARTICLE got unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
 } // end func CMD_ARTICLE
 
 func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, uint64, error) {
 	if connitem.srvtp == nil {
 		return 0, 0, fmt.Errorf("error CMD_IHAVE srvtp=nil")
 	}
+	if connitem.writer == nil {
+		return 0, 0, fmt.Errorf("error CMD_IHAVE: connitem.writer is nil")
+	}
+	start := time.Now()
 	/*
 	 * IHAVE
 	 *   Initial responses
@@ -199,20 +209,24 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 			return code, 0, nil
 	*/
 	default:
-		return code, 0, fmt.Errorf("error CMD_IHAVE unknown code=%d msg='%s' @ '%s' err='%v'", code, msg, provider.Name, err)
+		return code, 0, fmt.Errorf("error CMD_IHAVE unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
 	}
 	var txb uint64
 
 	// Send article
 	switch wireformat {
 	case true:
-		// not implemented.
-		// sends article as []byte which must include CRLF in articles (not stripped out)
-		// needs change in cache to write articles with \r\n instead of \n
-		// if change is done: reading from cache is a []byte and no need to split by \n into lines
-		// actually CRLF gets removed by textproto and we work with lines in []string
-		// but this is only cosmetics... no real need for.
+		// Sending article in wireformat mode is not implemented.
+		// To add wireformat support, update the cache logic as follows:
+		// 1. Optimize cache reads to work directly with []byte data, so you don't need to split by '\n' into lines.
+		// 2. Ensure the cache reading code correctly handles CRLF line endings when retrieving articles.
+		// 3. Test the cache with both wireformat and standard (non-wireformat) articles to ensure compatibility.
+		// Note: textproto removes CRLF and provides lines as []string, so this change mainly affects how data is formatted and stored.
+		// Implementing this is optional and only impacts data formatting, not core functionality.
 	case false:
+		if len(item.lines) == 0 {
+			return 0, txb, fmt.Errorf("error CMD_IHAVE: item.lines is empty")
+		}
 		for _, line := range item.lines {
 			n, err := io.WriteString(connitem.writer, line+CRLF)
 			if err != nil {

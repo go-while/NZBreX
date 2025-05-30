@@ -60,6 +60,12 @@ type CFG struct {
 	BUG              bool   `json:"BUG"`              // if true, enable bug reporting
 	Debug            bool   `json:"Debug"`            // if true, enable debug output
 	DebugCache       bool   `json:"DebugCache"`       // if true, enable cache debug output
+	DebugConnPool    bool   `json:"DebugConnPool"`    // if true, enable connpool debug output
+	DebugSharedCC    bool   `json:"DebugSharedCC"`    // if true, enable sharedConn debug output
+	DebugWorker      bool   `json:"DebugWorker"`      // if true, enable workers debug output
+	DebugCR          bool   `json:"DebugCR"`          // if true, enable check routine debug output
+	DebugDR          bool   `json:"DebugDR"`          // if true, enable downs routine debug output
+	DebugUR          bool   `json:"DebugUR"`          // if true, enable reups routine debug output
 	Verbose          bool   `json:"Verbose"`          // if true, enable verbose output
 	Bar              bool   `json:"Bar"`              // if true, show progress bar
 	Colors           bool   `json:"Colors"`           // if true, enable colored output
@@ -67,6 +73,7 @@ type CFG struct {
 	SloMoC           int    `json:"SloMoC"`           // slow motion for checking articles
 	SloMoD           int    `json:"SloMoD"`           // slow motion for downloading articles
 	SloMoU           int    `json:"SloMoU"`           // slow motion for uploading articles
+	SessThreshold    int    `json:"SessThreshold"`    // max number of sessions a processor keeps open
 } // end CFG struct
 
 type Provider struct {
