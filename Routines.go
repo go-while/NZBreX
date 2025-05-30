@@ -19,7 +19,7 @@ func (s *SESSION) IsSegmentStupid(item *segmentChanItem, doLock bool) (crazy boo
 	return
 }
 
-func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) error {
+func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (err error) {
 	if cfg.opt.SloMoC > 0 {
 		time.Sleep(time.Duration(cfg.opt.SloMoC) * time.Millisecond)
 	}
@@ -33,13 +33,17 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 	if cacheON && !cfg.opt.CheckCacheOnBoot {
 		cache.CheckCache(item)
 	}
-
-	connitem, err := SharedConnGet(sharedCC, provider)
+	var connitem *ConnItem
+	if sharedCC != nil {
+		connitem, err = SharedConnGet(sharedCC, provider)
+	} else {
+		connitem, err = provider.ConnPool.GetConn()
+	}
 	if err != nil {
-		return fmt.Errorf("ERROR in GoCheckRoutine: SharedConnGet '%s' (connitem=%v) err='%v'", provider.Name, connitem, err)
+		return fmt.Errorf("ERROR in GoCheckRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	if connitem == nil || connitem.conn == nil {
-		return fmt.Errorf("ERROR in GoCheckRoutine: SharedConnGet got nil item or conn '%s' (connitem=%v)", provider.Name, connitem)
+		return fmt.Errorf("ERROR in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
 	code, err := CMD_STAT(provider, connitem, item)
@@ -127,13 +131,15 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 	if cfg.opt.DebugCR {
 		log.Printf("GoWorker (%d) CheckRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 	}
-
-	SharedConnReturn(sharedCC, connitem)
-	//provider.ConnPool.ParkConn(provider, connitem)
+	if sharedCC != nil {
+		SharedConnReturn(sharedCC, connitem)
+	} else {
+		provider.ConnPool.ParkConn(connitem)
+	}
 	return nil
 } // end func GoCheckRoutine
 
-func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) error {
+func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (err error) {
 	if cfg.opt.CheckOnly {
 		return nil
 	}
@@ -163,12 +169,17 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 	item.mux.RUnlock() // mutex #de94
 
-	connitem, err := SharedConnGet(sharedCC, provider)
+	var connitem *ConnItem
+	if sharedCC != nil {
+		connitem, err = SharedConnGet(sharedCC, provider)
+	} else {
+		connitem, err = provider.ConnPool.GetConn()
+	}
 	if err != nil {
-		return fmt.Errorf("ERROR in GoDownsRoutine: SharedConnGet '%s' (connitem=%v) err='%v'", provider.Name, connitem, err)
+		return fmt.Errorf("ERROR in GoDownsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	if connitem == nil || connitem.conn == nil {
-		return fmt.Errorf("ERROR in GoDownsRoutine: SharedConnGet got nil item or conn '%s' (connitem=%v)", provider.Name, connitem)
+		return fmt.Errorf("ERROR in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
 	code, msg, err := CMD_ARTICLE(provider, connitem, item)
@@ -301,11 +312,15 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		log.Printf("GoWorker (%d) DownsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 	}
 
-	SharedConnReturn(sharedCC, connitem)
+	if sharedCC != nil {
+		SharedConnReturn(sharedCC, connitem)
+	} else {
+		provider.ConnPool.ParkConn(connitem)
+	}
 	return nil
 } // end func DownsRoutine
 
-func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) error {
+func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (err error) {
 	if cfg.opt.CheckOnly {
 		return nil
 	}
@@ -317,12 +332,17 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	who := fmt.Sprintf("UR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)
 
-	connitem, err := SharedConnGet(sharedCC, provider)
+	var connitem *ConnItem
+	if sharedCC != nil {
+		connitem, err = SharedConnGet(sharedCC, provider)
+	} else {
+		connitem, err = provider.ConnPool.GetConn()
+	}
 	if err != nil {
-		return fmt.Errorf("ERROR in GoReupsRoutine: SharedConnGet '%s' (connitem=%v) err='%v'", provider.Name, connitem, err)
+		return fmt.Errorf("ERROR in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	if connitem == nil || connitem.conn == nil {
-		return fmt.Errorf("ERROR in GoReupsRoutine: SharedConnGet got nil item or conn '%s' (connitem=%v)", provider.Name, connitem)
+		return fmt.Errorf("ERROR in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
 	var uploaded, unwanted, retry, clearmem bool
@@ -495,7 +515,11 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		log.Printf("GoWorker (%d) ReupsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 	}
 
-	SharedConnReturn(sharedCC, connitem)
+	if sharedCC != nil {
+		SharedConnReturn(sharedCC, connitem)
+	} else {
+		provider.ConnPool.ParkConn(connitem)
+	}
 	return nil
 } // end func ReupsRoutine
 

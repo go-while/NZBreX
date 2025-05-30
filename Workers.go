@@ -170,6 +170,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 	}
 } // end func GoBootWorkers
 
+const UseSharedCC = false // use shared connection channel for all 3 routines
 func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnEstablish *sync.WaitGroup, waitPool *sync.WaitGroup) {
 	if cfg.opt.DebugWorker {
 		log.Printf("GoWorker (%d) launching routines '%s'", wid, provider.Name)
@@ -183,10 +184,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 	// Obtain a connection for this worker and share it among the check, download, and reupload routines.
 	// The connection is not returned to the pool until all three routines have finished.
-	sharedCC, err := GetNewSharedConnChannel(wid, provider)
-	if err != nil || len(sharedCC) == 0 {
-		log.Printf("ERROR GoWorker (%d) failed to get shared connection channel for '%s' err='%v'", wid, provider.Name, err)
-		return
+	var sharedCC chan *ConnItem = nil
+	var err error
+	if UseSharedCC {
+		// Get a shared connection channel for the provider}
+		sharedCC, err = GetNewSharedConnChannel(wid, provider)
+		if err != nil || len(sharedCC) == 0 {
+			log.Printf("ERROR GoWorker (%d) failed to get shared connection channel for '%s' err='%v'", wid, provider.Name, err)
+			return
+		}
 	}
 
 	/* new worker code CheckRoutine */
@@ -202,19 +208,21 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				s.segmentChansCheck[provider.Group] <- nil // refill the nil so others will die too
 				break forGoCheckRoutine
 			}
-			if cfg.opt.BUG {
-				// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
-				// this is not a bug but maybe a deadlock! worked fine until we removed it...
-				start := time.Now()
-				item.mux.Lock()
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerCheck: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			/*
+				if cfg.opt.BUG {
+					// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
+					// this is not a bug but maybe a deadlock! worked fine until we removed it...
+					start := time.Now()
+					item.mux.Lock()
+					if cfg.opt.DebugWorker {
+						log.Printf("WorkerCheck: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+					}
+					item.mux.Unlock()
+					if cfg.opt.DebugWorker {
+						log.Printf("WorkerCheck: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
+					}
 				}
-				item.mux.Unlock()
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerCheck: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
-				}
-			}
+			*/
 			switch cfg.opt.ByPassSTAT {
 			case false:
 				if err := s.GoCheckRoutine(wid, provider, item, sharedCC); err != nil { // re-queue?
@@ -245,19 +253,21 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				s.segmentChansDowns[provider.Group] <- nil // refill the nil so others will die too
 				break forGoDownsRoutine
 			}
-			if cfg.opt.BUG {
-				// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
-				// this is not a bug but maybe a deadlock! worked fine until we removed it...
-				start := time.Now()
-				item.mux.Lock()
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerDown: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			/*
+				if cfg.opt.BUG {
+					// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
+					// this is not a bug but maybe a deadlock! worked fine until we removed it...
+					start := time.Now()
+					item.mux.Lock()
+					if cfg.opt.DebugWorker {
+						log.Printf("WorkerDown: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+					}
+					item.mux.Unlock()
+					if cfg.opt.DebugWorker {
+						log.Printf("WorkerDown: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
+					}
 				}
-				item.mux.Unlock()
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerDown: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
-				}
-			}
+			*/
 			if err := s.GoDownsRoutine(wid, provider, item, sharedCC); err != nil {
 				log.Printf("ERROR in GoDownsRoutine err='%v'", err)
 			}
@@ -278,19 +288,21 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				s.segmentChansReups[provider.Group] <- nil // refill the nil so others will die too
 				break forGoReupsRoutine
 			}
-			if cfg.opt.BUG {
-				// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
-				// this is not a bug but maybe a deadlock! worked fine until we removed it...
-				start := time.Now()
-				item.mux.Lock()
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerReup: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+			/*
+				if cfg.opt.BUG {
+					// we might get an item still locked for setting flags, so we lock too and wait for upper layer to release first.
+					// this is not a bug but maybe a deadlock! worked fine until we removed it...
+					start := time.Now()
+					item.mux.Lock()
+					if cfg.opt.DebugWorker {
+						log.Printf("WorkerReup: (%d) got lock seg.Id='%s' @ '%s'", wid, item.segment.Id, provider.Name)
+					}
+					item.mux.Unlock()
+					if cfg.opt.DebugWorker {
+						log.Printf("WorkerReup: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
+					}
 				}
-				item.mux.Unlock()
-				if cfg.opt.DebugWorker {
-					log.Printf("WorkerReup: (%d) unlocked (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
-				}
-			}
+			*/
 			if err := s.GoReupsRoutine(wid, provider, item, sharedCC); err != nil {
 				log.Printf("ERROR in GoReupsRoutine err='%v'", err)
 			}
@@ -299,10 +311,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	}(wid, provider, waitWorker, sharedCC) // end go func()
 
 	if cfg.opt.DebugWorker {
-		log.Printf("GoWorker (%d) waitWorker.Wait processing Provider '%s'", wid, provider.Name)
+		log.Printf("GoWorker (%d) waitWorker.Wait for routines to complete '%s'", wid, provider.Name)
 	}
-	waitWorker.Wait()
-
+	waitWorker.Wait() // wait for all 3 routines to finish
 	select {
 	case connitem := <-sharedCC:
 		if connitem != nil {
@@ -350,7 +361,7 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 				item.ignoreDlOn[pid] = true
 				continue providerDl
 			}
-			if cfg.opt.DebugWorker {
+			if cfg.opt.BUG && cfg.opt.DebugWorker {
 				log.Printf(" | [DV] push chan <- down seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
 			}
 			/* push download request only to 1.
