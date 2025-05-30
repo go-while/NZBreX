@@ -92,7 +92,7 @@ func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
 			break
 		}
 		m.mux.Unlock()
-		time.Sleep(time.Second) // infinite wait for memlim
+		time.Sleep(time.Second / 100) // infinite wait for memlim
 		log.Printf("ERROR! MemLimit tried to lock an item already in mem! seg.Id='%s'", item.segment.Id)
 	} // end for waithere
 
