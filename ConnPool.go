@@ -65,7 +65,7 @@ type ProviderConns struct {
 	provider *Provider
 }
 
-func NewConnPool(provider *Provider) {
+func NewConnPool(provider *Provider, workerWGconnEstablish *sync.WaitGroup) {
 	provider.mux.Lock()         // NewConnPool mutex #d028
 	defer provider.mux.Unlock() // NewConnPool mutex #d028
 
@@ -110,7 +110,7 @@ func NewConnPool(provider *Provider) {
 	PoolsLock.Lock()
 	ConnPools[provider.id] = provider.ConnPool
 	PoolsLock.Unlock()
-	go provider.ConnPool.WatchOpenConnsThread()
+	go provider.ConnPool.WatchOpenConnsThread(workerWGconnEstablish)
 	// no return value as we mutate the provider pointer!
 } // end func NewConnPool
 
@@ -376,7 +376,7 @@ getConnFromPool:
 				if cfg.opt.DebugConnPool {
 					c.mux.RLock()
 					// always print NewConn message
-					log.Printf("NewConn connid=%d '%s' inPool=%d open (after connect)=%d/%d", connid, c.provider.Name, len(c.pool), c.openConns, c.provider.MaxConns)
+					log.Printf("NewConn connid=%d '%s' inPool=%d (openConns after connect)=%d/%d", connid, c.provider.Name, len(c.pool), c.openConns, c.provider.MaxConns)
 					c.mux.RUnlock()
 				}
 				return // established new connection and returns connitem
@@ -438,14 +438,15 @@ func (c *ProviderConns) GetStats() (openconns int, idle int) {
 	return
 }
 
-func (c *ProviderConns) WatchOpenConnsThread() {
+func (c *ProviderConns) WatchOpenConnsThread(workerWGconnEstablish *sync.WaitGroup) {
 	// this is a thread which watches the open connections and closes them if they are idle for too long
 	// it will close the connection if it is idle for more than DefaultConnCloserSeconds
+	workerWGconnEstablish.Wait()
 	log.Printf("WatchOpenConnsThread started for '%s'", c.provider.Name)
 	defer log.Printf("WatchOpenConnsThread for '%s' defer returned", c.provider.Name)
 forever:
 	for {
-		time.Sleep(time.Millisecond * 100) // check every N milliseconds
+		time.Sleep(time.Millisecond * 2500) // check every N milliseconds
 
 		c.mux.RLock()
 		openConns := c.openConns
@@ -467,7 +468,7 @@ forever:
 			//log.Printf("WatchOpenConnsThread: all %d conns are possibly in shared chan for '%s' ... continue", openConns, c.provider.Name)
 			continue forever
 		} else {
-			log.Printf("WatchOpenConnsThread: open and parked connections for '%s' = %d", c.provider.Name, openConns)
+			log.Printf("WatchOpenConnsThread: idle/parked connections for '%s' = %d", c.provider.Name, openConns)
 		}
 		// check all connections in the pool
 		tempItems := []*ConnItem{} // temporary slice to hold ConnItems
