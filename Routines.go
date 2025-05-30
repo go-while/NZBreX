@@ -81,7 +81,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		}
 
 	default:
-		if code == 0 && err != nil {
+		if code == 0 || err != nil {
 			// connection problem, closed?
 			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' retry in %d sec re-queued", item.segment.Id, provider.Name, err, DefaultRequeueDelay)
@@ -213,7 +213,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			cache.Add2Cache(item)
 		}
 	default:
-		if code == 0 && err != nil {
+		if code == 0 || err != nil {
 			// connection problem, closed?
 			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
 
@@ -360,7 +360,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 			// pass
 
 		default:
-			if code == 0 && err != nil {
+			if code == 0 || err != nil {
 				memlim.MemReturn("MemRetOnERR 'CMD_POST':"+who, item)
 				// connection problem, closed?
 				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
@@ -393,7 +393,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 			// pass
 
 		default:
-			if code == 0 && err != nil {
+			if code == 0 || err != nil {
 				// connection problem, closed?
 				memlim.MemReturn("MemRetOnERR 'CMD_IHAVE':"+who, item)
 				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
