@@ -239,7 +239,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				//}
 				item.pushedDL = true // mark as pushed to download queue ByPassSTAT
 				item.mux.Unlock()
-				! TODO FIXME : use s.WorkDividerChan ?
+				// ! TODO FIXME : use s.WorkDividerChan ?
 				s.segmentChansDowns[provider.Group] <- item // bypass STAT: GoCheckRoutine push to download queue
 			}
 			continue forGoCheckRoutine
@@ -731,20 +731,25 @@ forever:
 					continue
 				}
 				dlog(cfg.opt.Verbose, " | [DV] | Feeding %d Downs to '%s'", dlq, provider.Group)
-
+				fetched, pushed, refill := 0, 0, 0
 			feedDL:
 				for {
 					select {
 					case item := <-s.memDL[provider.Group]: // out here
+						// item came from memDL, try push it to downs
 						// pass
+						fetched++
 						item.mux.Lock()
 						item.flaginDLMEM = false
 						item.mux.Unlock()
 						select {
-						case s.segmentChansDowns[provider.Group] <- item: // in there
+						case s.segmentChansDowns[provider.Group] <- item: // try put in there
 							// pass
+							pushed++
 						default:
 							// chan full, break the loop
+							s.memDL[provider.Group] <- item // refill the chan with the item
+							refill++                        // increase backlog
 							break feedDL
 						}
 					default:
@@ -752,7 +757,7 @@ forever:
 						break feedDL
 					}
 				}
-				dlog(cfg.opt.Verbose, " | [DV] | Done feeding %d Downs to '%s'", dlq, provider.Group)
+				dlog(cfg.opt.Verbose, " | [DV] | Done feeding %d Downs to '%s' (fetched: %d, refill: %d, backlog: %d)", pushed, provider.Group, fetched, refill, dlq)
 			}
 		} // end if argCheckFirst
 
@@ -764,16 +769,20 @@ forever:
 					continue
 				}
 				dlog(cfg.opt.Verbose, " | [DV] | Feeding %d Reups to '%s'", upq, provider.Group)
+				pushed := 0
 			feedUP:
 				for {
 					select {
 					case item := <-s.memUP[provider.Group]: // out here
+						// item came from memUP, try push it to reups
 						// pass
 						select {
-						case s.segmentChansReups[provider.Group] <- item: // in there
+						case s.segmentChansReups[provider.Group] <- item: // try put in there
 							// pass
+							pushed++
 						default:
 							// chan is full, break the loop
+							s.memUP[provider.Group] <- item // refill the chan with the item
 						}
 
 					default:
@@ -781,6 +790,7 @@ forever:
 						break feedUP
 					}
 				}
+				dlog(cfg.opt.Verbose, " | [DV] | Done feeding %d Reups to '%s' (backlog: %d)", pushed, provider.Group, upq)
 			}
 		} // end if argUploadLater
 
