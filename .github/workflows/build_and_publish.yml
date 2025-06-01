@@ -3,7 +3,7 @@ name: "Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'pre-v0.0.2'
+      - 'checkpoint-stable-1748754000-pre-v0.0.2'
     tags:
       - "test*"
   release:
