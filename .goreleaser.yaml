@@ -30,7 +30,7 @@ archives:
     files:
       - LICENSE*
       - README*
-      - "{{ .ProjectName }}{{ .Ext }}"
+      - "{{ .Binary }}"
 
 checksum:
   name_template: "checksums.txt"
