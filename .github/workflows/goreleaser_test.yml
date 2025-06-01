@@ -3,7 +3,7 @@ name: "Self-Hosted GoReleaser"
 on:
   push:
     branches:
-      - 'checkpoint-stable-1748780000'
+      - 'v0.0.2-SNAPSHOT-test-1748786444'
     tags:
       - "test*"
   release:
