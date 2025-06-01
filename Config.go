@@ -169,6 +169,8 @@ type segmentChanItem struct {
 	article     []string                         // contains the downloaded segment/article
 	head        []string                         // contains the head
 	body        []string                         // contains the body
+	pushedDL    bool                             // if true, item has been pushed to downs channel
+	pushedUP    bool                             // if true, item has been pushed to reups channel
 	flaginDL    bool                             // if true, item is in download
 	flagisDL    bool                             // if true, item has been downloaded
 	flaginUP    bool                             // if true, item is in upload

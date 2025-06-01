@@ -78,6 +78,7 @@ type SESSION struct {
 	D                     string                           // cosmetics for results print
 	closed                time.Time                        // closed is the time when the session was closed
 	WorkDividerChan       chan *WrappedItem                // channel to send items to the work divider
+	checkDone             bool                             // checkDone is set to true when the segment check is done
 } // end type SESSION struct
 
 func (p *PROCESSOR) NewProcessor() error {
@@ -243,7 +244,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 				item := &segmentChanItem{
 					segmux, s, &segment, &file,
 					make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)),
-					[]string{}, []string{}, []string{}, false, false, false, false, false, false, false, false,
+					[]string{}, []string{}, []string{}, false, false, false, false, false, false, false, false, false, false,
 					0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &s.nzbHash}
 				s.segmentList = append(s.segmentList, item)
 			}
@@ -307,38 +308,12 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	var waitDividerDone sync.WaitGroup // waitDividerDone is used to signal that GoWorkDivider() has quit
 	var waitPool sync.WaitGroup        // waitPool waits until all workers closed their connections and routines
 
-	/*
-		if cfg.opt.Bar {
-			// segment check progressbar
-			segmentBar = progressBars.NewBar("STAT", len(s.segmentList))
-			segmentBar.SetPreBar(cmpb.CalcSteps)
-			segmentBar.SetPostBar(cmpb.CalcTime)
-			if cfg.opt.Colors {
-				progressBars.SetColors(colors)
-			}
-			// start progressbar
-			progressBars.Start()
-			//progressBars.Stop("STAT", "done")
-		}
-	*/
-
 	// run the go routines
 	waitDivider.Add(1)
 	waitDividerDone.Add(1)
 	workerWGconnEstablish.Add(1)
 	s.GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, &waitPool, s.nzbFile.Bytes)
 	workerWGconnEstablish.Wait()
-
-	/*
-		if cfg.opt.Debug {
-			log.Print("sess: workerWGconnEstablish.Wait()")
-		}
-		workerWGconnEstablish.Wait() // CHECKME ! REVIEW !
-		// wait for all connections to be established before starting the work, or not?
-		if cfg.opt.Debug {
-			log.Print("sess: workerWGconnEstablish.Wait() released: segmentCheckStartTime=now")
-		}
-	*/
 
 	s.segmentCheckStartTime = time.Now()
 	// booting work divider
@@ -362,11 +337,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		log.Print("sess: waitWorker.Wait() released, waiting on waitPool.Wait()")
 	}
 	waitPool.Wait()
-	/*
-		if cfg.opt.Bar {
-			progressBars.Wait()
-		}
-	*/
+
 	if cfg.opt.Debug {
 		log.Print("sess: waitPool.Wait() released")
 	}

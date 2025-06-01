@@ -72,7 +72,8 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 			dlog(cfg.opt.Verbose, "Worker  Boot Provider '%s' group '%s'", provider.Name, provider.Group)
 
 			// create once if not exists
-			globalmux.Lock()
+			//globalmux.Lock()
+			s.mux.Lock()
 			if s.segmentChansCheck == nil {
 				dlog(cfg.opt.Debug, "Creating chans for group '%s' cfg.opt.ChanSize=%d", provider.Group, cfg.opt.ChanSize)
 				if cfg.opt.Debug {
@@ -90,7 +91,9 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 				s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
 				// fill check channel for provider group with pointers
+
 				go func(segmentChanCheck chan *segmentChanItem) {
+
 					start := time.Now()
 					for _, item := range s.segmentList {
 						segmentChanCheck <- item
@@ -101,12 +104,14 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 							break
 						}
 					}
-
 					dlog(cfg.opt.Verbose, " | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
-
+					s.mux.Lock()
+					s.checkDone = true // set checkDone to true so we can release the quaken to the downs routines
+					s.mux.Unlock()
 				}(s.segmentChansCheck[provider.Group])
 			}
-			globalmux.Unlock()
+			s.mux.Unlock()
+			//globalmux.Unlock()
 
 			dlog(cfg.opt.Verbose, "Connecting to Provider '%s' MaxConns=%d SSL=%t", provider.Name, provider.MaxConns, provider.SSL)
 
@@ -223,9 +228,13 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			case true:
 				item.mux.Lock()
 				item.flaginDL = true
+
+				if !item.pushedDL {
+					GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT")       // cfg.opt.ByPassSTAT
+					GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT") //cfg.opt.ByPassSTAT
+				}
+				item.pushedDL = true // mark as pushed to download queue ByPassSTAT
 				item.mux.Unlock()
-				GCounter.Incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
-				GCounter.Incr("TOTAL_dlQueueCnt") //cfg.opt.ByPassSTAT
 				s.segmentChansDowns[provider.Group] <- item
 			}
 			continue forGoCheckRoutine
@@ -365,48 +374,48 @@ providerDl:
 			item.ignoreDlOn[pid] = true
 			continue providerDl
 		}
-		if cfg.opt.DebugWorker {
-			//dlog( " | [DV] push chan <- down seg.Id='%s' @ '%s' CheckFirst=%t item='%#v'", item.segment.Id, s.providerList[pid].Name, cfg.opt.CheckFirst, item)
-			//dlog( " | [DV] push chan <- down seg.Id='%s' @ '%s' item.flaginDL=%t item.flaginDLMEM=%t", item.segment.Id, s.providerList[pid].Name, item.flaginDL, item.flaginDLMEM)
-		}
+		dlog(cfg.opt.DebugWorker, " | [DV] push chan <- down seg.Id='%s' @ '%s' item.flaginDL=%t item.flaginDLMEM=%t", item.segment.Id, s.providerList[pid].Name, item.flaginDL, item.flaginDLMEM)
 		/* push download request only to 1.
 		* this one should get it and update availableOn/missingOn list
 		 */
-		//dst := ""
-		if cfg.opt.CheckFirst {
+		dst := ""
+		if cfg.opt.CheckFirst && !cfg.opt.ByPassSTAT {
 			select {
 			case s.memDL[s.providerList[pid].Group] <- item:
 				item.flaginDLMEM = true
 				pushed = true
-				//dst = "memDL"
+				dst = "memDL"
 			default:
 				// chan is full
 			}
-		} else /*if !cfg.opt.ByPassSTAT*/ {
+		} else if !cfg.opt.ByPassSTAT {
 			if testing {
 				s.segmentChansDowns[s.providerList[pid].Group] <- item
 				pushed = true
-				//dst = "segDown"
+				dst = "segDown"
 			} else {
 				select {
 				case s.segmentChansDowns[s.providerList[pid].Group] <- item:
 					pushed = true
-					//dst = "segDown"
+					dst = "segDown"
 				/* TODO FIXME REVIEW ! TO BLOCK OR NOT TO BLOCK*/
 				default:
-					//dlog( "DEBUG SPAM pushDL: chan is full for seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
+					dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full for seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
 					// chan is full
 				}
 			}
-
 		}
 		if pushed {
 			item.flaginDL = true
 			// item has been pushed to download queue: segmentChansDowns[provider.Group] or is queued in memDL[provider.Group]
 			// if we forget to decrement dlQueueCnt at the right place(es): we will never stop...
-			GCounter.Incr("dlQueueCnt")       // increment temporary dlQueueCnt counter
-			GCounter.Incr("TOTAL_dlQueueCnt") // increment TOTAL_dlQueueCnt counter
-			//dlog( " | pushDL: chan pushed=%t seg.Id='%s' @ '%s' testing=%t dst=%s", pushed, item.segment.Id, s.providerList[pid].Name, testing, dst)
+			if !item.pushedDL {
+				// increment dlQueueCnt counter only if not already pushed
+				GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
+				GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
+			}
+			item.pushedDL = true // mark as pushed to download queue (in pushDL)
+			dlog(cfg.opt.DebugWorker, " | pushDL: chan pushed=%t seg.Id='%s' @ '%s' testing=%t dst=%s", pushed, item.segment.Id, s.providerList[pid].Name, testing, dst)
 
 			return // return after 1st push!
 		} // end if pushed to download queue
@@ -477,8 +486,11 @@ providerUp:
 
 		if pushed {
 			item.flaginUP = true
-			GCounter.Incr("upQueueCnt")
-			GCounter.Incr("TOTAL_upQueueCnt")
+			if !item.pushedUP {
+				GCounter.Incr("upQueueCnt")
+				GCounter.Incr("TOTAL_upQueueCnt")
+			}
+			item.pushedUP = true // mark as pushed to upload queue (in pushUP)
 			dlog(cfg.opt.DebugWorker, " | pushUP: chan pushed=%t seg.Id='%s' @ '%s'", pushed, item.segment.Id, s.providerList[pid].Name)
 			return // return after 1st push!
 		} // end if pushed to upload queue
@@ -704,7 +716,7 @@ forever:
 
 		dlog(cfg.opt.DebugWorker, " | [DV] lastRunTook='%d ms' '%v", lastRunTook.Milliseconds(), lastRunTook)
 
-		if !cfg.opt.CheckOnly && cfg.opt.CheckFirst && segcheckdone && checked == todo {
+		if !cfg.opt.CheckOnly && cfg.opt.CheckFirst && segcheckdone /* && checked == todo */ {
 			// releasing the DL quaken
 			for _, provider := range s.providerList {
 				dlq := len(s.memDL[provider.Group])
@@ -836,18 +848,19 @@ forever:
 
 			} else if cfg.opt.DebugWorker {
 				memdata := memlim.ViewData()
+
 				log11 = fmt.Sprintf("\n memdata=%d:\n memdata='\n%#v\n' \n | ",
 					len(memdata), memdata)
+
 				log11 = log11 + fmt.Sprintf("MEM:%d/%d [Cr=%d|Dr=%d|Ur=%d] ",
 					used_slots, max_slots, CNTc, CNTd, CNTu)
+
 				log11 = log11 + fmt.Sprintf("[CNTmemWait=%d/%d|CNTmemRet=%d|MemOpen=%d|MemWaitReturn=%d] ",
 					GCounter.GetValue("MemLockWait"), GCounter.GetValue("TOTAL_MemLockWait"), GCounter.GetValue("TOTAL_MemReturned"), GCounter.GetValue("TOTAL_MemLockWait")-GCounter.GetValue("TOTAL_MemReturned"), GCounter.GetValue("WAIT_MemReturn"))
+
 				log11 = log11 + fmt.Sprintf("(indl=%d|inup=%d) CP:(parked=%d|get=%d|new=%d|dis=%d|open=%d|wait=%d)",
 					indl, inup, GCounter.GetValue("TOTAL_ParkedConns"), GCounter.GetValue("TOTAL_GetConns"), GCounter.GetValue("TOTAL_NewConns"), GCounter.GetValue("TOTAL_DisConns"), GCounter.GetValue("TOTAL_NewConns")-GCounter.GetValue("TOTAL_DisConns"), GCounter.GetValue("WaitingGetConns"))
-				/*
-					log11 = fmt.Sprintf("\n memdata=%d:\n memdata='\n%#v\n' \n | MEM:%d/%d [Cr=%d|Dr=%d|Ur=%d] [CNTmemWait=%d/%d|CNTmemRet=%d|MemOpen=%d|MemWaitReturn=%d] (indl=%d|inup=%d) CP:(parked=%d|get=%d|new=%d|dis=%d|open=%d|wait=%d)",
-						len(memdata), memdata, used_slots, max_slots, CNTc, CNTd, CNTu, cntmw, CNTmw, CNTmr, CNTmo, CNTwmr, indl, inup, CNTpc, CNTgc, CNTnc, CNTdc, CNToc, CNTwc)
-				*/
+
 			}
 
 			// build stats log string ...
@@ -858,7 +871,11 @@ forever:
 			}
 		} // print some stats ends here
 
-		if !segcheckdone && checked == todo {
+		s.mux.RLock()
+		checkDone := s.checkDone // read value of s.checkDone
+		s.mux.RUnlock()
+
+		if !segcheckdone && (checked == todo || checkDone) {
 			s.mux.Lock()
 			s.segmentCheckEndTime = time.Now()
 			took := time.Since(s.segmentCheckStartTime)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"sync"
 )
@@ -58,18 +59,17 @@ func (c *Counter_uint64) Incr(k string) uint64 {
 	return retval
 } // end func GCounter.IncrCounter
 
-func (c *Counter_uint64) IncrMax(k string, vmax uint64) (bool, uint64) {
-	var retval uint64
+func (c *Counter_uint64) IncrMax(k string, vmax uint64, src string) (retbool bool, retval uint64, err error) {
 	c.mux.Lock()
+	defer c.mux.Unlock()
 	if c.m[k] < vmax {
 		c.m[k] += 1
 		retval = c.m[k]
+		retbool = true
+	} else {
+		err = fmt.Errorf("ERROR in Counter_uint64.IncrMax: key='%s' value=%d is already at max=%d! src='%s'", k, c.m[k], vmax, src)
 	}
-	c.mux.Unlock()
-	if retval > 0 {
-		return true, retval
-	}
-	return false, 0
+	return
 } // end func GCounter.IncrMax
 
 func (c *Counter_uint64) Decr(k string) uint64 {
