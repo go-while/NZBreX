@@ -241,7 +241,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	default:
 		dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE: case default: seg.Id='%s' code=%d msg='%s' err='%v'", item.segment.Id, code, msg, err)
 		if code == 0 || err != nil {
-			// connection problem, closed?
+			// handle connection problem / closed connection
 			provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
 
 			item.mux.RLock() // mutex #74b7
@@ -268,8 +268,9 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			return err
 
 		} else {
+			// handle any other code than 220 or 0
 			if code == 99932 { // crazy magic number for bad crc32 ! REVIEW	!
-				dlog(cfg.opt.Debug, "CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+				dlog(always, "CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 			}
 			// downloading article failed from provider
 			for pid, prov := range s.providerList {
@@ -309,17 +310,15 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				s.fileStatLock.Unlock()
 			}
 
-			GCounter.Decr("dlQueueCnt")
+			GCounter.Decr("dlQueueCnt") // failed article download, CODE != 220 or 0
 			if isdead {
-
 				if cfg.opt.YencWrite && GCounter.GetValue("TOTAL_yencQueueCnt") > 0 {
 					GCounter.Decr("yencQueueCnt")
 				}
 			}
-			if code == 430 {
-				dlog(cfg.opt.Print430, "INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
-			}
+			dlog((code == 430 && cfg.opt.Print430), "INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
 			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
+
 		}
 	} // end switch code
 	dlog(cfg.opt.DebugCR, "GoWorker (%d) DownsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
