@@ -414,12 +414,12 @@ getConnFromPool:
 			// try to open a new connection
 			newconnitem, aerr, aretry := c.NewConn()
 			if newconnitem == nil || aerr != nil || aretry {
-				dlog(always, "ERROR in ConnPool GetConn: NewConn failed '%s' connitem='%v' aerr='%v' retry=%t", c.provider.Name, newconnitem, aerr, aretry)
+				dlog(cfg.opt.DebugConnPool, "WARN in ConnPool GetConn: NewConn failed '%s' connitem='%v' aerr='%v' retry=%t", c.provider.Name, newconnitem, aerr, aretry)
 				if endlessLoop <= 0 || !aretry {
 					dlog(always, "ERROR in ConnPool GetConn: endlessLoop reached! wid=%d provider='%s' aerr='%v'", 0, c.provider.Name, aerr)
 					return nil, fmt.Errorf("endlessLoop reached in ConnPool GetConn: wid=%d provider='%s' aerr='%v'", 0, c.provider.Name, aerr)
 				}
-				dlog(always, "ERROR in ConnPool GetConn: retrying to get a conn '%s' aerr='%v'", c.provider.Name, aerr)
+				dlog(cfg.opt.DebugConnPool, "WARN in ConnPool GetConn: retrying to get a conn '%s' aerr='%v'", c.provider.Name, aerr)
 				endlessLoop--
 				time.Sleep(time.Millisecond * 10) // wait a bit before retrying
 				continue getConnFromPool          // until chan rans empty
