@@ -792,10 +792,13 @@ forever:
 			//log00 = fmt.Sprintf(" TODO: %d ", todo)
 
 			if (cfg.opt.CheckFirst || cfg.opt.CheckOnly) || (checked > 0 && checked != segm && checked != done) {
-				if check_perc != 100 {
-					log01 = fmt.Sprintf(" | STAT:[%03.1f%%] (%"+s.D+"d)", check_perc, checked)
+				if check_perc <= 99 {
+					log01 = fmt.Sprintf(" | STAT:[%03.1f%%] (%"+s.D+"d/%"+s.D+"d)", check_perc, checked, todo)
+				} else if check_perc >= 99 && check_perc < 100 {
+					log01 = fmt.Sprintf(" | STAT:[%03.5f%%] (%"+s.D+"d/%"+s.D+"d)", check_perc, checked, todo)
 				} else {
-					log01 = fmt.Sprintf(" | STAT:[done] (%"+s.D+"d)", checked)
+					// if we have checked all segments, we print it as done
+					log01 = fmt.Sprintf(" | STAT:[done] (%"+s.D+"d/%"+s.D+"d)", checked, todo)
 				}
 			}
 			if done > 0 {
