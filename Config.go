@@ -7,9 +7,9 @@ import (
 	"github.com/go-while/go-loggedrwmutex"
 )
 
-const UseSharedCC = false // temporary devel flag
+const UseSharedCC = true // temporary devel flag
 
-const always = true
+const always = true // flag for dlog
 
 const (
 	DOT  = "."
