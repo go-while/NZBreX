@@ -1,0 +1,545 @@
+goroutine 23 [running]:
+runtime/pprof.writeGoroutineStacks({0xb04420, 0xc00005a000})
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/pprof/pprof.go:764 +0x75
+runtime/pprof.writeGoroutine({0xb04420, 0xc00005a000}, 0x2)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/pprof/pprof.go:753 +0x45
+runtime/pprof.(*Profile).WriteTo(0xe4eba0, {0xb04420, 0xc00005a000}, 0x2)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/pprof/pprof.go:377 +0x1b4
+main.dumpGoroutines()
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/signals_other.go:31 +0x1af
+main.setupSigusr1Dump.func1()
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/signals_other.go:19 +0x8a
+created by main.setupSigusr1Dump in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/signals_other.go:14 +0x25
+
+goroutine 1 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0001245b0?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0001245b0)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.main()
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/main.go:120 +0x4f3
+
+goroutine 24 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 25 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 26 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 27 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 28 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 29 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 30 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 31 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 32 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 33 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 34 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 35 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 36 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 37 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 38 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 39 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 40 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 41 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 42 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 43 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 44 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 45 [chan receive]:
+main.(*Cache).GoCacheReader(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:145 +0x9c
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:52 +0x5ec
+
+goroutine 3 [syscall]:
+os/signal.signal_recv()
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sigqueue.go:152 +0x29
+os/signal.loop()
+	/tank0/efs/GO/.bin/go1.24.3/src/os/signal/signal_unix.go:23 +0x1d
+created by os/signal.Notify.func1.1 in goroutine 23
+	/tank0/efs/GO/.bin/go1.24.3/src/os/signal/signal.go:152 +0x47
+
+goroutine 46 [chan receive, 4 minutes]:
+main.(*Cache).GoCacheChecker(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:123 +0x95
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:53 +0x66c
+
+goroutine 47 [chan receive]:
+main.(*Cache).GoCacheWriter(0xc000198320, 0x0?)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:162 +0x65
+created by main.NewCache in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Cache.go:55 +0x705
+
+goroutine 48 [chan receive, 4 minutes]:
+main.(*PROCESSOR).processorThread(0xc00016c2a0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Session.go:539 +0x55
+created by main.(*PROCESSOR).NewProcessor in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Session.go:107 +0x311
+
+goroutine 49 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a81a0?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a81a0)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*PROCESSOR).LaunchSession(0xc00016c2a0, 0x0, {0x7ffdef6e1222, 0x29}, 0xc0001245b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Session.go:343 +0x2d86
+main.main.func1({0x7ffdef6e1222, 0x29}, 0xc0001245b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/main.go:114 +0x14c
+created by main.main in goroutine 1
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/main.go:112 +0x43c
+
+goroutine 4 [sleep]:
+time.Sleep(0x9502f900)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/time.go:338 +0x165
+main.(*ConnPool).WatchOpenConnsThread(0xc0000fa180, 0xc0004a85d0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/ConnPool.go:500 +0x278
+created by main.NewConnPool in goroutine 49
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/ConnPool.go:123 +0x8d3
+
+goroutine 5 [sleep]:
+time.Sleep(0x9502f900)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/time.go:338 +0x165
+main.(*ConnPool).WatchOpenConnsThread(0xc0000fa1e0, 0xc0004a85d0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/ConnPool.go:500 +0x278
+created by main.NewConnPool in goroutine 49
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/ConnPool.go:123 +0x8d3
+
+goroutine 86 [select]:
+main.GoSpeedMeter(0x199d4dca, 0xc0004a8180)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/NetConn.go:37 +0x26d
+created by main.(*SESSION).GoBootWorkers in goroutine 49
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:29 +0x1ba
+
+goroutine 8 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x1, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090070)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 62
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 106 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x2, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412310)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 95
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 163 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x1, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412310)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 94
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 115 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x5, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090070)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 114
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 62 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x1, 0xc0003a0c08, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 99
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 63 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x2, 0xc0003a0c08, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 99
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 64 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x3, 0xc0003a0c08, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 99
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 65 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x4, 0xc0003a0c08, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 99
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 114 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x5, 0xc0003a0c08, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 99
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 9 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func2(0x1, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc0000900e0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:254 +0x466
+created by main.(*SESSION).GoWorker in goroutine 62
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 10 [chan receive]:
+main.(*SESSION).GoWorker.func3(0x1, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090150)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 62
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 67 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x3, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090070)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 64
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 68 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func2(0x3, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc0000900e0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:254 +0x466
+created by main.(*SESSION).GoWorker in goroutine 64
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 69 [chan receive]:
+main.(*SESSION).GoWorker.func3(0x3, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090150)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 64
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 101 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x4, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090070)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 65
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 102 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func2(0x4, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc0000900e0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:254 +0x466
+created by main.(*SESSION).GoWorker in goroutine 65
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 103 [chan receive]:
+main.(*SESSION).GoWorker.func3(0x4, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090150)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 65
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 116 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func2(0x5, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc0000900e0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:254 +0x466
+created by main.(*SESSION).GoWorker in goroutine 114
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 117 [chan receive]:
+main.(*SESSION).GoWorker.func3(0x5, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090150)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 114
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 11 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x2, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090070)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 63
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 12 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func2(0x2, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc0000900e0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:254 +0x466
+created by main.(*SESSION).GoWorker in goroutine 63
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 13 [chan receive]:
+main.(*SESSION).GoWorker.func3(0x2, 0xc0003a0c08, 0xc0004a8180, 0x0, 0xc000090150)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 63
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 132 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x4, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412310)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 97
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 107 [chan receive]:
+main.(*MemLimiter).MemCheckWait(0xc0001171c0, {0xc000154100, 0x3f}, 0xc0005040f0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/MemLimit.go:104 +0x478
+main.(*SESSION).GoDownsRoutine(0xc00024a1a0, 0x2, 0xc0003a0908, 0xc0005040f0, 0x0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Routines.go:163 +0x652
+main.(*SESSION).GoWorker.func2(0x2, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412380)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:275 +0xa2d
+created by main.(*SESSION).GoWorker in goroutine 95
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 108 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func3(0x2, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc0004123f0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 95
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 16 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x3, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412310)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 96
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 178 [chan receive]:
+main.(*MemLimiter).MemCheckWait(0xc0001171c0, {0xc000296380, 0x3f}, 0xc0004ffe00)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/MemLimit.go:104 +0x478
+main.(*SESSION).GoDownsRoutine(0xc00024a1a0, 0x3, 0xc0003a0908, 0xc0004ffe00, 0x0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Routines.go:163 +0x652
+main.(*SESSION).GoWorker.func2(0x3, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412380)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:275 +0xa2d
+created by main.(*SESSION).GoWorker in goroutine 96
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 94 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x1, 0xc0003a0908, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 98
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 95 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x2, 0xc0003a0908, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 98
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 96 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x3, 0xc0003a0908, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 98
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 97 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x4, 0xc0003a0908, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 98
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 162 [sync.WaitGroup.Wait, 4 minutes]:
+sync.runtime_SemacquireWaitGroup(0xc0004a8180?)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/sema.go:110 +0x25
+sync.(*WaitGroup).Wait(0xc0004a8180)
+	/tank0/efs/GO/.bin/go1.24.3/src/sync/waitgroup.go:118 +0x89
+main.(*SESSION).GoWorker(0xc00024a1a0, 0x5, 0xc0003a0908, 0xc0004a8180, 0xc0004a85d0, 0xc0004a81b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:327 +0xc15
+created by main.(*SESSION).GoBootWorkers.func1 in goroutine 98
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:154 +0x179c
+
+goroutine 179 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func3(0x3, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc0004123f0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 96
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 164 [chan receive]:
+main.(*MemLimiter).MemCheckWait(0xc0001171c0, {0xc00024c080, 0x3f}, 0xc000504000)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/MemLimit.go:104 +0x478
+main.(*SESSION).GoDownsRoutine(0xc00024a1a0, 0x1, 0xc0003a0908, 0xc000504000, 0x0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Routines.go:163 +0x652
+main.(*SESSION).GoWorker.func2(0x1, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412380)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:275 +0xa2d
+created by main.(*SESSION).GoWorker in goroutine 94
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 165 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func3(0x1, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc0004123f0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 94
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 133 [IO wait]:
+internal/poll.runtime_pollWait(0x7faebd1d2280, 0x72)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0xc0004820a0, 0x72, 0x0)
+	/tank0/efs/GO/.bin/go1.24.3/src/internal/poll/fd_poll_runtime.go:84 +0xb1
+internal/poll.(*pollDesc).waitRead(...)
+	/tank0/efs/GO/.bin/go1.24.3/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000482080, {0xc0003ba051, 0xfaf, 0xfaf})
+	/tank0/efs/GO/.bin/go1.24.3/src/internal/poll/fd_unix.go:165 +0x453
+net.(*netFD).Read(0xc000482080, {0xc0003ba051, 0xfaf, 0xfaf})
+	/tank0/efs/GO/.bin/go1.24.3/src/net/fd_posix.go:55 +0x4b
+net.(*conn).Read(0xc0003b2008, {0xc0003ba051, 0xfaf, 0xfaf})
+	/tank0/efs/GO/.bin/go1.24.3/src/net/net.go:194 +0xad
+bufio.(*Reader).fill(0xc000034480)
+	/tank0/efs/GO/.bin/go1.24.3/src/bufio/bufio.go:113 +0x2a4
+bufio.(*Reader).ReadSlice(0xc000034480, 0xa)
+	/tank0/efs/GO/.bin/go1.24.3/src/bufio/bufio.go:380 +0x85
+bufio.(*Reader).ReadLine(0xc000034480)
+	/tank0/efs/GO/.bin/go1.24.3/src/bufio/bufio.go:409 +0x34
+net/textproto.(*Reader).readLineSlice(0xc0001941b0, 0xffffffffffffffff)
+	/tank0/efs/GO/.bin/go1.24.3/src/net/textproto/reader.go:64 +0xda
+net/textproto.(*Reader).ReadLine(...)
+	/tank0/efs/GO/.bin/go1.24.3/src/net/textproto/reader.go:44
+main.readArticleDotLines(0xc0003a0908, 0xc0004ffd10, 0xc0001941b0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/NetConn.go:364 +0x248
+main.CMD_ARTICLE(0xc0003a0908, 0xc0004942a0, 0xc0004ffd10)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/NetConn.go:136 +0xe1a
+main.(*SESSION).GoDownsRoutine(0xc00024a1a0, 0x4, 0xc0003a0908, 0xc0004ffd10, 0x0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Routines.go:197 +0xb9f
+main.(*SESSION).GoWorker.func2(0x4, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412380)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:275 +0xa2d
+created by main.(*SESSION).GoWorker in goroutine 97
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 134 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func3(0x4, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc0004123f0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 97
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 147 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func1(0x5, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412310)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:210 +0xef
+created by main.(*SESSION).GoWorker in goroutine 162
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:206 +0x51b
+
+goroutine 148 [chan receive]:
+main.(*MemLimiter).MemCheckWait(0xc0001171c0, {0xc000154340, 0x3f}, 0xc0005041e0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/MemLimit.go:104 +0x478
+main.(*SESSION).GoDownsRoutine(0xc00024a1a0, 0x5, 0xc0003a0908, 0xc0005041e0, 0x0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Routines.go:163 +0x652
+main.(*SESSION).GoWorker.func2(0x5, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc000412380)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:275 +0xa2d
+created by main.(*SESSION).GoWorker in goroutine 162
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:250 +0x7b7
+
+goroutine 149 [chan receive, 4 minutes]:
+main.(*SESSION).GoWorker.func3(0x5, 0xc0003a0908, 0xc0004a8180, 0x0, 0xc0004123f0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:291 +0x466
+created by main.(*SESSION).GoWorker in goroutine 162
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:287 +0xa57
+
+goroutine 70 [sleep]:
+time.Sleep(0x984a34c0)
+	/tank0/efs/GO/.bin/go1.24.3/src/runtime/time.go:338 +0x165
+main.(*SESSION).GoWorkDivider(0xc00024a1a0, 0xc0004a8190, 0xc0004a81a0)
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Workers.go:626 +0xdab
+created by main.(*PROCESSOR).LaunchSession in goroutine 49
+	/tank0/efs/GO/src/github.com/go-while/NZBreX/Session.go:339 +0x2c5d

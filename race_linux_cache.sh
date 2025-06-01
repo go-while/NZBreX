@@ -9,8 +9,8 @@ go run -race $(ls *.go|grep -v signals_windows) \
 	-chansize=16384 \
         -checkfirst=true -checkonly=false \
         -nzb="$nzbfile" -provider=provider.json \
-	-cc=true -debugcache=false \
-	-debug=false -debugcache=false -debugsharedcc=false -debugconnpool=false -debugworker=false -debugBUG=false \
+	-cd=/cache/nzbrex -cc=true -debugcache=false \
+	-debug=true -debugcache=true -debugsharedcc=true -debugconnpool=true -debugworker=true -bug=false\
 	-log=false -verbose=true -print430=true \
 	-crc32=false -yencout=false -yencmerge=false -yencdelparts=false \
         -cleanhdrfile=cleanHeaders.txt \

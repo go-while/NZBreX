@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,7 +24,7 @@ func (s *SESSION) YencMerge(result *string) {
 	}
 	var waitMerge sync.WaitGroup
 	mergeStart := time.Now().Unix()
-	log.Printf("Experimental YencWrite: try merging files....")
+	dlog(always, "Experimental YencWrite: try merging files....")
 	filenames := []string{}
 	for _, item := range s.segmentList {
 		if !slices.Contains(filenames, item.file.Filename) {
@@ -42,7 +41,7 @@ func (s *SESSION) YencMerge(result *string) {
 			defer waitMerge.Done()
 			target := filepath.Join(cfg.opt.Cachedir, s.nzbHash, "yenc", filename)
 			if FileExists(target) {
-				log.Printf("YencMerge: exists target='%s'", target)
+				dlog(always, "ERROR YencMerge: exists target='%s'", target)
 				return
 			}
 			var items []*segmentChanItem
@@ -66,10 +65,10 @@ func (s *SESSION) YencMerge(result *string) {
 				items = append(items, item)
 			} // end for s.segmentList
 			if len(items) == 0 {
-				log.Printf("ERROR YencMerge: no items found to merge? fn='%s'", filename)
+				dlog(always, "ERROR YencMerge: no items found to merge? fn='%s'", filename)
 				return
 			}
-			log.Printf("YencMerge: try merge fn='%s'", filename)
+			dlog(always, "YencMerge: try merge fn='%s'", filename)
 			deleted := false
 			missingParts := 0
 		mergeItems:
@@ -82,29 +81,29 @@ func (s *SESSION) YencMerge(result *string) {
 							continue mergeItems
 						}
 						if cfg.opt.Debug {
-							log.Printf("WARN YencMerge: missing partNo=%d fn='%s' not merging...", item.segment.Number, filename)
+							dlog(always, "WARN YencMerge: missing partNo=%d fn='%s' not merging...", item.segment.Number, filename)
 						}
 						if FileExists(target + ".tmp") {
 							if err := os.Remove(target + ".tmp"); err != nil {
-								log.Printf("ERROR YencMerge: remove fn='%s'.tmp failed err='%v'", filename, err)
+								dlog(always, "ERROR YencMerge: remove fn='%s'.tmp failed err='%v'", filename, err)
 								return
 							}
 						}
 						deleted = true
 						continue mergeItems
 					}
-					log.Printf("WARN YencMerge: fn='%s' missing partNo=%d writing %d nullbytes", filename, item.segment.Number, item.segment.Bytes)
+					dlog(always, "WARN YencMerge: fn='%s' missing partNo=%d writing %d nullbytes", filename, item.segment.Number, item.segment.Bytes)
 					if err := AppendFileBytes(item.segment.Bytes, target+".tmp"); err != nil {
-						log.Printf("ERROR YencMerge: AppendFile nullbytes err='%v'", err)
+						dlog(always, "ERROR YencMerge: AppendFile nullbytes err='%v'", err)
 						return
 					}
 					continue mergeItems
 				}
 				if cfg.opt.Debug {
-					log.Printf("... merging part: '%s'", partname)
+					dlog(always, "... merging part: '%s'", partname)
 				}
 				if err := AppendFile(fp, target+".tmp", cfg.opt.YencDelParts); err != nil {
-					log.Printf("ERROR YencMerge AppendFile err='%v'", err)
+					dlog(always, "ERROR YencMerge AppendFile err='%v'", err)
 					return
 				}
 			} // end for items
@@ -126,34 +125,34 @@ func (s *SESSION) YencMerge(result *string) {
 				testhash = "8762f7e74e4d64d72fceb5f70682e6b069932deedb4949c6975d0f0fe0a91be3"
 			}
 			if testhash != "" {
-				log.Printf("YencMerge: wait ... sha256sum fn='%s'", filename)
+				dlog(always, "YencMerge: wait ... sha256sum fn='%s'", filename)
 				hash, err := SHA256SumFile(target + ".tmp")
 				if err != nil {
-					log.Printf("ERROR YencMerge: fn='%s' SHA256SumFile err='%v'", target+".tmp", err)
+					dlog(always, "ERROR YencMerge: fn='%s' SHA256SumFile err='%v'", target+".tmp", err)
 					return
 				}
 				if hash != testhash {
-					log.Printf("ERROR YencMerge: fn='%s' has hash='%s' != '%s'", filename, hash, testhash)
+					dlog(always, "ERROR YencMerge: fn='%s' has hash='%s' != '%s'", filename, hash, testhash)
 					os.Remove(target + ".tmp")
 					return
 				}
-				log.Printf("YencMerge: Verify hash OK fn='%s'", filename)
+				dlog(always, "YencMerge: Verify hash OK fn='%s'", filename)
 			} // end debug verify testhash
 
 			if deleted || missingParts > 0 {
 				if cfg.opt.Debug {
-					log.Printf("YencMerge: missingParts=%d fn='%s' deleted=%t", missingParts, filename, deleted)
+					dlog(always, "YencMerge: missingParts=%d fn='%s' deleted=%t", missingParts, filename, deleted)
 				}
 			}
 
 			// finally rename
 			if !deleted {
 				if err := os.Rename(target+".tmp", target); err != nil {
-					log.Printf("ERROR YencMerge: move .tmp failed fn='%s' err='%v'", filename, err)
+					dlog(always, "ERROR YencMerge: move .tmp failed fn='%s' err='%v'", filename, err)
 					return
 				}
 			}
-			log.Printf("YencMerge: OK fn='%s'", filename)
+			dlog(always, "YencMerge: OK fn='%s'", filename)
 		}(fn, &waitMerge) // end go func
 	} // end for filename
 

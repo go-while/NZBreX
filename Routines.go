@@ -21,14 +21,13 @@ func (s *SESSION) IsSegmentStupid(item *segmentChanItem, doLock bool) (crazy boo
 
 func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (err error) {
 	if cfg.opt.SloMoC > 0 {
+		dlog(cfg.opt.BUG, "GoCheckRoutine SloMoC=%d", cfg.opt.SloMoC)
 		time.Sleep(time.Duration(cfg.opt.SloMoC) * time.Millisecond)
 	}
 	GCounter.Incr("GoCheckRoutines")
 	defer GCounter.Decr("GoCheckRoutines")
 
-	if cfg.opt.DebugCR {
-		log.Printf("GoWorker (%d) checking seg.Id='%s' @ '%s' remainingInChan=%d/%d", wid, item.segment.Id, provider.Name, len(s.segmentChansCheck[provider.Group]), cap(s.segmentChansCheck[provider.Group]))
-	}
+	dlog(cfg.opt.DebugCR, "GoWorker (%d) checking seg.Id='%s' @ '%s' remainingInChan=%d/%d", wid, item.segment.Id, provider.Name, len(s.segmentChansCheck[provider.Group]), cap(s.segmentChansCheck[provider.Group]))
 
 	if cacheON && !cfg.opt.CheckCacheOnBoot {
 		cache.CheckCache(item)
@@ -54,19 +53,22 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 			if prov.Group != provider.Group {
 				continue
 			}
-
-			switch provider.NoDownload {
-			case false:
-				// pass
-			case true:
-				// check me bug? NoDownload-flag !
-				// only flag as available on provider if provider actually allows downloading...?
-				item.mux.Lock()
-				item.ignoreDlOn[pid] = true
-				item.mux.Unlock()
-			}
-
+			/*
+				switch provider.NoDownload {
+				case false:
+					// pass
+				case true:
+					// check me bug? NoDownload-flag !
+					// only flag as available on provider if provider actually allows downloading...?
+					item.mux.Lock()
+					item.ignoreDlOn[pid] = true
+					item.mux.Unlock()
+				}
+			*/
 			item.mux.Lock()
+			if provider.NoDownload {
+				item.ignoreDlOn[pid] = true
+			}
 			item.availableOn[pid] = true
 			delete(item.missingOn, pid)
 			item.checkedOn++
@@ -88,7 +90,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		if code == 0 || err != nil {
 			// connection problem, closed?
 			provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' retry in %d sec re-queued", item.segment.Id, provider.Name, err, DefaultRequeueDelay)
+			dlog(always, "WARN checking seg.Id='%s' failed @ '%s' err='%v' retry in %d sec re-queued", item.segment.Id, provider.Name, err, DefaultRequeueDelay)
 			time.Sleep(DefaultRequeueDelay)
 			s.segmentChansCheck[provider.Group] <- item
 			return err
@@ -128,13 +130,16 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		}
 	*/
 
-	if cfg.opt.DebugCR {
-		log.Printf("GoWorker (%d) CheckRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
-	}
+	dlog(cfg.opt.DebugCR, "GoWorker (%d) CheckRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 	if sharedCC != nil {
 		SharedConnReturn(sharedCC, connitem)
 	} else {
-		provider.ConnPool.ParkConn(connitem)
+		provider.ConnPool.ParkConn(wid, connitem, "GoCheckRoutine")
+	}
+	if testing {
+		go func(item *segmentChanItem) {
+			s.WorkDividerChan <- &WrappedItem{wItem: item, src: "CR"} // send connitem to work divider
+		}(item)
 	}
 	return nil
 } // end func GoCheckRoutine
@@ -144,13 +149,18 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		return nil
 	}
 	if cfg.opt.SloMoD > 0 {
+		dlog(cfg.opt.BUG, "GoDownsRoutine SloMoD=%d", cfg.opt.SloMoD)
 		time.Sleep(time.Duration(cfg.opt.SloMoD) * time.Millisecond)
 	}
+	funcstart := time.Now()
 	GCounter.Incr("GoDownsRoutines")
 	defer GCounter.Decr("GoDownsRoutines")
 
 	who := fmt.Sprintf("DR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)
-	memlim.MemCheckWait(who, item)
+	start := time.Now()
+	dlog(cfg.opt.Debug, "GoDownsRoutine before MemCheckWait who='%s'", who)
+	memlim.MemLockWait(item, who)
+	dlog(cfg.opt.Debug, "GoDownsRoutine got MemCheckWait who='%s' waited=(%d ms)", who, time.Since(start).Milliseconds())
 
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
@@ -181,14 +191,17 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	if connitem == nil || connitem.conn == nil {
 		return fmt.Errorf("ERROR in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
-
+	dlog(cfg.opt.Debug, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
+	startArticle := time.Now()
 	code, msg, err := CMD_ARTICLE(provider, connitem, item)
+	dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE seg.Id='%s' code=%d msg='%s' err='%v' took=(%d ms)", item.segment.Id, code, msg, err, time.Since(startArticle).Milliseconds())
 
 	switch code {
 	case 220:
 		if err != nil {
-			log.Printf("GoDownsRoutine got code 220 but err='%v'", err)
+			dlog(always, "ERROR GoDownsRoutine got code 220 but err='%v'", err)
 		}
+		dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE case 220: seg.Id='%s' code=220 msg='%s' err='%v'", item.segment.Id, msg, err)
 		GCounter.Decr("dlQueueCnt") // on code 220
 		GCounter.Add("TMP_RXbytes", uint64(item.size))
 		GCounter.Add("TOTAL_RXbytes", uint64(item.size))
@@ -205,10 +218,13 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		item.mux.Lock()      // mutex #e96b
 		item.flagisDL = true // FIXME REVIEW should be set to false here if crc32 reports an error but code 220 is still there....
 		item.flaginDL = false
-		if cfg.opt.ByPassSTAT {
-			item.checkedOn++
-		}
-		item.mux.Unlock()   // mutex #e96b
+		/*
+			if cfg.opt.ByPassSTAT {
+				item.checkedOn++
+			}
+		*/
+		item.mux.Unlock() // mutex #e96b
+		// update statistics
 		provider.mux.Lock() // mutex #918f articles.available++/downloaded++
 		if cfg.opt.ByPassSTAT {
 			provider.articles.available++
@@ -220,10 +236,10 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		}
 		provider.articles.downloaded++
 		provider.mux.Unlock() // mutex #918f articles.available++/downloaded++
-		if cacheON {
-			cache.Add2Cache(item)
-		}
+		// pass item to cache. check if cache is on is inside the func
+		cache.Add2Cache(item)
 	default:
+		dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE: case default: seg.Id='%s' code=%d msg='%s' err='%v'", item.segment.Id, code, msg, err)
 		if code == 0 || err != nil {
 			// connection problem, closed?
 			provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
@@ -236,7 +252,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 			if !isdead && failed <= 5 {
 
-				log.Printf("WARN CMD_ARTICLE failed re-queue in %d sec: seg.Id='%s' @ '%s' failed=%d isdead=%t code=%d msg='%s' err='%v'", DefaultRequeueDelay, item.segment.Id, provider.Name, failed, isdead, code, msg, err)
+				dlog(always, "WARN CMD_ARTICLE failed re-queue in %d sec: seg.Id='%s' @ '%s' failed=%d isdead=%t code=%d msg='%s' err='%v'", DefaultRequeueDelay, item.segment.Id, provider.Name, failed, isdead, code, msg, err)
 				item.mux.Lock() // mutex #ee45
 				item.fails++
 				item.mux.Unlock() // mutex #ee45
@@ -247,13 +263,13 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			} else if isdead {
 				GCounter.Decr("dlQueueCnt") // code=0 && err != nil && isdead
 				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE failed':"+who, item)
-				log.Printf("!!!! DEBUG GoDownsRoutine: isdead seg.Id='%s' code=0 or err='%v'", item.segment.Id, err)
+				dlog(cfg.opt.Debug, "!!!! DEBUG GoDownsRoutine: isdead seg.Id='%s' code=0 or err='%v'", item.segment.Id, err)
 			}
 			return err
 
 		} else {
 			if code == 99932 { // crazy magic number for bad crc32 ! REVIEW	!
-				log.Printf("CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+				dlog(cfg.opt.Debug, "CRC32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 			}
 			// downloading article failed from provider
 			for pid, prov := range s.providerList {
@@ -301,30 +317,33 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				}
 			}
 			if code == 430 {
-				if cfg.opt.Print430 {
-					log.Printf("INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
-				}
+				dlog(cfg.opt.Print430, "INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
 			}
 			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
 		}
 	} // end switch code
-	if cfg.opt.DebugCR {
-		log.Printf("GoWorker (%d) DownsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
-	}
+	dlog(cfg.opt.DebugCR, "GoWorker (%d) DownsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 
 	if sharedCC != nil {
 		SharedConnReturn(sharedCC, connitem)
 	} else {
-		provider.ConnPool.ParkConn(connitem)
+		provider.ConnPool.ParkConn(wid, connitem, "GoDownsRoutine")
 	}
-	return nil
-} // end func DownsRoutine
+	if testing {
+		go func(item *segmentChanItem) {
+			s.WorkDividerChan <- &WrappedItem{wItem: item, src: "DR"} // send connitem to work divider
+		}(item)
+	}
+	dlog(cfg.opt.DebugDR, "GoDownsRoutine end seg.Id='%s' @ '%s' took=(%d ms) err='%v'", item.segment.Id, provider.Name, time.Since(funcstart).Milliseconds(), err)
+	return
+} // end func GoDownsRoutine
 
 func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (err error) {
 	if cfg.opt.CheckOnly {
 		return nil
 	}
 	if cfg.opt.SloMoU > 0 {
+		dlog(cfg.opt.BUG, "GoReupsRoutine SloMoU=%d", cfg.opt.SloMoU)
 		time.Sleep(time.Duration(cfg.opt.SloMoU) * time.Millisecond)
 	}
 	GCounter.Incr("GoReupsRoutines")
@@ -363,9 +382,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 	//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
 
-	if cfg.opt.Debug {
-		log.Printf("ReUp: (%d) seg.Id='%s' @ '%s' doPost=%t doIHAVE=%t", wid, item.segment.Id, provider.Name, doPOST, doIHAVE)
-	}
+	dlog(cfg.opt.Debug, "ReUp: (%d) seg.Id='%s' @ '%s' doPost=%t doIHAVE=%t", wid, item.segment.Id, provider.Name, doPOST, doIHAVE)
 
 	if doPOST {
 		code, _, err := CMD_POST(provider, connitem, item)
@@ -384,7 +401,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 				memlim.MemReturn("MemRetOnERR 'CMD_POST':"+who, item)
 				// connection problem, closed?
 				provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-				log.Printf("WARN CMD_POST failed retry in %d sec seg.Id='%s' @ '%s' err='%v' re-queued", DefaultRequeueDelay, item.segment.Id, provider.Name, err)
+				dlog(always, "WARN CMD_POST failed retry in %d sec seg.Id='%s' @ '%s' err='%v' re-queued", DefaultRequeueDelay, item.segment.Id, provider.Name, err)
 				time.Sleep(DefaultRequeueDelay)
 				s.segmentChansReups[provider.Group] <- item
 				return err
@@ -417,7 +434,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 				// connection problem, closed?
 				memlim.MemReturn("MemRetOnERR 'CMD_IHAVE':"+who, item)
 				provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-				log.Printf("WARN CMD_IHAVE failed retry in %d sec seg.Id='%s' @ '%s' err='%v' re-queued", DefaultRequeueDelay, item.segment.Id, provider.Name, err)
+				dlog(always, "WARN CMD_IHAVE failed retry in %d sec seg.Id='%s' @ '%s' err='%v' re-queued", DefaultRequeueDelay, item.segment.Id, provider.Name, err)
 				time.Sleep(DefaultRequeueDelay)
 				s.segmentChansReups[provider.Group] <- item
 				return err
@@ -451,7 +468,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	} else if unwanted {
 
 		// item is unwanted at provider, set flag.
-		log.Printf("Flag Unwanted seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		dlog(always, "Flag Unwanted seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		moreProvider := false
 		item.mux.Lock()
 		for pid, prov := range s.providerList {
@@ -478,7 +495,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	} else if retry {
 
-		log.Printf("Flag Retry seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		dlog(always, "Flag Retry seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		item.mux.Lock()
 		item.retryIn = time.Now().Unix() + 15
 		item.retryOn[provider.id] = true
@@ -490,13 +507,13 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 
 	if clearmem {
-		if cfg.opt.DebugUR {
-			log.Printf("GoWorker (%d) ReupsRoutine clearmem seg.Id='%s'", wid, item.segment.Id)
-		}
+
+		dlog(cfg.opt.DebugUR, "GoWorker (%d) ReupsRoutine clearmem seg.Id='%s'", wid, item.segment.Id)
+
 		// clears this item content from memory because it got uploaded
 		//doMemReturn := true
 		item.mux.Lock()
-		item.lines = []string{}
+		item.article = []string{}
 		/* // watch out for broken wings 99ffff!
 		 * // ideas was to not release memory here until yenc has been written, if flag is set...
 		 * // but something slows down by 90% if broken wings are enabled and it freezes...
@@ -508,20 +525,17 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		memlim.MemReturn(who, item)
 		//}
 	} else {
-		log.Printf("GoWorker (%d) WARN ReupsRoutine NO clearmem seg.Id='%s'", wid, item.segment.Id)
+		dlog(always, "GoWorker (%d) WARN ReupsRoutine NO clearmem seg.Id='%s'", wid, item.segment.Id)
 	}
-
-	if cfg.opt.DebugUR {
-		log.Printf("GoWorker (%d) ReupsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
-	}
+	dlog(cfg.opt.DebugUR, "GoWorker (%d) ReupsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 
 	if sharedCC != nil {
 		SharedConnReturn(sharedCC, connitem)
 	} else {
-		provider.ConnPool.ParkConn(connitem)
+		provider.ConnPool.ParkConn(wid, connitem, "GoReupsRoutine")
 	}
 	return nil
-} // end func ReupsRoutine
+} // end func GoReupsRoutine
 
 func (s *SESSION) StopRoutines() {
 	if cfg.opt.Debug {

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Tensai75/nzbparser"
+	"github.com/go-while/go-loggedrwmutex"
 )
 
 func getCoreLimiter() {
@@ -111,9 +112,7 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 		providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
 		for n := range cfg.providers {
 			if !cfg.providers[n].Enabled {
-				if cfg.opt.Debug {
-					log.Printf("CFG Skipped Provider (id=%d) '%s' because not enabled", id, cfg.providers[n].Name)
-				}
+				dlog(cfg.opt.Debug, "CFG Skipped Provider (n=%d) '%s' because not enabled", n, cfg.providers[n].Name)
 				continue
 			}
 			Name := cfg.providers[n].Name
@@ -129,11 +128,11 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 
 			// check for inconsistent configuration
 			if !cfg.providers[n].NoDownload && providerACL[Group]["NoDownload"] {
-				log.Printf("ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
+				dlog(always, "ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
 				os.Exit(1)
 			}
 			if !cfg.providers[n].NoUpload && providerACL[Group]["NoUpload"] {
-				log.Printf("ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
+				dlog(always, "ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
 				os.Exit(1)
 			}
 
@@ -146,17 +145,18 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 			}
 
 			// link to this provider
-			p := &cfg.providers[n]
+			provider := cfg.providers[n]
+			p := &provider
 			// provider is ready to connect
-			NewConnPool(p, workerWGconnEstablish)
 			p.id = id
+			p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: p.Name}
+			NewConnPool(p, workerWGconnEstablish)
 			s.providerList = append(s.providerList, p)
-			if cfg.opt.Debug {
-				log.Printf("CFG Loaded Provider (id=%d) '%s'", id, p.Name)
-			}
+			dlog(cfg.opt.Debug, "CFG Loaded Provider (id=%d) '%s'", id, p.Name)
 			id++
 		}
 	}
+	time.Sleep(time.Second * 3)
 	return nil
 } // end func loadProviderList
 
@@ -195,7 +195,7 @@ func LoadHeadersFromFile(path string) ([]string, error) {
 	for _, line := range lines {
 		for _, hdr := range needHeaders {
 			if strings.HasPrefix(line, hdr) {
-				log.Printf("ERROR can not load header '%s' to cleanup!", hdr)
+				dlog(always, "ERROR can not load header '%s' to cleanup!", hdr)
 				os.Exit(1)
 			}
 		}
@@ -366,7 +366,7 @@ func (s *SESSION) writeCsvFile() (err error) {
 		return fmt.Errorf("unable to write to the csv file: %v", err)
 	}
 	f.Close()
-	log.Printf("writeCsv: done")
+	dlog(cfg.opt.Csv, "writeCsv: done")
 	return
 } // end func writeCsv
 
@@ -410,13 +410,13 @@ func SHA256str(astr string) string {
 } // end func SHA256str
 
 func DirExists(dir string) bool {
-	//log.Printf("?DirExists dir='%s'", dir)
+	//dlog("?DirExists dir='%s'", dir)
 	info, err := os.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false
 		}
-		log.Printf("ERROR DirExists err='%v'", err)
+		dlog(always, "ERROR DirExists err='%v'", err)
 		return false
 	}
 	return info.IsDir()
@@ -428,7 +428,7 @@ func FileExists(File_path string) bool {
 		if os.IsNotExist(err) {
 			return false
 		}
-		log.Printf("ERROR FileExists err='%v'", err)
+		dlog(always, "ERROR FileExists err='%v'", err)
 		return false
 	}
 	return !info.IsDir()
@@ -437,10 +437,10 @@ func FileExists(File_path string) bool {
 func Mkdir(dir string) bool {
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
-		log.Printf("ERROR Mkdir='%s' err='%v'", dir, err)
+		dlog(always, "ERROR Mkdir='%s' err='%v'", dir, err)
 		return false
 	} else {
-		//log.Printf("CREATED DIR %s", dir)
+		//dlog("CREATED DIR %s", dir)
 	}
 	return true
 } // end func Mkdir
@@ -449,23 +449,23 @@ func RunProf() {
 	if webProf != "" {
 		go Prof.PprofWeb(webProf)
 	}
-	log.Printf("Started PprofWeb @ Port :61234")
+	dlog(always, "Started PprofWeb @ Port :61234")
 	go func() {
 		time.Sleep(time.Second * 15) // pProf
 		runtime.GC()
 		time.Sleep(time.Second * 5) // pProf
-		//log.Printf("Prof start capturing cpu profile")
+		//dlog("Prof start capturing cpu profile")
 		if _, err := Prof.StartCPUProfile(); err != nil {
-			log.Printf("ERROR Prof.StartCPUProfile err='%v'", err)
+			dlog(always, "ERROR Prof.StartCPUProfile err='%v'", err)
 			return
 		}
 		//time.Sleep(time.Second * 120)
 		//Prof.StopCPUProfile()
-		//log.Printf("Prof stop capturing cpu/mem profiles")
+		//dlog("Prof stop capturing cpu/mem profiles")
 	}()
 	go func() {
 		if err := Prof.StartMemProfile(120*time.Second, 20*time.Second); err != nil {
-			log.Printf("ERROR Prof.StartMemProfile err='%v'", err)
+			dlog(always, "ERROR Prof.StartMemProfile err='%v'", err)
 		}
 	}()
 } // end fun RunProf
@@ -481,26 +481,81 @@ func yesno(input bool) string {
 	return "?"
 } // end func yesno
 
-/*
-func dlog(anyflag bool, format string, a ...any) {
-	if anyflag {
-		log.Printf(format, a...)
+func dlog(logthis bool, format string, a ...any) {
+	if !logthis {
+		return
 	}
+	log.Printf(format, a...)
 } // end dlog
-*/
 
-/*
-func getUptime(what string, booted time.Time) (uptime float64) {
-	switch what {
-	case "Seconds":
-		uptime = time.Since(booted).Seconds()
-	case "Minutes":
-		uptime = time.Since(booted).Minutes()
-	case "Hours":
-		uptime = time.Since(booted).Hours()
-	default:
-		uptime = -1
+func GoMutexStatus() {
+	if loggedrwmutex.DisableLogging {
+		dlog(cfg.opt.Debug, "Mutex: loggedrwmutex.DisableLogging")
+		return
 	}
+	for {
+		time.Sleep(time.Millisecond * 5000) // check every N milliseconds
+		//c.provider.mux.PrintStatus(cfg.opt.Debug)          // prints mutex status for the provider
+		//c.provider.ConnPool.mux.PrintStatus(cfg.opt.Debug) // prints mutex status for the providers connpool
+		globalmux.PrintStatus(true) // prints global mutex status for the whole app
+		globalmux.Lock()
+		if memlim != nil && memlim.mux != nil {
+			memlim.mux.PrintStatus(true) // prints memory limit mutex status
+		}
+		globalmux.Unlock()
+	}
+}
+
+// RotateFiles renames "name" to "name.old.1", "name.old.1" to "name.old.2", ..., up to maxVersions
+// If a version exists, it is shifted up by one. All renames are done in reverse order to avoid overwrites.
+func RotateLogFiles(name string, maxVersions int) error {
+	if maxVersions < 1 {
+		dlog(always, "RotateLogFiles: maxVersions=%d is less than 1, nothing to do", maxVersions)
+		return nil
+	}
+	// Start from the highest version and move backwards
+	for i := maxVersions; i >= 1; i-- {
+		oldPath := fmt.Sprintf("%s.old.%d", name, i)
+		newPath := fmt.Sprintf("%s.old.%d", name, i+1)
+		if _, err := os.Stat(oldPath); err == nil {
+			if err := os.Rename(oldPath, newPath); err != nil {
+				return fmt.Errorf("failed to rename %q to %q: %w", oldPath, newPath, err)
+			}
+		}
+	}
+	// Now move the original file to .old.1
+	if _, err := os.Stat(name); err == nil {
+		if err := os.Rename(name, fmt.Sprintf("%s.old.1", name)); err != nil {
+			return fmt.Errorf("failed to rename %q to %q: %w", name, name+".old.1", err)
+		}
+	}
+	return nil
+} // end func RotateFiles (written by AI: GPT-4.1)
+
+func SetLogToTerminal() {
+	// Reset log output to the terminal
+	log.SetOutput(os.Stdout)
+	dlog(cfg.opt.Debug, "output reset to os.Stdout")
+} // end func SetLogToTerminal (written by AI: GPT-4.1)
+
+func LogToFile(filename string, append bool) (err error) {
+	// Set log output to the specified file
+	var logFile *os.File
+	if append {
+		// Open the file in append mode
+		logFile, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	} else {
+		// Open the file in overwrite mode
+		logFile, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	}
+	if err != nil {
+		dlog(always, "ERROR LogToFile: failed to open log file '%s': %v", filename, err)
+		return
+	}
+	if cfg.opt.Debug {
+		SetLogToTerminal()
+		dlog(always, "LogToFile: log output set to '%s'", filename)
+	}
+	log.SetOutput(logFile)
 	return
-} // end func getUptime
-*/
+} // end func LogToFile (written by AI: GPT-4.1)

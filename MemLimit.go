@@ -15,9 +15,8 @@ package main
  */
 
 import (
-	"log"
-	"sync"
-	"time"
+	"github.com/go-while/go-loggedrwmutex"
+	//"sync"
 )
 
 type MemLimiter struct {
@@ -25,7 +24,8 @@ type MemLimiter struct {
 	waiting int
 	memchan chan struct{}
 	memdata map[*segmentChanItem]bool
-	mux     sync.RWMutex
+	//mux     sync.RWMutex
+	mux *loggedrwmutex.LoggedSyncRWMutex // debug mutex
 }
 
 func NewMemLimiter(value int) *MemLimiter {
@@ -36,6 +36,7 @@ func NewMemLimiter(value int) *MemLimiter {
 		memchan: make(chan struct{}, value),
 		memdata: make(map[*segmentChanItem]bool, value),
 		mem_max: value,
+		mux:     &loggedrwmutex.LoggedSyncRWMutex{Name: "MemLimiter"},
 	}
 	for i := 1; i <= value; i++ {
 		// fills chan with empty structs
@@ -43,20 +44,9 @@ func NewMemLimiter(value int) *MemLimiter {
 		//     to get a slot out and refill when done
 		memlim.memchan <- struct{}{}
 	}
-	if cfg.opt.Debug {
-		log.Printf("NewMemLimiter: max=%d avail=%d", value, len(memlim.memchan))
-	}
+	dlog(always, "NewMemLimiter: max=%d avail=%d", value, len(memlim.memchan))
 	return memlim
 } // end func NewMemLimiter
-
-func (m *MemLimiter) SetMaxMem(newmax int) {
-	if newmax <= 0 {
-		newmax = 1 // can't have 0 objects in ram...
-	}
-	m.mux.Lock()
-	m.mem_max = newmax
-	m.mux.Unlock()
-} // end func SetMaxMem
 
 func (m *MemLimiter) Usage() (int, int) {
 	used_slots := m.mem_max - len(m.memchan)
@@ -72,59 +62,71 @@ func (m *MemLimiter) ViewData() (data []string) {
 	return
 } // end func memlim.ViewData
 
-func (m *MemLimiter) MemCheckWait(who string, item *segmentChanItem) {
-	if cfg.opt.Debug {
-		GCounter.Incr("TOTAL_MemCheckWait")
-	}
+func (m *MemLimiter) MemAvail() (retbool bool) {
+	m.mux.RLock()
+	retbool = (m.waiting <= m.mem_max)
+	m.mux.RUnlock()
+	return
+}
+
+func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
+
+	GCounter.Incr("TOTAL_MemLockWait")
+	GCounter.Incr("MemLockWait")
+	defer GCounter.Decr("MemLockWait")
 
 	m.mux.Lock()
-	if cfg.opt.Debug && m.waiting > 0 {
-		log.Printf("MemCheckWait WAIT avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, m.waiting, who)
+	if m.memdata[item] {
+		m.mux.Unlock()
+		dlog(always, "ERROR ! MemLimit tried to lock an item already in mem! seg.Id='%s' who='%s'", item.segment.Id, who)
+		return
 	}
+	m.memdata[item] = true // flag as in mem
+	//if cfg.opt.Debug && m.waiting > 0 {
+	dlog(cfg.opt.DebugMemlim, "MemLockWait avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, m.waiting, who)
+	//}
 	m.waiting++
 	m.mux.Unlock()
-
-	for {
-		m.mux.Lock()
-		if !m.memdata[item] {
-			m.memdata[item] = true // flag as in mem
+	/*
+		for {
+			m.mux.Lock()
+			if !m.memdata[item] {
+				m.memdata[item] = true // flag as in mem
+				m.mux.Unlock()
+				break
+			}
 			m.mux.Unlock()
-			break
-		}
-		m.mux.Unlock()
-		time.Sleep(time.Second / 100) // infinite wait for memlim
-		log.Printf("ERROR! MemLimit tried to lock an item already in mem! seg.Id='%s'", item.segment.Id)
-	} // end for waithere
+			time.Sleep(time.Second) // infinite wait for memlim. if this trigger something is wrong!
 
+		} // end for waithere
+	*/
 	<-m.memchan // infinite wait to get a slot from chan
 
 	m.mux.Lock()
 	m.waiting--
+	dlog(cfg.opt.DebugMemlim, "NewMemLock seg.Id='%s' m.waiting=%d who='%s'", item.segment.Id, m.waiting, who)
 	m.mux.Unlock()
 
-	if cfg.opt.Debug {
-		log.Printf("NewMemLock seg.Id='%s'", item.segment.Id)
-	}
-	//log.Printf("MemCheckWait SLOT chan=%d/%d", len(m.memchan), m.mem_max)
-} // end func memlim.MemCheckWait
+	dlog(cfg.opt.DebugMemlim, "MemLockWait got SLOT seg.Id='%s' who='%s'", item.segment.Id, who)
+} // end func memlim.MemLockWait
 
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
-	if cfg.opt.Debug {
-		GCounter.Incr("WAIT_MemReturn")
-	}
+	dlog(cfg.opt.DebugMemlim, "MemReturn enter seg.Id='%s' who='%s'", item.segment.Id, who)
+	GCounter.Incr("WAIT_MemReturn")
+	defer GCounter.Decr("WAIT_MemReturn")
+
 	select {
 	case m.memchan <- struct{}{}: // return mem slot into chan
 		//pass
 	default:
 		// wtf chan is full?? that's a bug!
-		log.Printf("ERROR MemReturn chan is full who='%s'", who)
+		dlog(always, "ERROR on MemReturn chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
+		return
 	}
 	m.mux.Lock()
 	delete(m.memdata, item)
 	m.mux.Unlock()
-	if cfg.opt.Debug {
-		GCounter.Decr("WAIT_MemReturn")
-		GCounter.Incr("TOTAL_MemReturned")
-	}
-	//log.Printf("MemReturned who='%s'", who)
+
+	GCounter.Incr("TOTAL_MemReturned")
+	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.Id, who)
 } // end func memlim.MemReturn

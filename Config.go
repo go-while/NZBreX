@@ -1,11 +1,15 @@
 package main
 
 import (
-	"sync"
 	"time"
 
 	"github.com/Tensai75/nzbparser"
+	"github.com/go-while/go-loggedrwmutex"
 )
+
+const UseSharedCC = false // temporary devel flag
+
+const always = true
 
 const (
 	DOT                           = "."
@@ -51,6 +55,9 @@ type CFG struct {
 	YencDelParts     bool   `json:"YencDelParts"`     // if true, yenc parts will be deleted after merge
 	Csv              bool   `json:"Csv"`              // if true, write a csv file for every nzb file
 	Log              bool   `json:"Log"`              // if true, log to file
+	LogAppend        bool   `json:"LogAppend"`        // if true, append to log file instead of overwriting
+	LogDir           string `json:"LogDir"`           // directory where log files are stored
+	LogOld           int    `json:"LogOld"`           // if true, rotate old log files up to .N
 	Prof             bool   `json:"Prof"`             // if true, start profiler
 	PrintStats       int64  `json:"PrintStats"`       // seconds to print stats, 0 = spammy, -1 = no output, >0 = print every N seconds
 	Print430         bool   `json:"Print430"`         // if true, print notice about code 430 article not found
@@ -63,6 +70,7 @@ type CFG struct {
 	DebugConnPool    bool   `json:"DebugConnPool"`    // if true, enable connpool debug output
 	DebugSharedCC    bool   `json:"DebugSharedCC"`    // if true, enable sharedConn debug output
 	DebugWorker      bool   `json:"DebugWorker"`      // if true, enable workers debug output
+	DebugMemlim      bool   `json:"DebugMemlim"`      // if true, enable memlim debug output
 	DebugCR          bool   `json:"DebugCR"`          // if true, enable check routine debug output
 	DebugDR          bool   `json:"DebugDR"`          // if true, enable downs routine debug output
 	DebugUR          bool   `json:"DebugUR"`          // if true, enable reups routine debug output
@@ -82,26 +90,27 @@ type CFG struct {
 } // end CFG struct
 
 type Provider struct {
-	Enabled       bool           // if false, provider will be skipped
-	NoCheck       bool           // if true, no check will be done for this provider
-	NoDownload    bool           // if true, no download will be done for this provider
-	NoUpload      bool           // if true, no upload will be done for this provider
-	Group         string         // group name is used internally to divide providers accounts into groups
-	Name          string         // provider name, used for logging and identification
-	Host          string         // provider host, used for connecting to the server
-	Port          uint32         // provider port, used for connecting to the server
-	Timeout       int64          // timeout in seconds for connecting to the server
-	SSL           bool           // if true, use SSL for connecting to the server
-	SkipSslCheck  bool           // if true, skip SSL certificate verification
-	Username      string         // username for authentication
-	Password      string         // password for authentication
-	MaxConns      int            // maximum number of connections to the provider
-	TCPMode       string         // TCP mode to use (tcp, tcp4, tcp6)
-	PreferIHAVE   bool           // if true, prefer IHAVE over POST method
-	MaxConnErrors int            // maximum number of errors before giving up on a connection
-	ConnPool      *ProviderConns // the pool of connections for this provider
-	mux           sync.RWMutex   // mutex to protect the provider struct
-	id            int            // will be set in loadProviderList
+	Enabled       bool      // if false, provider will be skipped
+	NoCheck       bool      // if true, no check will be done for this provider
+	NoDownload    bool      // if true, no download will be done for this provider
+	NoUpload      bool      // if true, no upload will be done for this provider
+	Group         string    // group name is used internally to divide providers accounts into groups
+	Name          string    // provider name, used for logging and identification
+	Host          string    // provider host, used for connecting to the server
+	Port          uint32    // provider port, used for connecting to the server
+	Timeout       int64     // timeout in seconds for connecting to the server
+	SSL           bool      // if true, use SSL for connecting to the server
+	SkipSslCheck  bool      // if true, skip SSL certificate verification
+	Username      string    // username for authentication
+	Password      string    // password for authentication
+	MaxConns      int       // maximum number of connections to the provider
+	TCPMode       string    // TCP mode to use (tcp, tcp4, tcp6)
+	PreferIHAVE   bool      // if true, prefer IHAVE over POST method
+	MaxConnErrors int       // maximum number of errors before giving up on a connection
+	ConnPool      *ConnPool // the pool of connections for this provider
+	//mux           sync.RWMutex    // mutex to protect the provider struct
+	mux *loggedrwmutex.LoggedSyncRWMutex // debug mutex
+	id  int                              // will be set in loadProviderList
 	// flags
 	capabilities struct {
 		check  bool // if true, provider supports checking articles
@@ -130,37 +139,40 @@ type segmentChanItem struct {
 	// cache, download, and upload routines.
 	// segmentChanItem is used to store information about a segment/article
 	// that is being processed in the segment channel.
-	mux         sync.RWMutex
-	s           *SESSION              // links to where it belongs
-	segment     *nzbparser.NzbSegment // segment/article to download
-	file        *nzbparser.NzbFile    // file to which the segment belongs
-	missingOn   map[int]bool          // [provider.id]bool
-	availableOn map[int]bool          // [provider.id]bool
-	ignoreDlOn  map[int]bool          // [provider.id]bool
-	unwantedOn  map[int]bool          // [provider.id]bool
-	retryOn     map[int]bool          // [provider.id]bool
-	errorOn     map[int]bool          // [provider.id]bool // not in use ... ?!
-	dmcaOn      map[int]bool          // [provider.id]bool
-	lines       []string              // contains the downloaded segment/article
-	flaginDL    bool                  // if true, item is in download
-	flagisDL    bool                  // if true, item has been downloaded
-	flaginUP    bool                  // if true, item is in upload
-	flagisUP    bool                  // if true, item has been uploaded
-	flaginDLMEM bool                  // if true, item is in download memory and waits for the quaken
-	flaginUPMEM bool                  // if true, item is in upload memory and waits for the quaken
-	flaginYenc  bool                  // if true, item is in writing to yenc cache
-	flagisYenc  bool                  // if true, item has been written to yenc cache
-	checkedOn   int                   // counts up if item has been checked on a provider
-	hashedId    string                // hashed segment id, used for cache filename
-	cached      bool                  // if true, item is cached
-	readChan    chan int              // to notify, cache has loaded the file to item.lines
-	checkChan   chan bool             // to notify if item exists in cache
-	size        int                   // size of the segment/article in bytes
-	dlcnt       int                   // download count, used for retrying
-	badcrc      int                   // number of bad crc checks, used for retrying
-	fails       int                   // number of fails, used for retrying
-	retryIn     int64                 // retry in seconds, used for retrying
-	nzbhashname *string               // pointer to the nzb hash name, used for cache directory
+	//mux         sync.RWMutex
+	mux         *loggedrwmutex.LoggedSyncRWMutex // mutex to protect the segmentChanItem struct
+	s           *SESSION                         // links to where it belongs
+	segment     *nzbparser.NzbSegment            // segment/article to download
+	file        *nzbparser.NzbFile               // file to which the segment belongs
+	missingOn   map[int]bool                     // [provider.id]bool
+	availableOn map[int]bool                     // [provider.id]bool
+	ignoreDlOn  map[int]bool                     // [provider.id]bool
+	unwantedOn  map[int]bool                     // [provider.id]bool
+	retryOn     map[int]bool                     // [provider.id]bool
+	errorOn     map[int]bool                     // [provider.id]bool // not in use ... ?!
+	dmcaOn      map[int]bool                     // [provider.id]bool
+	article     []string                         // contains the downloaded segment/article
+	head        []string                         // contains the head
+	body        []string                         // contains the body
+	flaginDL    bool                             // if true, item is in download
+	flagisDL    bool                             // if true, item has been downloaded
+	flaginUP    bool                             // if true, item is in upload
+	flagisUP    bool                             // if true, item has been uploaded
+	flaginDLMEM bool                             // if true, item is in download memory and waits for the quaken
+	flaginUPMEM bool                             // if true, item is in upload memory and waits for the quaken
+	flaginYenc  bool                             // if true, item is in writing to yenc cache
+	flagisYenc  bool                             // if true, item has been written to yenc cache
+	checkedOn   int                              // counts up if item has been checked on a provider
+	hashedId    string                           // hashed segment id, used for cache filename
+	cached      bool                             // if true, item is cached
+	readChan    chan int                         // to notify, cache has loaded the file to item.lines
+	checkChan   chan bool                        // to notify if item exists in cache
+	size        int                              // size of the segment/article in bytes
+	dlcnt       int                              // download count, used for retrying
+	badcrc      int                              // number of bad crc checks, used for retrying
+	fails       int                              // number of fails, used for retrying
+	retryIn     int64                            // retry in seconds, used for retrying
+	nzbhashname *string                          // pointer to the nzb hash name, used for cache directory
 } // end segmentChanItem struct
 
 // fileStatistic is used to store statistics about a file

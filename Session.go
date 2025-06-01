@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tensai75/nzbparser"
+	"github.com/go-while/go-loggedrwmutex"
 )
 
 // PROCESSOR manages NZB file processing.
@@ -24,7 +25,8 @@ import (
 type PROCESSOR struct {
 	IsRunning bool
 	//cfg       *Config // TODO: remove from global scope?
-	mux       sync.RWMutex
+	//mux       sync.RWMutex
+	mux       *loggedrwmutex.LoggedSyncRWMutex
 	sessIds   uint64              // counts up
 	sessMap   map[uint64]*SESSION // map with sessions
 	nzbDir    string              // watch this dir for nzb files
@@ -43,7 +45,8 @@ type PROCESSOR struct {
 // The SESSION struct is used to track the state of processing for each NZB file.
 // It is created by the PROCESSOR when a new NZB file is detected and processed.
 type SESSION struct {
-	mux       sync.RWMutex
+	//mux       sync.RWMutex
+	mux       *loggedrwmutex.LoggedSyncRWMutex
 	counter   *Counter_uint64 // private counter for every session // TODO check all GCounter if they should be private
 	proc      *PROCESSOR      // the parent where we belong to
 	sessId    uint64          // session ID
@@ -74,9 +77,11 @@ type SESSION struct {
 	digStr                string                           // cosmetics for results print
 	D                     string                           // cosmetics for results print
 	closed                time.Time                        // closed is the time when the session was closed
+	WorkDividerChan       chan *WrappedItem                // channel to send items to the work divider
 } // end type SESSION struct
 
 func (p *PROCESSOR) NewProcessor() error {
+	p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: "PROCESSOR"} // use a logged sync mutex to log locking and unlocking
 	p.mux.Lock()
 	defer p.mux.Unlock()
 	if p.IsRunning {
@@ -92,8 +97,8 @@ func (p *PROCESSOR) NewProcessor() error {
 			if retries <= 0 {
 				return fmt.Errorf("error NewProcessor: watchDir not found: '%s'", cfg.opt.NzbDir)
 			}
-			log.Printf("WARN NewProcessor: watchDir not found: '%s' ... retry in 9s (retries %d)", cfg.opt.NzbDir, retries)
-			time.Sleep(9 * time.Second)
+			dlog(always, "WARN NewProcessor: watchDir not found: '%s' ... retry in 9s (retries %d)", cfg.opt.NzbDir, retries)
+			time.Sleep(9 * time.Second) // watchdir not found, retry in
 			retries--
 		}
 		//p.refresh = time.Duration(0 * time.Second) // default. call processor.SetDirRefresh after NewProcessor
@@ -105,7 +110,7 @@ func (p *PROCESSOR) NewProcessor() error {
 	p.stop_chan = make(chan struct{}, 1)
 	go p.processorThread()
 	p.IsRunning = true
-	log.Printf("NewProcessor: nzbDir='%s' refresh=%d", p.nzbDir, p.refresh)
+	dlog(always, "NewProcessor: nzbDir='%s' refresh=%d", p.nzbDir, p.refresh)
 	return nil
 } // end func NewProcessor
 
@@ -139,9 +144,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 			return fmt.Errorf("error LaunchSession: sessId <= 0 ?! nzbfilepath='%s' newsession='%#v' err='%v'", nzbfilepath, newsession, err)
 		} else {
 			// we have a new session
-			if cfg.opt.Debug {
-				log.Printf("LaunchSession: created new session with sessId=%d nzbfilepath='%s'", sessId, nzbfilepath)
-			}
+			dlog(cfg.opt.Verbose, "LaunchSession: created new session with sessId=%d nzbfilepath='%s'", sessId, nzbfilepath)
 			s = newsession
 		}
 
@@ -165,26 +168,37 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	// create log file: /path/nzb.log
 	if cfg.opt.Log {
 		logFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".log"
-		logFile, err := os.Create(logFileName)
+		logPath := filepath.Join(cfg.opt.LogDir, logFileName)
+		if cfg.opt.LogDir != "" && cfg.opt.LogDir != "." && !DirExists(cfg.opt.LogDir) {
+			if !Mkdir(cfg.opt.LogDir) {
+				return fmt.Errorf("error LaunchSession: unable to create log dir '%s': %v", cfg.opt.LogDir, err)
+			}
+		}
+
+		RotateLogFiles(logPath, cfg.opt.LogOld)
+		/*
+			logFile, err := os.Create(logPath)
+			if err != nil {
+				return fmt.Errorf("error LaunchSession: unable to open log file: %v", err)
+			}
+		*/
+		SetLogToTerminal() // set log output to stdout first
+		dlog(always, "LaunchSession: Writing log to: '%s'", logPath)
+		err := LogToFile(logPath, cfg.opt.LogAppend) // set log output to the log file
 		if err != nil {
 			return fmt.Errorf("error LaunchSession: unable to open log file: %v", err)
 		}
-		log.SetOutput(os.Stdout)
-		log.Printf("ERROR LaunchSession: Writing log to: '%s'", logFileName)
-		log.SetOutput(logFile)
-		defer log.SetOutput(os.Stdout)
+		defer SetLogToTerminal() // reset log output to stdout after the session is done
 	}
 
 	/*
 		if cfg.opt.Verbose {
-			log.Printf("LaunchSession Settings: '%#v'", *cfg.opt) // TODO should be in main() once on boot!
+			dlog( "LaunchSession Settings: '%#v'", *cfg.opt) // TODO should be in main() once on boot!
 		}
 	*/
 
 	s.preparationStartTime = time.Now()
-	if cfg.opt.Debug {
-		log.Printf("LaunchSession Loading NZB: '%s'", s.nzbPath)
-	}
+	dlog(cfg.opt.Verbose, "LaunchSession Loading NZB: '%s'", s.nzbPath)
 
 	if s.nzbFile != nil {
 		// nzbfile is still open and loaded, pass
@@ -198,9 +212,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		}
 		s.nzbFile = nzbfile
 
-		if cfg.opt.Debug {
-			log.Printf("nzbfile='%#v'", s.nzbFile)
-		}
+		dlog(cfg.opt.Debug, "nzbfile='%#v'", s.nzbFile)
 
 		// loop through all file tags within the NZB file
 		for _, file := range nzbfile.Files {
@@ -219,18 +231,19 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 						s.nzbGroups = append(s.nzbGroups, agroup)
 					}
 				}
-				log.Printf("NewsGroups: %v", s.nzbGroups)
+				dlog(always, "NewsGroups: %v", s.nzbGroups)
 			}
 			// filling s.segmentList
 			for _, segment := range file.Segments {
-				if cfg.opt.BUG {
-					log.Printf("append nzb to segmentList: Id='%s' file='%s'", segment.Id, file.Filename)
-				}
+				dlog(cfg.opt.BUG, "append nzb to segmentList: Id='%s' file='%s'", segment.Id, file.Filename)
 				// If you add more fields to the 'segmentChanItem' struct, the compiler will catch missing initializations here and crash on compilation.
+				// mux := new(sync.RWMutex)
+				segmux := &loggedrwmutex.LoggedSyncRWMutex{Name: "segment-" + segment.Id} // use a logged sync mutex to log locking and unlocking
+				// create a new segmentChanItem for each segment
 				item := &segmentChanItem{
-					sync.RWMutex{}, s, &segment, &file,
+					segmux, s, &segment, &file,
 					make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)),
-					nil, false, false, false, false, false, false, false, false,
+					[]string{}, []string{}, []string{}, false, false, false, false, false, false, false, false,
 					0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &s.nzbHash}
 				s.segmentList = append(s.segmentList, item)
 			}
@@ -239,7 +252,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		mibsize := float64(nzbfile.Bytes) / 1024 / 1024
 		artsize := mibsize / float64(len(s.segmentList)) * 1024
 		s.nzbSize = nzbfile.Bytes // store the size of the nzb file in bytes
-		log.Printf("%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, s.nzbName, len(s.segmentList), nzbfile.TotalSegments, mibsize, artsize)
+		dlog(always, "%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, s.nzbName, len(s.segmentList), nzbfile.TotalSegments, mibsize, artsize)
 
 	} // end if s.nzbFile
 
@@ -251,7 +264,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	var workerWGconnEstablish sync.WaitGroup // workerWGconnEstablish is used to wait for all connections to be established before starting the work
 	s.providerList = nil
 	if err := cfg.loadProviderList(s, &workerWGconnEstablish); err != nil {
-		log.Printf("ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
+		dlog(always, "ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
 		return err
 	}
 	totalMaxConns := 0
@@ -259,24 +272,19 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		totalMaxConns += provider.MaxConns
 	}
 
-	if cfg.opt.Debug {
-		log.Printf("(Re-)Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
-	}
+	dlog(cfg.opt.Debug, "(Re-)Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
 
 	globalmux.Lock()
 	// setup mem limiter
 	if memlim == nil {
-		memlim = NewMemLimiter(cfg.opt.MemMax)
-	}
-
-	// set memory slots or update maxmem on reload
-	if cfg.opt.MemMax <= 0 && totalMaxConns > 0 {
-		if cfg.opt.MemMax != totalMaxConns {
-			cfg.opt.MemMax = totalMaxConns
-			if memlim != nil {
-				memlim.SetMaxMem(totalMaxConns)
+		memMax := cfg.opt.MemMax
+		// sets memory slots once globally!
+		if memMax <= 0 && totalMaxConns > 0 {
+			if memMax != totalMaxConns*2 {
+				memMax = totalMaxConns * 2
 			}
 		}
+		memlim = NewMemLimiter(memMax)
 	}
 
 	// limits crc32 and yenc processing
@@ -291,9 +299,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	}
 	globalmux.Unlock()
 
-	if cfg.opt.Debug {
-		log.Printf("Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
-	}
+	dlog(cfg.opt.Debug, "Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
 
 	// setup wait groups
 	var waitWorker sync.WaitGroup      // waitWorker is used to wait for all workers to finish
@@ -321,6 +327,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	waitDividerDone.Add(1)
 	workerWGconnEstablish.Add(1)
 	s.GoBootWorkers(&waitDivider, &workerWGconnEstablish, &waitWorker, &waitPool, s.nzbFile.Bytes)
+	workerWGconnEstablish.Wait()
 
 	/*
 		if cfg.opt.Debug {
@@ -368,9 +375,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 	s.YencMerge(&result)
 
-	result = result + runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end"
+	result = runtime_info + "\n> ###" + result + "\n\n> ###\n\n:end"
 
 	s.results = append(s.results, result)
+	log.Print(result)
 
 	s.writeCsvFile()
 
@@ -387,7 +395,7 @@ func (p *PROCESSOR) SetDirRefresh(seconds int64) {
 	p.mux.Lock()
 	p.refresh = time.Duration(seconds) * time.Second
 	p.mux.Unlock()
-	log.Printf("SetWatchDirRefresh: seconds=%d nzbDir='%s' ", seconds, p.nzbDir)
+	dlog(always, "SetWatchDirRefresh: seconds=%d nzbDir='%s' ", seconds, p.nzbDir)
 } // end func SetWatchDirRefresh
 
 // private PROCESSOR/SESSION functions
@@ -398,7 +406,8 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	// nzbName is the name of the nzb file, e.g. "test.nzb" or "test.nzb.gz"
 	//
 	s := &SESSION{
-		proc:                 p, // the parent processor
+		proc:                 p,                                                            // the parent processor
+		mux:                  &loggedrwmutex.LoggedSyncRWMutex{Name: "SESSION-" + nzbName}, // use a logged sync mutex to log locking and unlocking
 		preparationStartTime: time.Now(),
 		providerList:         make([]*Provider, 0, 8), // will be filled later
 		sessId:               p.newssid(),
@@ -407,6 +416,7 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 		nzbHash:              SHA256str(filepath.Base(nzbName)),
 		nzbPath:              filepath.Join(p.nzbDir, nzbName),
 		fileStat:             make(filesStatistic),
+		WorkDividerChan:      make(chan *WrappedItem, cfg.opt.ChanSize),
 	}
 	// add session to processor map
 	p.mux.Lock()
@@ -420,9 +430,7 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	p.sessMap[s.sessId] = s
 	sessId := s.sessId
 	p.mux.Unlock()
-	if cfg.opt.Debug {
-		log.Printf("newSession: created sessId=%d nzbName='%s' nzbPath='%s'", sessId, s.nzbName, s.nzbPath)
-	}
+	dlog(cfg.opt.Debug, "newSession: created sessId=%d nzbName='%s' nzbPath='%s'", sessId, s.nzbName, s.nzbPath)
 	return sessId, s
 } // end func newSession
 
@@ -431,7 +439,7 @@ func (p *PROCESSOR) newssid() uint64 {
 	p.sessIds++
 	newSessId := p.sessIds
 	p.mux.Unlock()
-	log.Printf("PROCESSOR.newssid: %d", newSessId)
+	dlog(cfg.opt.Debug, "PROCESSOR.newssid: %d", newSessId)
 	return newSessId
 } // end func p.newssid
 
@@ -451,9 +459,7 @@ func (s *SESSION) closeSession() {
 	// since processing the watchDir is not working yet this is just a idea for the future
 	// we always have only 1 session running at a time and then quit... stop here!
 
-	if cfg.opt.Debug {
-		log.Printf("closeSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
-	}
+	dlog(cfg.opt.Debug, "closeSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 
 	// close all channels in segmentChansCheck, segmentChansDowns, segmentChansReup
 	// app will panic if anybody still sends which should not be possible
@@ -492,15 +498,13 @@ func (s *SESSION) closeSession() {
 	s.memDL = make(map[string]chan *segmentChanItem)
 	s.memUP = make(map[string]chan *segmentChanItem)
 
-	if cfg.opt.Debug {
-		log.Printf("cleanupSession: closed all segment channels for sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
-	}
+	dlog(cfg.opt.Debug, "cleanupSession: closed all segment channels for sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 
 	s.mux.Lock()      // lock the session for cleanup
 	s.active = false  // set active to false, we are no longer processing
 	s.nzbFile = nil   // reset nzbFile to nil
 	s.preBoot = false // reset preBoot to false
-	log.Printf("session closed: sessId=%d nzbName='%s' nzbPath='%s' runtime=[%v]", s.sessId, s.nzbName, s.nzbPath, time.Since(s.preparationStartTime).Seconds())
+	dlog(cfg.opt.Debug, "session closed: sessId=%d nzbName='%s' nzbPath='%s' runtime=[%v]", s.sessId, s.nzbName, s.nzbPath, time.Since(s.preparationStartTime).Seconds())
 	s.preparationStartTime = time.Time{} // reset preparationStartTime to zero value
 	s.fileStat = make(filesStatistic)    // reset fileStat to empty map
 	s.closed = time.Now()                // set end time to now
@@ -512,7 +516,7 @@ func (s *SESSION) closeSession() {
 // It is called when a session is no longer needed, e.g., after processing is complete.
 func (p *PROCESSOR) removeSession(sessId uint64, s *SESSION) {
 	if s == nil {
-		log.Printf("removeSession: sessId=%d s is nil, nothing to remove", sessId)
+		dlog(cfg.opt.Debug, "removeSession: sessId=%d s is nil, nothing to remove", sessId)
 		return
 	}
 	// threshold reached, we removed the session from the processor map
@@ -526,7 +530,7 @@ func (p *PROCESSOR) removeSession(sessId uint64, s *SESSION) {
 	s.segmentList = nil // reset segmentList
 	s.mux.Unlock()      // unlock the session
 	s = nil             // set session to nil to free memory
-	log.Printf("PROCESSOR.removeSession: sessId=%d", sessId)
+	dlog(cfg.opt.Debug, "PROCESSOR.removeSession: sessId=%d", sessId)
 } // end func p.removeSession
 
 func (p *PROCESSOR) processorThread() {
@@ -538,7 +542,7 @@ forever:
 		p.stop_chan <- stopSignal
 		break forever
 	}
-	log.Printf("Quit PROCESSOR: dir='%s'", p.nzbDir)
+	dlog(always, "Quit PROCESSOR: dir='%s'", p.nzbDir)
 } // end func p.processorThread
 
 func (p *PROCESSOR) refreshDir() {
@@ -567,21 +571,21 @@ func (p *PROCESSOR) refreshDir() {
 			newfiles = append(newfiles, &filename)
 
 			if sessId, _ := p.newSession(filename); err != nil || sessId <= 0 {
-				log.Printf("ERROR refreshDir sessId=%d <= 0? err='%v'", sessId, err)
+				dlog(always, "ERROR refreshDir sessId=%d <= 0? err='%v'", sessId, err)
 			}
 
 		}
 	} // end for file fs
 
-	if len(newfiles) == 0 && cfg.opt.Verbose {
-		log.Printf("refreshDir: no new files found...")
+	if len(newfiles) == 0 {
+		dlog(cfg.opt.Verbose, "refreshDir: no new files found...")
 		return
 	}
 
 	if cfg.opt.Verbose {
-		log.Printf("refreshDir loaded new files: %d dir='%s'", len(newfiles), p.nzbDir)
+		dlog(always, "refreshDir loaded new files: %d dir='%s'", len(newfiles), p.nzbDir)
 		for _, fn := range newfiles {
-			log.Printf("refreshDir: '%s' New: '%s'", p.nzbDir, *fn)
+			dlog(always, "refreshDir: '%s' New: '%s'", p.nzbDir, *fn)
 		}
 	}
 
@@ -589,7 +593,7 @@ func (p *PROCESSOR) refreshDir() {
 
 func (p *PROCESSOR) watchDirThread() {
 	tAchan := time.After(5 * time.Second)
-	log.Printf("Starting watchDir: '%s' first lookup in 5 sec", p.nzbDir)
+	dlog(always, "Starting watchDir: '%s' first lookup in 5 sec", p.nzbDir)
 forever:
 	for {
 		select {
@@ -598,7 +602,7 @@ forever:
 			break forever
 
 		case <-tAchan:
-			//log.Printf("watchDir checking '%s'", p.nzbDir)
+			//dlog( "watchDir checking '%s'", p.nzbDir)
 			p.mux.RLock()
 			if p.refresh > 0 {
 				p.refreshDir()
@@ -611,5 +615,5 @@ forever:
 			p.mux.RUnlock()
 		}
 	} // end for
-	log.Printf("Processor watchDir '%s' quit", p.nzbDir)
+	dlog(always, "Processor watchDir '%s' quit", p.nzbDir)
 } // end func watchDir

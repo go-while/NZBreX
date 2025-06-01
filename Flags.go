@@ -15,6 +15,7 @@ func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
 	// essentials
 	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
+	//flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "/path/to/watch/dir/for/nzbfiles")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
 	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
 	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
@@ -44,19 +45,23 @@ func ParseFlags() {
 	flag.Int64Var(&cfg.opt.PrintStats, "printstats", DefaultPrintStats, "prints stats every N seconds. 0 is spammy and -1 disables output. a very high number will print only once it is finished")
 	flag.BoolVar(&cfg.opt.Print430, "print430", false, "[true|false] prints notice about code 430 article not found")
 	flag.BoolVar(&cfg.opt.Log, "log", false, "[true|false] logs to file (default: false)")
-	flag.BoolVar(&cfg.opt.BUG, "bug", false, "[true|false] full debug (default: false)")
-	flag.BoolVar(&cfg.opt.Debug, "debug", false, "[true|false] part debug (default: false)")
-	flag.BoolVar(&cfg.opt.DebugCache, "debugcache", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugConnPool, "debugconnpool", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugSharedCC, "debugsharedcc", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugWorker, "debugworker", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugSTAT, "debugstat", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugARTICLE, "debugarticle", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugIHAVE, "debugihave", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugPOST, "debugpost", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugCR, "debugcr", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugDR, "debugdr", false, "[true|false] (default: false)")
-	flag.BoolVar(&cfg.opt.DebugUR, "debugur", false, "[true|false] (default: false)")
+	flag.BoolVar(&cfg.opt.LogAppend, "logappend", false, "[true|false] appends to logfile instead of rotating or overwriting old ones (default: false)")
+	flag.StringVar(&cfg.opt.LogDir, "logdir", "logs", "defaults to logs/ in executable dir, an empty string puts logfile into the currentdir of executable")
+	flag.IntVar(&cfg.opt.LogOld, "logold", 0, "rotates log files to .N, 0 disables rotation (default: 0)")
+	flag.BoolVar(&cfg.opt.BUG, "debugBUG", false, "[true|false] bug is an extra flag for some very, very spammy code lines (default: false)")
+	flag.BoolVar(&cfg.opt.Debug, "debug", false, "[true|false] general debug -does not print everything- (default: false)")
+	flag.BoolVar(&cfg.opt.DebugCache, "debugcache", false, "[true|false] debug Cache (default: false)")
+	flag.BoolVar(&cfg.opt.DebugConnPool, "debugconnpool", false, "[true|false] debug ConnPool (default: false)")
+	flag.BoolVar(&cfg.opt.DebugSharedCC, "debugsharedcc", false, "[true|false] debug sharedConn Chan (default: false)")
+	flag.BoolVar(&cfg.opt.DebugWorker, "debugworker", false, "[true|false] debug WORKER (default: false)")
+	flag.BoolVar(&cfg.opt.DebugMemlim, "debugmemlim", false, "[true|false] debug MEMLIMIT (default: false)")
+	flag.BoolVar(&cfg.opt.DebugSTAT, "debugstat", false, "[true|false] debug STAT (default: false)")
+	flag.BoolVar(&cfg.opt.DebugARTICLE, "debugarticle", false, "[true|false] debug ARTICLE (default: false)")
+	flag.BoolVar(&cfg.opt.DebugIHAVE, "debugihave", false, "[true|false] debug IHAVE (default: false)")
+	flag.BoolVar(&cfg.opt.DebugPOST, "debugpost", false, "[true|false] debug POST (default: false)")
+	flag.BoolVar(&cfg.opt.DebugCR, "debugcr", false, "[true|false] debug check routine (default: false)")
+	flag.BoolVar(&cfg.opt.DebugDR, "debugdr", false, "[true|false] debug downs routine (default: false)")
+	flag.BoolVar(&cfg.opt.DebugUR, "debugur", false, "[true|false] debug reups routine (default: false)")
 	// rate limiter
 	flag.IntVar(&cfg.opt.SloMoC, "slomoc", 0, "SloMo'C' limiter sleeps N milliseconds before checking")
 	flag.IntVar(&cfg.opt.SloMoD, "slomod", 0, "SloMo'D' limiter sleeps N milliseconds before downloading")
@@ -79,13 +84,18 @@ func ParseFlags() {
 		RunProf()
 	}
 
-	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
-		log.Printf("ERROR: you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
+	if cfg.opt.LogAppend && cfg.opt.LogOld > 0 {
+		dlog(always, "ERROR : you can not use -logappend with -logold > 0 because it will not rotate logs!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
-		log.Printf("ERROR: you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
+		dlog(always, "ERROR : you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
+		os.Exit(1)
+	}
+
+	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
+		dlog(always, "ERROR : you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
 		os.Exit(1)
 	}
 
@@ -93,6 +103,10 @@ func ParseFlags() {
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 2 {
 			cfg.opt.YencTest = 2
 		}
+	}
+
+	if cfg.opt.LogOld < 0 {
+		cfg.opt.LogOld = 0 // disable log rotation
 	}
 
 	// setup debug modes
@@ -120,7 +134,7 @@ func ParseFlags() {
 			cfg.opt.DebugCache)
 
 		if cache == nil {
-			log.Printf("ERROR Cache failed... is nil!")
+			dlog(always, "ERROR Cache failed... is nil!")
 			os.Exit(1)
 		}
 		if !cache.MkSubDir("test") {
@@ -130,13 +144,12 @@ func ParseFlags() {
 
 	if headers, err := LoadHeadersFromFile(cfg.opt.CleanHeadersFile); headers != nil {
 		cleanHeader = headers
-		log.Printf("Loaded %d headers from '%s' ==> cleanHeader='%#v'", len(headers), cfg.opt.CleanHeadersFile, cleanHeader)
+		dlog(always, "Loaded %d headers from '%s' ==> cleanHeader='%#v'", len(headers), cfg.opt.CleanHeadersFile, cleanHeader)
 	} else if err != nil {
-		log.Printf("ERROR loading headers failed file='%s' err='%v'", cfg.opt.CleanHeadersFile, err)
+		dlog(always, "ERROR loading headers failed file='%s' err='%v'", cfg.opt.CleanHeadersFile, err)
 		os.Exit(1)
 	}
 
-	if cfg.opt.Verbose {
-		log.Printf("Settings: '%#v'", *cfg.opt)
-	}
+	dlog(cfg.opt.Verbose, "Settings: '%#v'", *cfg.opt)
+
 } // end func ParseFlags

@@ -3,10 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-while/yenc" // fork of chrisfarms with little mods
 )
@@ -27,7 +27,7 @@ type Cache struct {
 
 func NewCache(cachedir string, crw int, checkOnly bool, maxartsize int, yenc_write bool, debug bool) (c *Cache) {
 	if cachedir == "" {
-		log.Printf("Error NewCache: cachedir is empty!")
+		dlog(always, "ERROR  NewCache: cachedir is empty!")
 		return nil
 	}
 	c = &Cache{
@@ -39,7 +39,7 @@ func NewCache(cachedir string, crw int, checkOnly bool, maxartsize int, yenc_wri
 		debug:      debug,
 	}
 	if !Mkdir(c.cachedir) {
-		log.Printf("ERROR creating Cachedir: '%s/'", c.cachedir)
+		dlog(always, "ERROR  creating Cachedir: '%s/'", c.cachedir)
 		return nil
 	}
 	c.cache_check_chan = make(chan *segmentChanItem, c.crw)
@@ -61,24 +61,23 @@ func NewCache(cachedir string, crw int, checkOnly bool, maxartsize int, yenc_wri
 } // end func NewCache
 
 func (c *Cache) Add2Cache(item *segmentChanItem) {
+	if !cacheON {
+		return
+	}
 	c.cache_writer_chan <- item
 } // end func c.Add2Cache
 
 func (c *Cache) MkSubDir(nzbhashname string) (exists bool) {
 	subdir := filepath.Join(c.cachedir, nzbhashname)
 	if DirExists(subdir) {
-		if c.debug {
-			log.Printf("Cache SubDir exists: '%s'", subdir)
-		}
+		dlog(c.debug, "Cache SubDir exists: '%s'", subdir)
 		return true
 	}
 	if !Mkdir(subdir) {
-		log.Printf("ERROR cache.MkSubDir: '%s/%s'", c.cachedir, nzbhashname)
+		dlog(always, "ERROR  cache.MkSubDir: '%s/%s'", c.cachedir, nzbhashname)
 		return false
 	}
-	if c.debug {
-		log.Printf("Cache SubDir created: '%s'", subdir)
-	}
+	dlog(c.debug, "Cache SubDir created: '%s'", subdir)
 	return true
 } // func c.MkSubDir
 
@@ -90,7 +89,7 @@ func (c *Cache) CheckCache(item *segmentChanItem) (exists bool) {
 
 func (c *Cache) ReadCache(item *segmentChanItem) (n int) {
 	item.mux.RLock()
-	if len(item.lines) > 0 {
+	if len(item.article) > 0 {
 		item.mux.RUnlock()
 		return item.size
 	}
@@ -106,12 +105,7 @@ func (c *Cache) ReadCache(item *segmentChanItem) (n int) {
 		if item.size == 0 {
 			item.size = n
 		}
-		if item.flaginDL {
-			item.flaginDL = false
-		}
-		if item.flaginDLMEM {
-			item.flaginDLMEM = false
-		}
+		item.flaginDL = false
 		item.mux.Unlock()
 	}
 	return
@@ -126,9 +120,7 @@ func (c *Cache) GoCacheChecker(cid int) {
 		}
 		filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
 		exists := FileExists(filename)
-		if c.debug {
-			log.Printf("GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
-		}
+		dlog(c.debug, "GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
 		if exists {
 			item.mux.Lock()
 			item.cached = true
@@ -147,9 +139,7 @@ func (c *Cache) GoCacheReader(cid int) {
 			return
 		}
 		size := c.CacheReader(item)
-		if c.debug {
-			log.Printf("GoCacheReader size=%d id='%s'", size, item.hashedId)
-		}
+		dlog(c.debug, "GoCacheReader size=%d id='%s'", size, item.hashedId)
 		//read_bytes += uint64(size)
 		item.readChan <- size // notify
 	}
@@ -190,16 +180,14 @@ func (c *Cache) CacheReader(item *segmentChanItem) (read_bytes int) {
 	filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
 	if fileobj, err := os.ReadFile(filename); err != nil {
 		// read from diskcache failed
-		if c.debug {
-			log.Printf("CacheReader 404 os.ReadFile err='%v'", err)
-		}
+		dlog(c.debug, "CacheReader 404 os.ReadFile err='%v'", err)
 	} else {
 		read_bytes = len(fileobj)
 		// TODO: store as wireformat \r\n needs changes as sendDotLines won't work
 		if read_bytes > 0 {
 			// parses the byte object from file to []string
 			item.mux.Lock()
-			item.lines = strings.Split(string(fileobj)[:len(fileobj)-1], "\n")
+			item.article = strings.Split(string(fileobj)[:len(fileobj)-1], "\n")
 			item.cached = true
 			if item.flaginDL {
 				item.flaginDL = false
@@ -211,33 +199,38 @@ func (c *Cache) CacheReader(item *segmentChanItem) (read_bytes int) {
 } // end func c.CacheReader
 
 func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
-
-	if len(item.lines) == 0 {
+	start := time.Now()
+	item.mux.Lock()
+	if len(item.article) == 0 {
+		dlog(always, "ERROR  CacheWriter: item.article is empty seg.Id='%s'", item.segment.Id)
+		item.mux.Unlock()
 		return 0
 	}
 
-	item.mux.Lock()
 	if item.hashedId == "" {
 		item.hashedId = SHA256str("<" + item.segment.Id + ">")
 	}
 	item.mux.Unlock()
 
-	filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
-
-	if FileExists(filename) {
+	cachedir := filepath.Join(c.cachedir, *item.nzbhashname)
+	filename := filepath.Join(cachedir, item.hashedId+".art")
+	if !DirExists(cachedir) && !Mkdir(cachedir) {
+		dlog(always, "ERROR  CacheWriter Mkdir failed dir='%s'", cachedir)
+		return 0
+	} else if FileExists(filename) {
 		item.mux.Lock()
 		item.cached = true
 		item.mux.Unlock()
-		return
+		return 0
 	}
 
 	filename_tmp := filename + ".tmp"
 	if file, err := os.OpenFile(filename_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		defer file.Close()
 		datawriter := bufio.NewWriterSize(file, DefaultCacheWriteBuffer)
-		for _, line := range item.lines {
+		for _, line := range item.article {
 			if n, err := datawriter.WriteString(line + LF); err != nil {
-				log.Printf("ERROR GoCacheWriter datawriter.Write err='%v'", err)
+				dlog(always, "ERROR  GoCacheWriter datawriter.Write err='%v'", err)
 				return 0
 			} else {
 				wrote_bytes += n
@@ -245,28 +238,31 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 		}
 
 		if err := datawriter.Flush(); err != nil {
-			log.Printf("ERROR CacheWriter datawriter.Flush err='%v'", err)
+			dlog(always, "ERROR  CacheWriter datawriter.Flush err='%v'", err)
 			return 0
 		}
 
 		file.Close()
 		if err := os.Rename(filename_tmp, filename); err != nil {
-			log.Printf("ERROR GoCacheWriter move .tmp failed err='%v'", err)
+			dlog(always, "ERROR  GoCacheWriter move .tmp failed err='%v'", err)
 			return 0
 		}
 	} // end OpenFile
 
 	item.mux.Lock()
 	item.cached = true
-	item.flaginDLMEM = false
 	item.flaginDL = false
 	if GCounter.GetValue("postProviders") == 0 || cfg.opt.UploadLater {
-		item.lines = []string{} // free memory
+		item.article = []string{} // free memory
 	}
 	item.mux.Unlock()
 
 	if c.debug {
-		log.Printf("CacheWrote seg.Id='%s' h_Id='%s' => f='%s' (b=%d)", item.segment.Id, item.hashedId, filename, wrote_bytes)
+		writeSpeedinMegaBytes := -0.1
+		if wrote_bytes > 0 {
+			writeSpeedinMegaBytes = float64(wrote_bytes) / 1024.0 / 1024.0 / float64(time.Since(start).Milliseconds()) * 1000
+		}
+		dlog(always, "CacheWrote seg.Id='%s' h_Id='%s' => f='%s' (b=%d) took=(%d ms) speed=(%.2f MByte/s)", item.segment.Id, item.hashedId, filename, wrote_bytes, time.Since(start).Milliseconds(), writeSpeedinMegaBytes)
 	}
 	return
 } // end func c.CacheWriter
@@ -283,11 +279,11 @@ func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp st
 
 func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
 	if c.yenc_writer_chan == nil {
-		log.Printf("ERROR cache.WriteYenc yenc_writer_chan is nil")
+		dlog(always, "ERROR  cache.WriteYenc yenc_writer_chan is nil")
 		return
 	}
 	if len(yPart.Body) == 0 {
-		log.Printf("Error WriteYenc: empty Body seg.Id='%s'", item.segment.Id)
+		dlog(always, "ERROR  WriteYenc: empty Body seg.Id='%s'", item.segment.Id)
 		return
 	}
 	GCounter.Incr("yencQueueCnt")
@@ -322,15 +318,13 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 		return 0
 	}
 
-	if c.debug {
-		log.Printf("Writing yenc part: '%s'", fp_tmp)
-	}
+	dlog(c.debug, "Writing yenc part: '%s'", fp_tmp)
 	//doMemReturn := true
 	if file, err := os.OpenFile(fp_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		defer file.Close()
 		datawriter := bufio.NewWriterSize(file, DefaultYencWriteBuffer)
 		if n, err := datawriter.Write(yitem.yPart.Body); err != nil {
-			log.Printf("ERROR YencWriter datawriter.Write err='%v'", err)
+			dlog(always, "ERROR  YencWriter datawriter.Write err='%v'", err)
 			c.resetYencFlagsOnErr(yitem.item)
 			return 0
 		} else {
@@ -338,7 +332,7 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 		}
 
 		if err := datawriter.Flush(); err != nil {
-			log.Printf("ERROR YencWriter datawriter.Flush err='%v'", err)
+			dlog(always, "ERROR  YencWriter datawriter.Flush err='%v'", err)
 			c.resetYencFlagsOnErr(yitem.item)
 			return 0
 		}
@@ -346,7 +340,7 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 		file.Close()
 
 		if err := os.Rename(fp_tmp, fp); err != nil {
-			log.Printf("ERROR YencWriter move .tmp failed err='%v'", err)
+			dlog(always, "ERROR  YencWriter move .tmp failed err='%v'", err)
 			c.resetYencFlagsOnErr(yitem.item)
 			return 0
 		}
