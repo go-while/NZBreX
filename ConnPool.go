@@ -505,9 +505,13 @@ func (c *ConnPool) WatchOpenConnsThread(workerWGconnEstablish *sync.WaitGroup) {
 	tempItems := []*ConnItem{} // temporary slice to hold ConnItems
 forever:
 	for {
-		time.Sleep(time.Millisecond * 5000)                // check every N milliseconds
-		c.provider.mux.PrintStatus(cfg.opt.Debug)          // prints mutex status for the provider
-		c.provider.ConnPool.mux.PrintStatus(cfg.opt.Debug) // prints mutex status for the providers connpool
+		time.Sleep(time.Millisecond * 5000) // check every N milliseconds
+		c.provider.mux.Lock()
+		if c.provider.ConnPool != nil {
+			c.provider.mux.PrintStatus(cfg.opt.Debug)          // prints mutex status for the provider
+			c.provider.ConnPool.mux.PrintStatus(cfg.opt.Debug) // prints mutex status for the providers connpool
+		}
+		c.provider.mux.Unlock()
 		//globalmux.PrintStatus(cfg.opt.Debug)               // prints global mutex status for the whole app
 		//memlim.mux.PrintStatus(cfg.opt.Debug)              // prints memory limit mutex status
 		// capture this moment, might by stale instantly
