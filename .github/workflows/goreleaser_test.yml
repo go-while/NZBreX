@@ -1,4 +1,4 @@
-name: "Self-Hosted GoReleaser"
+name: "TEST Self-Hosted GoReleaser"
 
 on:
   push:
@@ -6,8 +6,6 @@ on:
       - 'v0.0.2-SNAPSHOT-test-1748786444'
     tags:
       - "test*"
-  release:
-    types: [published]
   workflow_dispatch:
   repository_dispatch:
   pull_request:
@@ -21,7 +19,7 @@ permissions:
 
 jobs:
   goreleaser:
-    name: "GoReleaser Test Build"
+    name: "TEST GoReleaser"
     runs-on: [self-hosted, ubu2204-gor]
 #    env:
 #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
