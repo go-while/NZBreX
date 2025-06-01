@@ -432,6 +432,12 @@ getConnFromPool:
 	//return nil, fmt.Errorf("error in ConnPool GetConn: uncatched return! wid=%d", wid)
 } // end func GetConn
 
+// ExtendConn extends the read deadline of a connection.
+func (c *ConnPool) ExtendConn(connitem *ConnItem) {
+	connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline))
+}
+
+// newconnid generates a new unique connection id for the ConnItem.
 func (c *ConnPool) newconnid() (newid uint64) {
 	c.mux.Lock()
 	c.nextconnId++
@@ -440,6 +446,9 @@ func (c *ConnPool) newconnid() (newid uint64) {
 	return
 }
 
+// ParkConn parks a connection in the pool.
+// It will set the parktime to the current time and increase the parkedCnt.
+// If the pool is full, it will close the connection instead which is most likely a bug in the code.
 func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 
 	connitem.parktime = time.Now()
@@ -461,6 +470,11 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 	}
 } // end func ParkConn
 
+// CloseConn closes a connection and removes it from the pool.
+// If a sharedConnChan is supplied, it will send a nil to the channel to signal that the connection was closed.
+// This is used to signal the routines to get a new connection from the pool.
+// If the connection is nil, it will not close it and just remove it from the pool.
+// If the connection is already closed, it will not close it again.
 func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) {
 
 	if cfg.opt.DebugConnPool {
@@ -481,6 +495,9 @@ func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) 
 	}
 } // end func CloseConn
 
+// GetStats returns the current stats of the connection pool.
+// It returns the number of open connections and the number of idle connections in the pool.
+// This is used to monitor the connection pool and to see if it is working as expected.
 func (c *ConnPool) GetStats() (openconns int, idle int) {
 	c.mux.RLock()
 	openconns, idle = c.openConns, len(c.pool)
@@ -488,9 +505,13 @@ func (c *ConnPool) GetStats() (openconns int, idle int) {
 	return
 }
 
+// WatchOpenConnsThread is a thread which watches the open connections and closes them if they are idle for too long.
+// It will close the connection if it is idle for more than DefaultConnCloser.
+// It will also try to open new connections if there are no idle connections in the pool.
+// This is used to keep the connection pool healthy and to avoid idle connections which are not used.
+// It will run until the stop_chan is closed or the provider is killed.
+// It will also print the status of the mutexes for debugging purposes.
 func (c *ConnPool) WatchOpenConnsThread(workerWGconnEstablish *sync.WaitGroup) {
-	// this is a thread which watches the open connections and closes them if they are idle for too long
-	// it will close the connection if it is idle for more than DefaultConnCloser
 	workerWGconnEstablish.Wait()
 	dlog(cfg.opt.DebugConnPool, "WatchOpenConnsThread started for '%s'", c.provider.Name)
 	defer dlog(cfg.opt.DebugConnPool, "WatchOpenConnsThread for '%s' defer returned", c.provider.Name)
@@ -583,6 +604,7 @@ forever:
 	} // end forever
 } // end func WatchOpenConnsThread
 
+// isNetConnClosedErr checks if the error is a network connection closed error.
 func isNetConnClosedErr(err error) bool {
 	switch {
 	case
@@ -675,6 +697,12 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	return
 } // end func SharedConnGet
 
+// SharedConnReturn puts a connection back into the sharedCC channel.
+// This is used to share the connection with other goroutines.
+// It does not close the connection, just parks it back into the channel.
+// This function is used to return a connection to the shared channel for reuse.
+// It is used by the goroutines which are working on the same item.
+// It is important to return the connection to the shared channel so that other goroutines can use it.
 func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
 	sharedCC <- connitem // put the connection back into the channel to share it with other goroutines
 } // end func SharedConnReturn
@@ -684,9 +712,7 @@ func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
 // It does not close the connection, just parks it back into the pool.
 // This function is used to return a connection to the pool for reuse.
 func ReturnSharedConnToPool(wid int, sharedCC chan *ConnItem, provider *Provider, connitem *ConnItem) {
-	if cfg.opt.DebugConnPool {
-		dlog(cfg.opt.DebugConnPool, "ReturnSharedConnToPool: returning connitem='%#v' to pool '%s'", connitem, provider.Name)
-	}
+	dlog(cfg.opt.DebugConnPool, "ReturnSharedConnToPool: returning connitem='%#v' to pool '%s'", connitem, provider.Name)
 	if connitem == nil || connitem.conn == nil {
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close the connection to reduce the counter of open connections
 		dlog(cfg.opt.DebugConnPool, "WARN ReturnSharedConnToPool: connitem is nil or conn.conn is nil! provider='%s'", provider.Name)
@@ -698,9 +724,7 @@ func ReturnSharedConnToPool(wid int, sharedCC chan *ConnItem, provider *Provider
 // ReturnSharedConnToPoolAndClose returns a shared connection to the pool and closes it.
 // This is used when the connection is no longer needed or has expired.
 func ReturnSharedConnToPoolAndClose(sharedCC chan *ConnItem, provider *Provider, connitem *ConnItem) {
-	if cfg.opt.DebugConnPool {
-		dlog(cfg.opt.DebugConnPool, "ReturnSharedConnToPoolAndClose: returning connitem='%#v' to pool '%s'", connitem, provider.Name)
-	}
+	dlog(cfg.opt.DebugConnPool, "ReturnSharedConnToPoolAndClose: returning connitem='%#v' to pool '%s'", connitem, provider.Name)
 	if connitem == nil || connitem.conn == nil {
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close the connection to reduce the counter of open connections
 		dlog(cfg.opt.DebugConnPool, "WARN ReturnSharedConnToPoolAndClose: connitem is nil or conn.conn is nil! provider='%s'", provider.Name)
