@@ -96,7 +96,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnEstabli
 
 					start := time.Now()
 					for _, item := range s.segmentList {
-						segmentChanCheck <- item
+						segmentChanCheck <- item // sllowed to block inside feeder routine
 					}
 					for {
 						time.Sleep(time.Second) // wait for check routine to empty out the chan
@@ -226,6 +226,8 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
 				}
 			case true:
+				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
+				os.Exit(1)
 				item.mux.Lock()
 				item.flaginDL = true
 
@@ -237,7 +239,8 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				//}
 				item.pushedDL = true // mark as pushed to download queue ByPassSTAT
 				item.mux.Unlock()
-				s.segmentChansDowns[provider.Group] <- item
+				! TODO FIXME : use s.WorkDividerChan ?
+				s.segmentChansDowns[provider.Group] <- item // bypass STAT: GoCheckRoutine push to download queue
 			}
 			continue forGoCheckRoutine
 		} // end forGoCheckRoutine
@@ -392,12 +395,12 @@ providerDl:
 			}
 		} else if !cfg.opt.ByPassSTAT {
 			if testing {
-				s.segmentChansDowns[s.providerList[pid].Group] <- item
+				s.segmentChansDowns[s.providerList[pid].Group] <- item // testing blocking
 				pushed = true
 				dst = "segDown"
 			} else {
 				select {
-				case s.segmentChansDowns[s.providerList[pid].Group] <- item:
+				case s.segmentChansDowns[s.providerList[pid].Group] <- item: // testing non-blocking
 					pushed = true
 					dst = "segDown"
 				/* TODO FIXME REVIEW ! TO BLOCK OR NOT TO BLOCK*/
@@ -474,11 +477,11 @@ providerUp:
 
 		/* TODO FIXME REVIEW ! TO BLOCK OR NOT TO BLOCK*/
 		if testing { // blocking
-			s.segmentChansReups[s.providerList[pid].Group] <- item
+			s.segmentChansReups[s.providerList[pid].Group] <- item // testing blocking
 			pushed = true
 		} else {
 			select { // non-blocking
-			case s.segmentChansReups[s.providerList[pid].Group] <- item:
+			case s.segmentChansReups[s.providerList[pid].Group] <- item: // testing non-blocking
 				// pass
 				pushed = true
 			default:
@@ -733,10 +736,17 @@ forever:
 				for {
 					select {
 					case item := <-s.memDL[provider.Group]: // out here
+						// pass
 						item.mux.Lock()
 						item.flaginDLMEM = false
 						item.mux.Unlock()
-						s.segmentChansDowns[provider.Group] <- item // in there
+						select {
+						case s.segmentChansDowns[provider.Group] <- item: // in there
+							// pass
+						default:
+							// chan full, break the loop
+							break feedDL
+						}
 					default:
 						// chan ran empty
 						break feedDL
@@ -757,8 +767,15 @@ forever:
 			feedUP:
 				for {
 					select {
-					case item := <-s.memUP[provider.Group]:
-						s.segmentChansReups[provider.Group] <- item
+					case item := <-s.memUP[provider.Group]: // out here
+						// pass
+						select {
+						case s.segmentChansReups[provider.Group] <- item: // in there
+							// pass
+						default:
+							// chan is full, break the loop
+						}
+
 					default:
 						// chan ran empty
 						break feedUP
