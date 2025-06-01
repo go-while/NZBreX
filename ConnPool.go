@@ -42,10 +42,10 @@ const (
 )
 
 var (
-	//noDeadLine   time.Time                 // used as zero value!
-	//readDeadConn = time.Unix(1, 0)         // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
-	ConnPools = make(map[int]*ConnPool) // used in KillConnPool
-	PoolsLock sync.RWMutex
+	noDeadLine   time.Time                 // used as zero value!
+	readDeadConn = time.Unix(1, 0)         // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
+	ConnPools    = make(map[int]*ConnPool) // used in KillConnPool
+	PoolsLock    sync.RWMutex
 )
 
 // holds an active connection to share around
@@ -353,30 +353,32 @@ getConnFromPool:
 				continue getConnFromPool // until chan rans empty
 			}
 			if connitem.parktime.Add(DefaultConnExpire).Before(time.Now()) {
-				/*
-						buf := make([]byte, 1)
-						// some provider have short timeout values.
-						// try reading from conn. check takes some µs
-						connitem.conn.SetReadDeadline(readDeadConn)
-						if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
-							dlog( "INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", c.provider.Name, readBytes, rerr)
-							go c.CloseConn(connitem, nil)
-							continue getConnFromPool // until chan rans empty
-						}
-						connitem.conn.SetReadDeadline(noDeadLine)
-						buf = nil
-					dlog( "INFO ConnPool GetConn: got long idle=(%d ms) '%s', passed Read test", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
-				*/
-				dlog(cfg.opt.DebugConnPool, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', close and get NewConn", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
-				c.CloseConn(connitem, nil)
-				connitem, err, _ = c.NewConn()
-				if connitem == nil || err != nil {
-					continue getConnFromPool
+
+				buf := make([]byte, 1)
+				// some provider have short timeout values.
+				// try reading from conn. check takes some µs
+				connitem.conn.SetReadDeadline(readDeadConn)
+				if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
+					dlog("INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", c.provider.Name, readBytes, rerr)
+					c.CloseConn(connitem, nil)
+					continue getConnFromPool // until chan rans empty
 				}
+				c.ExtendConn(connitem) // long idle
+				buf = nil
+				dlog(cfg.opt.DebugConnPool, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', passed Read test", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
+				/*
+					dlog(cfg.opt.DebugConnPool, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', close and get NewConn", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
+					c.CloseConn(connitem, nil)
+					connitem, err, _ = c.NewConn()
+					if connitem == nil || err != nil {
+						continue getConnFromPool
+					}
+				*/
+				c.ExtendConn(connitem) // extend the read deadline of the new connection
 			}
 			// we have a valid connection from the pool which is no longer parked
-			connitem.parktime = time.Time{}                                        // set parktime to zero value
-			connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline)) // set read deadline to DefaultConnExpire
+			connitem.parktime = time.Time{} // set parktime to zero value
+			c.ExtendConn(connitem)
 
 			GCounter.Incr("TOTAL_GetConns")
 			dlog(cfg.opt.DebugConnPool, "GetConn got one from pool '%s' took='%v'", c.provider.Name, time.Since(start))
@@ -424,6 +426,7 @@ getConnFromPool:
 				time.Sleep(time.Millisecond * 10) // wait a bit before retrying
 				continue getConnFromPool          // until chan rans empty
 			}
+			c.ExtendConn(newconnitem)
 			// we have a new connection!
 			return newconnitem, aerr
 		} // end select
@@ -434,7 +437,7 @@ getConnFromPool:
 
 // ExtendConn extends the read deadline of a connection.
 func (c *ConnPool) ExtendConn(connitem *ConnItem) {
-	connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline))
+	connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline)) // ExtendConn()
 }
 
 // newconnid generates a new unique connection id for the ConnItem.
@@ -453,6 +456,7 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 
 	connitem.parktime = time.Now()
 	connitem.parkedCnt += 1
+	c.ExtendConn(connitem) // ParkConn
 	select {
 	case c.pool <- connitem:
 		// parked in pool
@@ -460,7 +464,7 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 		GCounter.Incr("TOTAL_ParkedConns")
 		if cfg.opt.BUG && cfg.opt.DebugConnPool {
 			c.mux.RLock()
-			dlog(cfg.opt.DebugConnPool, "ParkedConn connid=%d (wid=%d) '%s' inPool=%d cap=%d openConns=%d src='%s'", connitem.connid, wid, c.provider.Name, len(c.pool), cap(c.pool), c.openConns, src)
+			dlog(always, "ParkedConn connid=%d (wid=%d) '%s' inPool=%d cap=%d openConns=%d src='%s'", connitem.connid, wid, c.provider.Name, len(c.pool), cap(c.pool), c.openConns, src)
 			c.mux.RUnlock()
 		}
 	default:
@@ -679,6 +683,7 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 		if cfg.opt.BUG {
 			dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
 		}
+		c.ExtendConn(connitem)
 		return aconnitem, nil
 	}
 	//provider.ConnPool.CloseConn(aconnitem, sharedCC) // close the nil connection item to reduce counter if needed and put nil back into sharedCC
@@ -693,7 +698,7 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 		return
 	}
 	connitem = newconnitem // use the new connection item
-
+	c.ExtendConn(connitem)
 	return
 } // end func SharedConnGet
 
@@ -704,7 +709,8 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 // It is used by the goroutines which are working on the same item.
 // It is important to return the connection to the shared channel so that other goroutines can use it.
 func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
-	sharedCC <- connitem // put the connection back into the channel to share it with other goroutines
+	c.ExtendConn(connitem) // SharedConnReturn
+	sharedCC <- connitem   // put the connection back into the channel to share it with other goroutines
 } // end func SharedConnReturn
 
 // ReturnSharedConnToPool returns a shared connection to the pool.
