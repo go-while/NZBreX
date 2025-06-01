@@ -12,19 +12,34 @@ const UseSharedCC = false // temporary devel flag
 const always = true
 
 const (
-	DOT                           = "."
-	CR                            = "\r"
-	LF                            = "\n"
-	CRLF                          = CR + LF
-	DefaultCacheRW                = 8
-	DefaultChanSize               = 1000
-	DefaultPrintStats       int64 = 5
-	DefaultCacheWriteBuffer       = 256 * 1024
-	DefaultYencWriteBuffer        = 256 * 1024
-	DefaultMaxArticleSize         = 1 * 1024 * 1024
-	DefaultConnectTimeout         = 9 * time.Second
-	DefaultConnectErrSleep        = 9 * time.Second
-	DefaultRequeueDelay           = 1 * time.Second
+	DOT  = "."
+	CR   = "\r"
+	LF   = "\n"
+	CRLF = CR + LF
+	// DefaultCacheRW defines the number of goroutines for cache reader/writer
+	DefaultCacheRW = 8
+
+	// DefaultChanSize defines the size (cap) of the channels for check, download, upload
+	DefaultChanSize = 1000
+
+	// DefaultPrintStats defines the interval in seconds for printing statistics
+	// 0 = spammy output, -1 = no output, >0 = print every N seconds
+	DefaultPrintStats int64 = 5
+
+	// DefaultCacheWriteBuffer defines the size of the write buffer for cache files
+	DefaultCacheWriteBuffer = 32 * 1024
+	// DefaultYencWriteBuffer defines the size of the write buffer for yenc files
+	DefaultYencWriteBuffer = 32 * 1024
+	// DefaultMaxArticleSize defines the maximum size of an article in bytes
+	// if an article is larger than this, it will be skipped
+	DefaultMaxArticleSize = 1 * 1024 * 1024
+
+	// DefaultConnectTimeout defines the timeout for connecting to a server
+	DefaultConnectTimeout = 9 * time.Second
+	// DefaultConnectErrSleep defines the time to wait before retrying a connection after an error
+	DefaultConnectErrSleep = 9 * time.Second
+	// DefaultRequeueDelay defines the delay before requeuing an item in the segment channel
+	DefaultRequeueDelay = 9 * time.Second
 )
 
 type Config struct {
