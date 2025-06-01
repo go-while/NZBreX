@@ -20,7 +20,7 @@ builds:
 
   - id: windows
     main: .
-    binary: NZBreX
+    binary: NZBreX.exe
     goos:
       - windows
     goarch:
@@ -36,7 +36,7 @@ builds:
 archives:
   - id: linux
     ids: [linux]
-    format: tar.gz
+    formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE*
@@ -45,7 +45,7 @@ archives:
 
   - id: windows
     ids: [windows]
-    format: zip
+    formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE*
