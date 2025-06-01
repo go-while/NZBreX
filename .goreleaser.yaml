@@ -1,16 +1,10 @@
-version: 2
-
-project_name: NZBreX
-dist: dist
-
 builds:
-  - id: default
+  - id: linux
     main: .
     binary: NZBreX
     goos:
       - linux
       - darwin
-      - windows
       - freebsd
       - openbsd
       - netbsd
@@ -20,44 +14,40 @@ builds:
       - 386
       - arm
     ldflags:
-      #- "-s -w -X main.appVersion={{.Version}} -X main.commit={{.ShortCommit}} -X main.date={{.Date}}"
+      - "-s -w -X main.appVersion={{.Version}}"
+    env:
+      - CGO_ENABLED=0
+
+  - id: windows
+    main: .
+    binary: NZBreX
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - 386
+      - arm
+    ldflags:
       - "-s -w -X main.appVersion={{.Version}}"
     env:
       - CGO_ENABLED=0
 
 archives:
-  - id: default
+  - id: linux
+    ids: [linux]
+    format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE*
       - README*
       - "{{ .Binary }}"
 
-checksum:
-  name_template: "checksums.txt"
-
-nfpms:
-  - id: deb
-    formats: [deb]
-    vendor: NZBreX
-    maintainer: "NZBreX <nzbrex@usenet-server.com>"
-    description: "NZBreX - a cmd line tool to re-upload articles missing from providers"
-    homepage: "https://github.com/go-while/NZBreX"
-    license: "MIT"
-    bindir: /usr/bin
-    file_name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}.deb
-
-release:
-  github:
-    owner: go-while
-    name: NZBreX
-  draft: false
-  prerelease: auto
-
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-  use: github
+  - id: windows
+    ids: [windows]
+    format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+      - "{{ .Binary }}"
