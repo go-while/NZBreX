@@ -17,16 +17,15 @@ upload_with_retry() {
   while [ $attempt -le $max_attempts ]; do
     test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
     size=$(du -b $file|cut -f1)
-    human=$(du -h $file)
+    human=$(du -h $file|cut -f1)
     if curl --silent -f -F "file=@$file" \
          -H "X-Git-Repo: $GITHUB_REPOSITORY" \
          -H "X-Git-Ref: $GITHUB_REF_NAME" \
          -H "X-Git-SHA7: $GITHUB_SHA7" \
          -H "X-Git-Comp: $COMPILER" \
-         -H "X-Git-MATRIX: $MATRIX" \
          -H "X-Auth-Token: $BUILD_TEST_UPLOAD_TOKEN" \
          $GARUS_ROUTE; then
-      echo "Upload succeeded for $file size=$size [$human]"
+      echo "Upload succeeded for $file bytes=$size [$human]"
       return 0
     else
       echo "Upload failed for $file. Retrying in $delay seconds..."
@@ -38,7 +37,7 @@ upload_with_retry() {
   return 1
 }
 
-for file in dist/*.zip dist/*.exe dist/*.deb; do
+for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz; do
   [ -e "$file" ] || continue
   for algo in 256 512; do
     sha="sha${algo}sum"
