@@ -35,7 +35,7 @@ The workflow also cross-compiles pure Go executables for:
 ### 3. 'GoReleaser' Workflow
 
 See:
-- [`../.github/workflows/.goreleaser_test_.yml`](../.github/workflows/.goreleaser_test_.yml)
+- [`../.github/workflows/.goreleaser_test.yml`](../.github/workflows/.goreleaser_test.yml)
 - [`../.goreleaser.yaml`](../.goreleaser.yaml)
 
 GoReleaser compiles all pure Go executables on a single self-hosted machine.
