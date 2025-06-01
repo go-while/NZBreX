@@ -39,6 +39,7 @@ build/
 test/
 nzbs/tmp*
 nzbs/test*
+provider.json
 
 # github codespace
 oryxBuildBinary
