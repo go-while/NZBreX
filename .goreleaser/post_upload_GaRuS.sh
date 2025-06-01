@@ -37,10 +37,12 @@ upload_with_retry() {
   return 1
 }
 
+ls -lha .
 ls -lha dist/
 for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz dist/checksums.*; do
   [ -e "$file" ] || continue
   for algo in 256 512; do
+    [ "$file" = "checksums.txt" ] && continue
     sha="sha${algo}sum"
     $sha "$file" > "$file.$sha"
     echo -e "\n$file.$sha"
@@ -50,7 +52,7 @@ for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz 
   upload_with_retry "$file"
 done
 
-DIST="dist.$(date +%s).$(head -1 /dev/urandom |hexdump -n 4|head -1|cut -d" " -f2-|sed 's/\s//g').$(hostname).tgz"
+DIST="dist.${GITHUB_REF_NAME}-${GITHUB_SHA7}.$(hostname).tgz"
 if [ -e "$DIST" ]; then
   echo "$DIST already exists. Skipping tar."
 else
