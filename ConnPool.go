@@ -1,5 +1,7 @@
 package main
 
+// ConnPool is a connection pool for a provider.
+// It manages a pool of connections to the provider's server.
 /*
  * there is not much error handling in this pool implementation!
  * simply: get a conn, park a conn, close a conn
@@ -24,9 +26,6 @@ import (
 	"github.com/go-while/go-loggedrwmutex"
 )
 
-// TODO FIXME temporary debug flags
-const WatchOpenConns = false
-
 const (
 	// if conn was parked more than DefaultConnExpire:
 	// try read from conn which takes some µs
@@ -37,6 +36,9 @@ const (
 	// we close it and get a new one...
 	// some provider close idle connections early without telling you...
 	DefaultConnCloser = 30 * time.Second
+
+	// read deadline for a connection, after this time we close the connection if no data was received
+	DefaultConnReadDeadline = 60 * time.Second
 )
 
 var (
@@ -372,13 +374,12 @@ getConnFromPool:
 					continue getConnFromPool
 				}
 			}
+			// we have a valid connection from the pool which is no longer parked
+			connitem.parktime = time.Time{}                                        // set parktime to zero value
+			connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline)) // set read deadline to DefaultConnExpire
 
-			connitem.parktime = time.Time{} // set parktime to zero value
-
-			if cfg.opt.DebugConnPool {
-				GCounter.Incr("TOTAL_GetConns")
-				dlog(always, "GetConn got one from pool '%s' took='%v'", c.provider.Name, time.Since(start))
-			}
+			GCounter.Incr("TOTAL_GetConns")
+			dlog(cfg.opt.DebugConnPool, "GetConn got one from pool '%s' took='%v'", c.provider.Name, time.Since(start))
 			return
 
 		default:
@@ -403,32 +404,28 @@ getConnFromPool:
 				dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: infinite waiting for a conn '%s'", c.provider.Name)
 
 				connitem = <-c.pool
-
-				if cfg.opt.DebugConnPool {
-					GCounter.Incr("TOTAL_GetConns")
-					dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: released, got connid=%d age=(%v) %s: waited='%v'", connitem.connid, time.Since(connitem.parktime), c.provider.Name, time.Since(waiting))
-				}
+				GCounter.Incr("TOTAL_GetConns")
+				dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: released, got connid=%d age=(%v) %s: waited='%v'", connitem.connid, time.Since(connitem.parktime), c.provider.Name, time.Since(waiting))
 				return
 			}
 			dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: try to open a new connection '%s' openConns=%d provider.MaxConns=%d", c.provider.Name, c.openConns, c.provider.MaxConns)
 			c.mux.RUnlock() // mutex c458
 
 			// try to open a new connection
-			newconnitem, aerr, retry := c.NewConn()
-			if err != nil {
-				dlog(always, "ERROR in ConnPool GetConn: NewConn failed '%s' connitem='%v' err='%v'", c.provider.Name, connitem, err)
-				if endlessLoop <= 0 || !retry {
-					dlog(always, "ERROR in ConnPool GetConn: endlessLoop reached! wid=%d provider='%s' err='%v'", 0, c.provider.Name, err)
-					return nil, fmt.Errorf("endlessLoop reached in ConnPool GetConn: wid=%d provider='%s' err='%v'", 0, c.provider.Name, err)
+			newconnitem, aerr, aretry := c.NewConn()
+			if newconnitem == nil || aerr != nil || aretry {
+				dlog(always, "ERROR in ConnPool GetConn: NewConn failed '%s' connitem='%v' aerr='%v' retry=%t", c.provider.Name, newconnitem, aerr, aretry)
+				if endlessLoop <= 0 || !aretry {
+					dlog(always, "ERROR in ConnPool GetConn: endlessLoop reached! wid=%d provider='%s' aerr='%v'", 0, c.provider.Name, aerr)
+					return nil, fmt.Errorf("endlessLoop reached in ConnPool GetConn: wid=%d provider='%s' aerr='%v'", 0, c.provider.Name, aerr)
 				}
-				dlog(always, "ERROR in ConnPool GetConn: retrying to get a conn '%s' err='%v'", c.provider.Name, err)
+				dlog(always, "ERROR in ConnPool GetConn: retrying to get a conn '%s' aerr='%v'", c.provider.Name, aerr)
 				endlessLoop--
 				time.Sleep(time.Millisecond * 10) // wait a bit before retrying
 				continue getConnFromPool          // until chan rans empty
 			}
 			// we have a new connection!
-			connitem, err = newconnitem, aerr
-			return
+			return newconnitem, aerr
 		} // end select
 	} // end for
 	// vet says: unreachable code
@@ -492,11 +489,6 @@ func (c *ConnPool) GetStats() (openconns int, idle int) {
 }
 
 func (c *ConnPool) WatchOpenConnsThread(workerWGconnEstablish *sync.WaitGroup) {
-	/*
-		if !WatchOpenConns {
-			return
-		}
-	*/
 	// this is a thread which watches the open connections and closes them if they are idle for too long
 	// it will close the connection if it is idle for more than DefaultConnCloser
 	workerWGconnEstablish.Wait()
