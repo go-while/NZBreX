@@ -71,6 +71,9 @@ nfpms:
     bindir: /usr/bin
     file_name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}.deb
 
+snapshot:
+  name_template: "{{ .Branch }}-SNAPSHOT-{{ .ShortCommit }}"
+
 release:
   github:
     owner: go-while
