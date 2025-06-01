@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   build_matrix:
-    name: Build ${{ matrix.name }}
+    name: Build ${{ matrix.name }}-${{ matrix.libc }}
     runs-on:
       - self-hosted
       - ${{ matrix.runner_label }}
