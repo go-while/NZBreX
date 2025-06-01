@@ -13,7 +13,7 @@ on:
   pull_request:
     branches:
       #- main
-      - testing
+      - "test*"
 
 permissions:
   contents: write
@@ -40,12 +40,6 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: false
-
-      # Uncomment if you need platform-specific build dependencies
-      # - name: Install build dependencies
-      #   run: |
-      #     sudo apt-get update
-      #     sudo apt-get install -y musl-tools zip curl dpkg-dev
 
       #- name: "Restore go cache"
       #  run: runner/go-cache-restore.sh
