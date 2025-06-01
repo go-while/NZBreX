@@ -3,7 +3,7 @@ name: "Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'checkpoint-stable-1748780000'
+      - 'v0.0.2-SNAPSHOT-test-1748786444'
     tags:
       - "test*"
   release:
@@ -356,7 +356,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
             VERSION="${GITHUB_REF_NAME}"
           else
-            VERSION="0.0.0-SNAPSHOT"
+            VERSION="${GITHUB_REF_NAME}-SNAPSHOT"
           fi
           # Strip leading 'v' if present
           VERSION="${VERSION#v}"
