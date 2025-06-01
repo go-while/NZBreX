@@ -30,8 +30,7 @@ archives:
     files:
       - LICENSE*
       - README*
-      - CHANGELOG*
-      - docs/**
+      - "{{ .ProjectName }}{{ .Ext }}"
 
 checksum:
   name_template: "checksums.txt"

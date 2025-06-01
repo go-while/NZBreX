@@ -293,7 +293,7 @@ jobs:
       - name: "@Start Clean directory"
         run: |
           echo "deleting workspace"
-          rm -rfv dist build ${{ github.workspace }}/
+          rm -rf dist build ${{ github.workspace }}/
           mkdir -vp ${{ github.workspace }}
 
       - name: "Checkout code"
@@ -506,8 +506,10 @@ jobs:
 #        uses: softprops/action-gh-release@v2
 #        with:
 #          files: |
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
+#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
 #            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
 
@@ -517,5 +519,5 @@ jobs:
       - name: "@End Clean directory"
         run: |
           echo "deleting workspace"
-          rm -rfv dist build ${{ github.workspace }}/
+          rm -rf dist build ${{ github.workspace }}/
           mkdir -vp ${{ github.workspace }}
