@@ -555,7 +555,7 @@ readlines:
 				}
 			*/
 			item.mux.Unlock()
-			GCounter.Decr("dlQueueCnt") // FIXME NEEDS REVIEW
+			DecreaseDLQueueCnt() // FIXME NEEDS REVIEW
 			dlog(always, "ERROR readArticleDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 			return nil
 		}

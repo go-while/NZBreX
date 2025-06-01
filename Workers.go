@@ -229,10 +229,12 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				item.mux.Lock()
 				item.flaginDL = true
 
-				if !item.pushedDL {
-					GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT")       // cfg.opt.ByPassSTAT
-					GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT") //cfg.opt.ByPassSTAT
-				}
+				//if !item.pushedDL {
+				GCounter.Incr("dlQueueCnt")       // cfg.opt.ByPassSTAT
+				GCounter.Incr("TOTAL_dlQueueCnt") // cfg.opt.ByPassSTAT
+				//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT")       // cfg.opt.ByPassSTAT
+				//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT") //cfg.opt.ByPassSTAT
+				//}
 				item.pushedDL = true // mark as pushed to download queue ByPassSTAT
 				item.mux.Unlock()
 				s.segmentChansDowns[provider.Group] <- item
@@ -409,11 +411,13 @@ providerDl:
 			item.flaginDL = true
 			// item has been pushed to download queue: segmentChansDowns[provider.Group] or is queued in memDL[provider.Group]
 			// if we forget to decrement dlQueueCnt at the right place(es): we will never stop...
-			if !item.pushedDL {
-				// increment dlQueueCnt counter only if not already pushed
-				GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
-				GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
-			}
+			//if !item.pushedDL {
+			// increment dlQueueCnt counter only if not already pushed
+			GCounter.Incr("dlQueueCnt")       // increment temporary dlQueueCnt counter
+			GCounter.Incr("TOTAL_dlQueueCnt") // increment temporary dlQueueCnt counter
+			//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
+			//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
+			//}
 			item.pushedDL = true // mark as pushed to download queue (in pushDL)
 			dlog(cfg.opt.DebugWorker, " | pushDL: chan pushed=%t seg.Id='%s' @ '%s' testing=%t dst=%s", pushed, item.segment.Id, s.providerList[pid].Name, testing, dst)
 
@@ -728,18 +732,17 @@ forever:
 			feedDL:
 				for {
 					select {
-					case item := <-s.memDL[provider.Group]:
+					case item := <-s.memDL[provider.Group]: // out here
 						item.mux.Lock()
 						item.flaginDLMEM = false
 						item.mux.Unlock()
-						s.segmentChansDowns[provider.Group] <- item
+						s.segmentChansDowns[provider.Group] <- item // in there
 					default:
 						// chan ran empty
 						break feedDL
 					}
 				}
 				dlog(cfg.opt.Verbose, " | [DV] | Done feeding %d Downs to '%s'", dlq, provider.Group)
-
 			}
 		} // end if argCheckFirst
 

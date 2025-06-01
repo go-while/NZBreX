@@ -165,8 +165,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
 		// item has been read from cache
-		GCounter.Decr("dlQueueCnt")       // decrease temporary counter when read from cache
-		GCounter.Decr("TOTAL_dlQueueCnt") // decrease total counter when read from cache
+		DecreaseDLQueueCnt() // decrease when read from cache
 		//memlim.MemReturn(who+":cacheRead", item)
 		return nil
 	}
@@ -202,7 +201,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			dlog(always, "ERROR GoDownsRoutine got code 220 but err='%v'", err)
 		}
 		dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE case 220: seg.Id='%s' code=220 msg='%s' err='%v'", item.segment.Id, msg, err)
-		GCounter.Decr("dlQueueCnt") // on code 220
+		DecreaseDLQueueCnt() // on code 220
 		GCounter.Add("TMP_RXbytes", uint64(item.size))
 		GCounter.Add("TOTAL_RXbytes", uint64(item.size))
 
@@ -261,7 +260,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				s.segmentChansDowns[provider.Group] <- item
 
 			} else if isdead {
-				GCounter.Decr("dlQueueCnt") // code=0 && err != nil && isdead
+				DecreaseDLQueueCnt() // code=0 && err != nil && isdead
 				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE failed':"+who, item)
 				dlog(cfg.opt.Debug, "!!!! DEBUG GoDownsRoutine: isdead seg.Id='%s' code=0 or err='%v'", item.segment.Id, err)
 			}
@@ -309,8 +308,8 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				s.fileStat[s.nzbName].missing[provider.Name]++
 				s.fileStatLock.Unlock()
 			}
+			DecreaseDLQueueCnt() // failed article download, CODE != 220 or 0
 
-			GCounter.Decr("dlQueueCnt") // failed article download, CODE != 220 or 0
 			if isdead {
 				if cfg.opt.YencWrite && GCounter.GetValue("TOTAL_yencQueueCnt") > 0 {
 					GCounter.Decr("yencQueueCnt")

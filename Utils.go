@@ -559,3 +559,9 @@ func LogToFile(filename string, append bool) (err error) {
 	log.SetOutput(logFile)
 	return
 } // end func LogToFile (written by AI: GPT-4.1)
+
+func DecreaseDLQueueCnt() {
+	// this is used to decrease the dlQueueCnt counter
+	GCounter.Decr("dlQueueCnt")
+	GCounter.Decr("TOTAL_dlQueueCnt")
+}
