@@ -37,6 +37,7 @@ upload_with_retry() {
   return 1
 }
 
+ls -lha dist/
 for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz dist/checksums.*; do
   [ -e "$file" ] || continue
   for algo in 256 512; do
@@ -49,11 +50,17 @@ for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz 
   upload_with_retry "$file"
 done
 
-#DIST="dist.tgz"
-#if [ -e "$DIST" ]; then
-#  echo "$DIST already exists. Skipping tar."
-#else
-#  tar -czf "$DIST" dist/
-#  echo "Created $DIST from dist/."
-#fi
+DIST="dist.$(date +%s).$(head -1 /dev/urandom |hexdump -n 4|head -1|cut -d" " -f2-|sed 's/\s//g').$(hostname).tgz"
+if [ -e "$DIST" ]; then
+  echo "$DIST already exists. Skipping tar."
+else
+  tar -czf "$DIST" dist/
+  echo "Created $DIST from dist/."
+  du -b "$DIST"; du -hs "$DIST";
+  sha256sum "$DIST" > "${DIST}.sha256sum"
+  sha512sum "$DIST" > "${DIST}.sha512sum"
+  upload_with_retry "$file" "${DIST}.sha512sum"
+  upload_with_retry "$file" "${DIST}.sha256sum"
+  upload_with_retry "$file" "${DIST}"
+fi
 
