@@ -37,7 +37,7 @@ upload_with_retry() {
   return 1
 }
 
-for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz; do
+for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz dist/checksums.*; do
   [ -e "$file" ] || continue
   for algo in 256 512; do
     sha="sha${algo}sum"
