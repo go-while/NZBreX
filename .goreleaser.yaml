@@ -1,5 +1,7 @@
 version: 2
 
+version_template: "{{ if .Tag }}{{ .Tag }}{{ else }}{{ .Branch }}-SNAPSHOT-{{ .ShortCommit }}{{ end }}"
+
 project_name: NZBreX
 dist: dist
 
@@ -70,9 +72,6 @@ nfpms:
     license: "MIT"
     bindir: /usr/bin
     file_name_template: NZBreX_{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}.deb
-
-snapshot:
-  name_template: "{{ .Branch }}-SNAPSHOT-{{ .ShortCommit }}"
 
 release:
   github:
