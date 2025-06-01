@@ -795,7 +795,7 @@ forever:
 				if check_perc <= 99 {
 					log01 = fmt.Sprintf(" | STAT:[%03.1f%%] (%"+s.D+"d/%"+s.D+"d)", check_perc, checked, todo)
 				} else if check_perc >= 99 && check_perc < 100 {
-					log01 = fmt.Sprintf(" | STAT:[%03.5f%%] (%"+s.D+"d/%"+s.D+"d)", check_perc, checked, todo)
+					log01 = fmt.Sprintf(" | STAT:[%03.3f%%] (%"+s.D+"d/%"+s.D+"d)", check_perc, checked, todo)
 				} else {
 					// if we have checked all segments, we print it as done
 					log01 = fmt.Sprintf(" | STAT:[done] (%"+s.D+"d/%"+s.D+"d)", checked, todo)
