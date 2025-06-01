@@ -42,7 +42,7 @@ ls -lha dist/
 for file in dist/*.zip dist/*.exe dist/*.deb dist/*.tgz dist/*.tar.gz dist/*.xz dist/checksums.*; do
   [ -e "$file" ] || continue
   for algo in 256 512; do
-    [ "$file" = "checksums.txt" ] && continue
+    [ "$file" = "dist/checksums.txt" ] && continue
     sha="sha${algo}sum"
     $sha "$file" > "$file.$sha"
     echo -e "\n$file.$sha"
