@@ -61,8 +61,8 @@ else
   du -b "$DIST"; du -hs "$DIST";
   sha256sum "$DIST" > "${DIST}.sha256sum"
   sha512sum "$DIST" > "${DIST}.sha512sum"
-  upload_with_retry "$file" "${DIST}.sha512sum"
-  upload_with_retry "$file" "${DIST}.sha256sum"
-  upload_with_retry "$file" "${DIST}"
+  upload_with_retry "${DIST}.sha512sum"
+  upload_with_retry "${DIST}.sha256sum"
+  upload_with_retry "${DIST}"
 fi
 
