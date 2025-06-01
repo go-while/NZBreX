@@ -359,7 +359,7 @@ getConnFromPool:
 				// try reading from conn. check takes some µs
 				connitem.conn.SetReadDeadline(readDeadConn)
 				if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
-					dlog("INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", c.provider.Name, readBytes, rerr)
+					dlog(always, "INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", c.provider.Name, readBytes, rerr)
 					c.CloseConn(connitem, nil)
 					continue getConnFromPool // until chan rans empty
 				}
@@ -437,6 +437,9 @@ getConnFromPool:
 
 // ExtendConn extends the read deadline of a connection.
 func (c *ConnPool) ExtendConn(connitem *ConnItem) {
+	if connitem == nil || connitem.conn == nil {
+		return
+	}
 	connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline)) // ExtendConn()
 }
 
@@ -683,7 +686,7 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 		if cfg.opt.BUG {
 			dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
 		}
-		c.ExtendConn(connitem)
+		provider.ConnPool.ExtendConn(connitem)
 		return aconnitem, nil
 	}
 	//provider.ConnPool.CloseConn(aconnitem, sharedCC) // close the nil connection item to reduce counter if needed and put nil back into sharedCC
@@ -698,7 +701,7 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 		return
 	}
 	connitem = newconnitem // use the new connection item
-	c.ExtendConn(connitem)
+	provider.ConnPool.ExtendConn(connitem)
 	return
 } // end func SharedConnGet
 
@@ -708,9 +711,9 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 // This function is used to return a connection to the shared channel for reuse.
 // It is used by the goroutines which are working on the same item.
 // It is important to return the connection to the shared channel so that other goroutines can use it.
-func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem) {
-	c.ExtendConn(connitem) // SharedConnReturn
-	sharedCC <- connitem   // put the connection back into the channel to share it with other goroutines
+func SharedConnReturn(sharedCC chan *ConnItem, connitem *ConnItem, provider *Provider) {
+	provider.ConnPool.ExtendConn(connitem) // SharedConnReturn
+	sharedCC <- connitem                   // put the connection back into the channel to share it with other goroutines
 } // end func SharedConnReturn
 
 // ReturnSharedConnToPool returns a shared connection to the pool.

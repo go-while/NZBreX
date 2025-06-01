@@ -132,7 +132,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 
 	dlog(cfg.opt.DebugCR, "GoWorker (%d) CheckRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 	if sharedCC != nil {
-		SharedConnReturn(sharedCC, connitem)
+		SharedConnReturn(sharedCC, connitem, provider)
 	} else {
 		provider.ConnPool.ParkConn(wid, connitem, "GoCheckRoutine")
 	}
@@ -323,7 +323,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	dlog(cfg.opt.DebugCR, "GoWorker (%d) DownsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 
 	if sharedCC != nil {
-		SharedConnReturn(sharedCC, connitem)
+		SharedConnReturn(sharedCC, connitem, provider)
 	} else {
 		provider.ConnPool.ParkConn(wid, connitem, "GoDownsRoutine")
 	}
@@ -528,7 +528,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	dlog(cfg.opt.DebugUR, "GoWorker (%d) ReupsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
 
 	if sharedCC != nil {
-		SharedConnReturn(sharedCC, connitem)
+		SharedConnReturn(sharedCC, connitem, provider)
 	} else {
 		provider.ConnPool.ParkConn(wid, connitem, "GoReupsRoutine")
 	}
