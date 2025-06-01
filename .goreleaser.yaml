@@ -6,6 +6,7 @@ dist: dist
 builds:
   - id: default
     main: .
+    binary: NZBreX
     goos:
       - linux
       - darwin
