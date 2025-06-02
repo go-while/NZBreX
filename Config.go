@@ -7,7 +7,7 @@ import (
 	"github.com/go-while/go-loggedrwmutex"
 )
 
-const UseSharedCC = true // temporary devel flag
+const UseSharedCC = false // temporary devel flag
 
 const always = true // flag for dlog
 
@@ -169,8 +169,8 @@ type segmentChanItem struct {
 	article     []string                         // contains the downloaded segment/article
 	head        []string                         // contains the head
 	body        []string                         // contains the body
-	pushedDL    bool                             // if true, item has been pushed to downs channel
-	pushedUP    bool                             // if true, item has been pushed to reups channel
+	pushedDL    int                              // a counter for debugging
+	pushedUP    int                              // a counter for debugging
 	flaginDL    bool                             // if true, item is in download
 	flagisDL    bool                             // if true, item has been downloaded
 	flaginUP    bool                             // if true, item is in upload

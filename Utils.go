@@ -565,3 +565,32 @@ func DecreaseDLQueueCnt() {
 	GCounter.Decr("dlQueueCnt")
 	GCounter.Decr("TOTAL_dlQueueCnt")
 }
+
+func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Duration, min, max int64) int64 {
+	// Defensive: avoid division by zero
+	if pushed == 0 {
+		return max / 3
+	}
+
+	// Calculate work ratio: how much was done versus remaining
+	workRatio := float64(pushed) / float64(todo)
+
+	// Adjust microsleep: if work ratio is low, decrease sleep (work faster); if high, increase sleep (slow down)
+	adjustment := int64(float64(lastRunTook.Milliseconds()) * (1.0 - workRatio))
+
+	newSleep := microsleep + adjustment
+
+	// Clamp between min and max
+	if newSleep < min {
+		newSleep = min
+	}
+	if newSleep > max {
+		newSleep = max
+	}
+	dlog(always, "AdjustMicroSleep: pushed=%d todo=%d lastRunTook=%s microsleep=%d -> newSleep=%d (min=%d max=%d)", pushed, todo, lastRunTook, microsleep, newSleep, min, max)
+	return newSleep
+}
+
+func fatal() bool {
+	return true
+}

@@ -353,27 +353,31 @@ getConnFromPool:
 				continue getConnFromPool // until chan rans empty
 			}
 			if connitem.parktime.Add(DefaultConnExpire).Before(time.Now()) {
-
-				buf := make([]byte, 1)
-				// some provider have short timeout values.
-				// try reading from conn. check takes some µs
-				connitem.conn.SetReadDeadline(readDeadConn)
-				if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
-					dlog(always, "INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", c.provider.Name, readBytes, rerr)
-					c.CloseConn(connitem, nil)
-					continue getConnFromPool // until chan rans empty
-				}
-				c.ExtendConn(connitem) // long idle
-				buf = nil
-				dlog(cfg.opt.DebugConnPool, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', passed Read test", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
 				/*
-					dlog(cfg.opt.DebugConnPool, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', close and get NewConn", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
-					c.CloseConn(connitem, nil)
+					buf := make([]byte, 1)
+					// some provider have short timeout values.
+					// try reading from conn. check takes some µs
+					connitem.conn.SetReadDeadline(readDeadConn)
+					if readBytes, rerr := connitem.conn.Read(buf); isNetConnClosedErr(rerr) || readBytes > 0 {
+						dlog(always, "INFO ConnPool GetConn: dead idle '%s' readBytes=(%d != 0?) err='%v' ... continue", c.provider.Name, readBytes, rerr)
+						c.CloseConn(connitem, nil)
+						continue getConnFromPool // until chan rans empty
+					}
+					c.ExtendConn(connitem) // long idle
+					buf = nil
+					dlog(cfg.opt.DebugConnPool, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', passed Read test", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
+				*/
+
+				dlog(always, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', close and get NewConn", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
+
+				c.CloseConn(connitem, nil)
+				/*
 					connitem, err, _ = c.NewConn()
 					if connitem == nil || err != nil {
 						continue getConnFromPool
 					}
 				*/
+
 				c.ExtendConn(connitem) // extend the read deadline of the new connection
 			}
 			// we have a valid connection from the pool which is no longer parked
@@ -437,10 +441,12 @@ getConnFromPool:
 
 // ExtendConn extends the read deadline of a connection.
 func (c *ConnPool) ExtendConn(connitem *ConnItem) {
-	if connitem == nil || connitem.conn == nil {
-		return
-	}
-	connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline)) // ExtendConn()
+	/*
+		if connitem == nil || connitem.conn == nil {
+			return
+		}
+		connitem.conn.SetReadDeadline(time.Now().Add(DefaultConnReadDeadline)) // ExtendConn()
+	*/
 }
 
 // newconnid generates a new unique connection id for the ConnItem.

@@ -308,16 +308,29 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				s.fileStat[s.nzbName].missing[provider.Name]++
 				s.fileStatLock.Unlock()
 			}
-			DecreaseDLQueueCnt() // failed article download, CODE != 220 or 0
-
+			moreProvider := false // flag if we have more providers to download from
+			for pid, prov := range s.providerList {
+				if prov.Group != provider.Group {
+					if !prov.NoDownload {
+						if item.availableOn[pid] && !item.ignoreDlOn[pid] {
+							moreProvider = true
+							break // we have at least one provider to download from
+						}
+					}
+					continue
+				}
+			}
+			if !moreProvider {
+				DecreaseDLQueueCnt() // failed article download, CODE != 220 or 0
+			}
 			if isdead {
 				if cfg.opt.YencWrite && GCounter.GetValue("TOTAL_yencQueueCnt") > 0 {
 					GCounter.Decr("yencQueueCnt")
 				}
 			}
 			dlog((code == 430 && cfg.opt.Print430), "INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
-			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
 
+			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
 		}
 	} // end switch code
 	dlog(cfg.opt.DebugCR, "GoWorker (%d) DownsRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)

@@ -237,7 +237,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT")       // cfg.opt.ByPassSTAT
 				//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT") //cfg.opt.ByPassSTAT
 				//}
-				item.pushedDL = true // mark as pushed to download queue ByPassSTAT
+				item.pushedDL++ // mark as pushed to download queue ByPassSTAT
 				item.mux.Unlock()
 				// ! TODO FIXME : use s.WorkDividerChan ?
 				s.segmentChansDowns[provider.Group] <- item // bypass STAT: GoCheckRoutine push to download queue
@@ -349,11 +349,18 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 } // end func GoWorker
 
-func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64) {
+func matchThisDL(item *segmentChanItem) bool {
+	return (len(item.article) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
+} // end func matchThisDL
+
+func matchThisUP(item *segmentChanItem) bool {
+	return (len(item.article) > 0 && item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM && !item.flaginDL)
+} // end func matchThisUP
+
+func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64, err error) {
 	if !allowDl {
 		return
 	}
-
 	if !memlim.MemAvail() {
 		return
 	}
@@ -361,14 +368,18 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 	item.mux.Lock()
 	defer item.mux.Unlock()
 
-	matchThis := (len(item.article) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
-	if !matchThis {
-		return false, 1
+	if !matchThisDL(item) {
+		return false, 1, nil // not a match, item is already in DL or UP or has article
 	}
+	// loop over the availableOn map and check if we can push the item to download
 providerDl:
 	for pid, avail := range item.availableOn {
 		if !avail {
+			dlog(always, " | [DV] skip seg.Id='%s' @ '%s' not availableOn", item.segment.Id, s.providerList[pid].Name)
 			continue providerDl
+		}
+		if !matchThisDL(item) {
+			break
 		}
 		if item.ignoreDlOn[pid] {
 			dlog(cfg.opt.DebugWorker, " | [DV] ignoreDlOn seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
@@ -379,58 +390,57 @@ providerDl:
 			item.ignoreDlOn[pid] = true
 			continue providerDl
 		}
-		dlog(cfg.opt.DebugWorker, " | [DV] push chan <- down seg.Id='%s' @ '%s' item.flaginDL=%t item.flaginDLMEM=%t", item.segment.Id, s.providerList[pid].Name, item.flaginDL, item.flaginDLMEM)
+		dlog(cfg.opt.BUG, " | [DV] try push chan <- down seg.Id='%s' @ '%s' item.flaginDL=%t item.flaginDLMEM=%t", item.segment.Id, s.providerList[pid].Name, item.flaginDL, item.flaginDLMEM)
 		/* push download request only to 1.
 		* this one should get it and update availableOn/missingOn list
 		 */
 		dst := ""
 		if cfg.opt.CheckFirst && !cfg.opt.ByPassSTAT {
 			select {
-			case s.memDL[s.providerList[pid].Group] <- item:
+			// put item temporarly into memDL until checkFirst is complete
+			case s.memDL[s.providerList[pid].Group] <- item: // non-blocking
 				item.flaginDLMEM = true
 				pushed = true
 				dst = "memDL"
+				dlog(cfg.opt.DebugWorker, " | [DV] push memDL seg.Id='%s' @ '%s' item.flaginDL=%t item.flaginDLMEM=%t", item.segment.Id, s.providerList[pid].Name, item.flaginDL, item.flaginDLMEM)
+
 			default:
 				// chan is full
 			}
 		} else if !cfg.opt.ByPassSTAT {
-			if testing {
-				s.segmentChansDowns[s.providerList[pid].Group] <- item // testing blocking
+			// if we don't check first, we can push directly to the download queue
+			select {
+			case s.segmentChansDowns[s.providerList[pid].Group] <- item: // non-blocking
 				pushed = true
 				dst = "segDown"
-			} else {
-				select {
-				case s.segmentChansDowns[s.providerList[pid].Group] <- item: // testing non-blocking
-					pushed = true
-					dst = "segDown"
-				/* TODO FIXME REVIEW ! TO BLOCK OR NOT TO BLOCK*/
-				default:
-					dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full for seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
-					// chan is full
-				}
+				item.flaginDL = true
+				// item has been pushed to download queue: segmentChansDowns[provider.Group] or is queued in memDL[provider.Group]
+				// if we forget to decrement dlQueueCnt at the right place(es): we will never stop...
+				//if !item.pushedDL {
+				// increment dlQueueCnt counter only if not already pushed
+				GCounter.Incr("dlQueueCnt")       // increment temporary dlQueueCnt counter
+				GCounter.Incr("TOTAL_dlQueueCnt") // increment temporary dlQueueCnt counter
+				//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
+				//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
+				//}
+				item.pushedDL++ // mark as pushed to download queue (in pushDL)
+				dlog(cfg.opt.DebugWorker, " | pushDL: chan pushed=%t seg.Id='%s' @ '%s' testing=%t dst=%s", pushed, item.segment.Id, s.providerList[pid].Name, testing, dst)
+				err = nil
+				return // return after 1st push!
+			default:
+				//dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full @ '%s'", s.providerList[pid].Name)
+				// chan is full means we cannot push the item to the download queue to this provider group
+				// either app is blocked or we're just checking faster than we can download at all...
+				err = fmt.Errorf("pushDL: chans full @ '%s'", s.providerList[pid].Name)
+				// FIXME TODO: should we return here or continue with next provider-group?
+				return false, 1, err
 			}
 		}
-		if pushed {
-			item.flaginDL = true
-			// item has been pushed to download queue: segmentChansDowns[provider.Group] or is queued in memDL[provider.Group]
-			// if we forget to decrement dlQueueCnt at the right place(es): we will never stop...
-			//if !item.pushedDL {
-			// increment dlQueueCnt counter only if not already pushed
-			GCounter.Incr("dlQueueCnt")       // increment temporary dlQueueCnt counter
-			GCounter.Incr("TOTAL_dlQueueCnt") // increment temporary dlQueueCnt counter
-			//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
-			//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
-			//}
-			item.pushedDL = true // mark as pushed to download queue (in pushDL)
-			dlog(cfg.opt.DebugWorker, " | pushDL: chan pushed=%t seg.Id='%s' @ '%s' testing=%t dst=%s", pushed, item.segment.Id, s.providerList[pid].Name, testing, dst)
-
-			return // return after 1st push!
-		} // end if pushed to download queue
 	} // end for providerDl
 	return
 } // end func pushDL
 
-func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inretry uint64) {
+func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inretry uint64, err error) {
 	if !allowUp {
 		return
 	}
@@ -438,9 +448,7 @@ func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup
 	item.mux.Lock()
 	defer item.mux.Unlock()
 
-	matchThis := (len(item.article) > 0 && item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM && !item.flaginDL)
-
-	if !matchThis {
+	if !matchThisUP(item) {
 		return
 	}
 	// looks like we have fetched the segment and did not upload the item yet
@@ -474,35 +482,25 @@ providerUp:
 		/* push upload request only to 1.
 		this one should up it and usenet should distribute it within minutes
 		*/
-
-		/* TODO FIXME REVIEW ! TO BLOCK OR NOT TO BLOCK*/
-		if testing { // blocking
-			s.segmentChansReups[s.providerList[pid].Group] <- item // testing blocking
-			pushed = true
-		} else {
-			select { // non-blocking
-			case s.segmentChansReups[s.providerList[pid].Group] <- item: // testing non-blocking
-				// pass
-				pushed = true
-			default:
-				//dlog( "DEBUG SPAM pushUP: chan is full for seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
-				// chan is full
-
-			}
-		}
-
-		if pushed {
+		select { // non-blocking
+		case s.segmentChansReups[s.providerList[pid].Group] <- item: // non-blocking
+			// pass
 			item.flaginUP = true
-			if !item.pushedUP {
-				GCounter.Incr("upQueueCnt")
-				GCounter.Incr("TOTAL_upQueueCnt")
-			}
-			item.pushedUP = true // mark as pushed to upload queue (in pushUP)
+			GCounter.Incr("upQueueCnt")
+			GCounter.Incr("TOTAL_upQueueCnt")
+			//GCounter.IncrMax("upQueueCnt", uint64(len(s.segmentList)), "pushUP")
+			//GCounter.IncrMax("TOTAL_upQueueCnt", uint64(len(s.segmentList)), "pushUP")
+			item.pushedUP++ // mark as pushed to upload queue (in pushUP)
 			dlog(cfg.opt.DebugWorker, " | pushUP: chan pushed=%t seg.Id='%s' @ '%s'", pushed, item.segment.Id, s.providerList[pid].Name)
 			return // return after 1st push!
-		} // end if pushed to upload queue
+		default:
+			//dlog(cfg.opt.BUG "DEBUG SPAM pushUP: chan is full @ '%s'", s.providerList[pid].Name)
+			// chan is full for this group, try next provider-group or not? FIXME TODO REVIEW
+			noup++
+			return false, noup, inretry, fmt.Errorf("pushUP: chan is full for seg.Id='%s' @ '%s'", item.segment.Id, s.providerList[pid].Name)
+		}
 	} // end for providerUp
-	return
+	return false, noup, inretry, fmt.Errorf("pushUP: no provider found for seg.Id='%s'", item.segment.Id)
 } // end func pushUP
 
 type WrappedItem struct {
@@ -612,9 +610,22 @@ func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sy
 		}(s)
 	*/
 	// loops forever over the s.segmentList and checks if there is anything to do for an item
+	var minsleep int64 = 10 // 0.1 second in milliseconds
+	var baseline int64 = 2555
+	var maxsleep int64 = 15000 // 9 seconds in milliseconds
+	microsleep := baseline
+	fetchedtoDL, fetchedtoUP, refillDL, refillUP, pushedDL, pushedUP := uint64(0), uint64(0), uint64(0), uint64(0), uint64(0), uint64(0)
+	startLoop := time.Now()
 forever:
 	for {
-		time.Sleep(time.Duration((lastRunTook.Milliseconds() * 2)) + (2555 * time.Millisecond))
+		dvlastRunTook := time.Since(startLoop)
+		pushed := pushedDL + pushedUP
+
+		microsleep = AdjustMicroSleep(microsleep, pushed, todo, dvlastRunTook, minsleep, maxsleep)
+		if cfg.opt.DebugWorker {
+			dlog(cfg.opt.DebugWorker, " | [DV] lastRunTook='%d ms' '%v microsleep=%v fetchedtoUP=%d fetchedtoDL=%d refillDL=%d refillUP=%d", dvlastRunTook.Milliseconds(), dvlastRunTook, microsleep, fetchedtoUP, fetchedtoDL, refillDL, refillUP)
+		}
+		time.Sleep(time.Duration((dvlastRunTook.Milliseconds() * 2)) + (time.Duration(microsleep) * time.Millisecond))
 
 		// uint64
 		var segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64
@@ -623,7 +634,7 @@ forever:
 		// or uploaded because provider has config flat NoDownload or NoUpload set
 		var Tnodl, Tnoup uint64
 
-		startLoop := time.Now()
+		startLoop = time.Now()
 
 	forsegmentList:
 		for _, item := range s.segmentList {
@@ -697,7 +708,11 @@ forever:
 			item.mux.RUnlock() // RUNLOCKS HERE #824d
 
 			if !testing {
-				pushedUp, nNoUp, nInRetry := s.pushUP(allowUp, item)
+				pushedUp, nNoUp, nInRetry, a1err := s.pushUP(allowUp, item)
+				if a1err != nil {
+					dlog(always, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.Id)
+					continue forsegmentList
+				}
 				if pushedUp {
 					dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDup seg.Id='%s' pushedUp=%t inup=%d", item.segment.Id, pushedUp, inup)
 				}
@@ -705,7 +720,11 @@ forever:
 				//Tnoup += len(item.ignoreDlOn)
 				inretry += nInRetry
 				if !pushedUp && allowDl {
-					pushedDl, nNoDl := s.pushDL(allowDl, item)
+					pushedDl, nNoDl, b1err := s.pushDL(allowDl, item)
+					if b1err != nil {
+						dlog(always, "ERROR pushDL err='%v' (seg.Id='%s')", b1err, item.segment.Id)
+						continue forsegmentList
+					}
 					nodl += nNoDl
 					Tnodl += uint64(len(item.ignoreDlOn))
 					if pushedDl {
@@ -731,25 +750,24 @@ forever:
 					continue
 				}
 				dlog(cfg.opt.Verbose, " | [DV] | Feeding %d Downs to '%s'", dlq, provider.Group)
-				fetched, pushed, refill := 0, 0, 0
 			feedDL:
 				for {
 					select {
 					case item := <-s.memDL[provider.Group]: // out here
 						// item came from memDL, try push it to downs
 						// pass
-						fetched++
+						fetchedtoDL++
 						item.mux.Lock()
 						item.flaginDLMEM = false
 						item.mux.Unlock()
 						select {
 						case s.segmentChansDowns[provider.Group] <- item: // try put in there
 							// pass
-							pushed++
+							pushedDL++
 						default:
 							// chan full, break the loop
 							s.memDL[provider.Group] <- item // refill the chan with the item
-							refill++                        // increase backlog
+							refillDL++                      // increase backlog
 							break feedDL
 						}
 					default:
@@ -757,7 +775,7 @@ forever:
 						break feedDL
 					}
 				}
-				dlog(cfg.opt.Verbose, " | [DV] | Done feeding %d Downs to '%s' (fetched: %d, refill: %d, backlog: %d)", pushed, provider.Group, fetched, refill, dlq)
+				dlog(cfg.opt.Verbose, " | [DV] | Done feeding %d Downs to '%s' (fetched: %d, refill: %d, backlog: %d)", pushedDL, provider.Group, fetchedtoDL, refillDL, dlq)
 			}
 		} // end if argCheckFirst
 
@@ -769,20 +787,22 @@ forever:
 					continue
 				}
 				dlog(cfg.opt.Verbose, " | [DV] | Feeding %d Reups to '%s'", upq, provider.Group)
-				pushed := 0
 			feedUP:
 				for {
 					select {
 					case item := <-s.memUP[provider.Group]: // out here
 						// item came from memUP, try push it to reups
+						fetchedtoUP++
 						// pass
 						select {
 						case s.segmentChansReups[provider.Group] <- item: // try put in there
 							// pass
-							pushed++
+							pushedUP++
 						default:
-							// chan is full, break the loop
+							// reups chan is full, break the loop
 							s.memUP[provider.Group] <- item // refill the chan with the item
+							refillUP++                      // increase backlog
+							break feedUP
 						}
 
 					default:
@@ -994,12 +1014,6 @@ forever:
 			dlog(always, " | DV closeCase='%s' closeWait=%d", closeCase, closeWait)
 		}
 	} // end forever
-
-	/*
-		if !cfg.opt.Bar && logstring != "" { // always prints final logstring
-			log.Print("Final: "+logstring)
-		}
-	*/
 
 	dlog(cfg.opt.DebugWorker, "%s\n   WorkDivider quit: closeCase='%s'", logstring, closeCase)
 

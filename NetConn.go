@@ -43,18 +43,18 @@ func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
 	var TOTAL_TXbytes, TOTAL_RXbytes uint64
 forever:
 	for {
-		select {
-		case quit := <-stop_chan:
+		select { // speedmeter
+		case quit := <-stop_chan: // speedmeter
 			if cfg.opt.Debug {
 				log.Print("GoSpeedMeter stop_chan")
 			}
-			stop_chan <- quit
+			stop_chan <- quit // speedmeter
 			if cfg.opt.Debug {
 				log.Print("GoSpeedMeter returns")
 			}
 			break forever
 
-		case <-cron:
+		case <-cron: // speedmeter
 			tmp_rxb, tmp_txb := GCounter.GetReset("TMP_RXbytes"), GCounter.GetReset("TMP_TXbytes")
 			logStr, logStr_RX, logStr_TX = "", "", ""
 			if tmp_rxb > 0 {

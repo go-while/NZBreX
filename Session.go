@@ -244,7 +244,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 				item := &segmentChanItem{
 					segmux, s, &segment, &file,
 					make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)), make(map[int]bool, len(s.providerList)),
-					[]string{}, []string{}, []string{}, false, false, false, false, false, false, false, false, false, false,
+					[]string{}, []string{}, []string{}, 0, 0, false, false, false, false, false, false, false, false,
 					0, SHA256str("<" + segment.Id + ">"), false, make(chan int, 1), make(chan bool, 1), 0, 0, 0, 0, 0, &s.nzbHash}
 				s.segmentList = append(s.segmentList, item)
 			}
