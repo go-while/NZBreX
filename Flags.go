@@ -99,11 +99,6 @@ func ParseFlags() {
 		os.Exit(1)
 	}
 
-	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
-		dlog(always, "ERROR : you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
-		os.Exit(1)
-	}
-
 	if cfg.opt.YencCRC {
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 2 {
 			cfg.opt.YencTest = 2
