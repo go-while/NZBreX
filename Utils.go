@@ -256,7 +256,7 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 // If the source file is empty, it does nothing.
 func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("error Appendfile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
+		return fmt.Errorf("error AppendFile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
 	}
 
 	// Open source file for reading
