@@ -1,5 +1,5 @@
 #!/bin/bash
-nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb
+nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb.gz
 test "$1" != "" && nzbfile="$1"
 
 ./NZBreX \
