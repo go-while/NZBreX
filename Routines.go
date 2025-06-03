@@ -414,7 +414,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	} // end switch cmd
 
 	if uploaded {
-		item.txb += txb
+
 		// to calulate total upload speed of this session working on a nzb
 		s.counter.Add("TMP_TXbytes", uint64(item.size))
 		s.counter.Add("TOTAL_TXbytes", uint64(item.size))
@@ -428,6 +428,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		GCounter.Add("TOTAL_TXbytes", uint64(item.size))
 		// react to finished upload
 		item.mux.Lock()
+		item.txb += txb
 		// flag item on our group as available
 		for id, prov := range s.providerList {
 			if prov.Group != provider.Group {
