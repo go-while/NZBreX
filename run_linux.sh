@@ -2,9 +2,7 @@
 nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb
 test "$1" != "" && nzbfile="$1"
 
-# to run -race on linux: exclude the signals_windows with grep -v
-
-go run -race $(ls *.go|grep -v signals_windows) \
+./NZBreX \
 	-chansize=500 \
         -checkfirst=true -checkonly=false \
         -nzb="$nzbfile" -provider="provider.json" \
