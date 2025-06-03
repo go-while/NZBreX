@@ -21,8 +21,7 @@ func (c *Counter_uint64) KillCounter() {
 	clear(c.m)
 	c.m = nil
 	c.mux.Unlock()
-	c = nil // we crash here if anything still tries to count on or read from this counter!
-} // end func Counter.DelCounter
+} // end func Counter.KillCounter
 
 func (c *Counter_uint64) ClearCounter() {
 	c.mux.Lock()
