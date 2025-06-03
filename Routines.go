@@ -223,7 +223,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		if cfg.opt.ByPassSTAT {
 			item.checkedOn++
 		}
-		item.PrintItemFlags(cfg.opt.Debug, "post-CMD_ARTICLE: case 220")
+		item.PrintItemFlags(cfg.opt.DebugFlags, false, "post-CMD_ARTICLE: case 220")
 		item.mux.Unlock() // mutex #e96b
 
 		// update statistics

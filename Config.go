@@ -95,6 +95,7 @@ type CFG struct {
 	DebugARTICLE     bool   `json:"DebugARTICLE"`     // if true, enable ARTICLE debug output
 	DebugIHAVE       bool   `json:"DebugIHAVE"`       // if true, enable IHAVE debug output
 	DebugPOST        bool   `json:"DebugPOST"`        // if true, enable POST debug output
+	DebugFlags       bool   `json:"DebugFlags"`       // if true, enable printing item flags
 	//DebugSTREAM       bool   `json:"DebugSTREAM"`      // if true, enable STREAM debug output
 	Verbose       bool `json:"Verbose"`       // if true, enable verbose output
 	Bar           bool `json:"Bar"`           // if true, show progress bar
@@ -244,9 +245,13 @@ var (
 // it is called from the segmentChanItem.PrintItemFlags() method
 // src is the source of the log message
 // print is a boolean to control if the flags should be printed or not
-func (item *segmentChanItem) PrintItemFlags(print bool, src string) {
+func (item *segmentChanItem) PrintItemFlags(print bool, doLock bool, src string) {
 	if !print {
 		return
+	}
+	if doLock {
+		item.mux.RLock()
+		defer item.mux.RUnlock()
 	}
 	flags := []string{}
 	if item.flaginDL {
