@@ -174,7 +174,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
 	startArticle := time.Now()
-	code, msg, err := CMD_ARTICLE(provider, connitem, item)
+	code, msg, rxb, err := CMD_ARTICLE(provider, connitem, item)
 
 	if err != nil {
 		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
@@ -217,13 +217,14 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			item.mux.Unlock() // mutex #0a11
 		}
 		item.mux.Lock() // mutex #e96b
+		item.rxb += rxb
 		item.flagisDL = true
 		item.flaginDL = false
 		item.flaginDLMEM = false
 		if cfg.opt.ByPassSTAT {
 			item.checkedOn++
 		}
-		item.PrintItemFlags(cfg.opt.Debug, "post-CMD_ARTICLE: case 220")
+		item.PrintItemFlags(cfg.opt.DebugFlags, false, "post-CMD_ARTICLE: case 220")
 		item.mux.Unlock() // mutex #e96b
 
 		// update statistics
@@ -414,7 +415,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	} // end switch cmd
 
 	if uploaded {
-		item.txb += txb
+
 		// to calulate total upload speed of this session working on a nzb
 		s.counter.Add("TMP_TXbytes", uint64(item.size))
 		s.counter.Add("TOTAL_TXbytes", uint64(item.size))
@@ -428,6 +429,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		GCounter.Add("TOTAL_TXbytes", uint64(item.size))
 		// react to finished upload
 		item.mux.Lock()
+		item.txb += txb
 		// flag item on our group as available
 		for id, prov := range s.providerList {
 			if prov.Group != provider.Group {

@@ -196,7 +196,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			switch cfg.opt.ByPassSTAT {
 			case false:
 				code, err := s.GoCheckRoutine(wid, provider, item, sharedCC)
-				item.PrintItemFlags(cfg.opt.Debug, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
+				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 				if err != nil { // re-queue?
 					dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
 				}
@@ -250,7 +250,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			errStr := ""
 			StartDowns := time.Now()
 			code, err := s.GoDownsRoutine(wid, provider, item, sharedCC)
-			item.PrintItemFlags(cfg.opt.Debug, fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
+			item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
 			DecreaseDLQueueCnt()
 			if err != nil || (code != 220 && code != 920) {
 				if code != 430 {
@@ -274,7 +274,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				mode = "cache read"
 			}
 
-			dlog(always, "GoDownsRoutine: %s (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", mode, wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
+			dlog(cfg.opt.DebugWorker && cfg.opt.BUG, "GoDownsRoutine: %s (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", mode, wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
 
 			// back to top
 		} // end forGoDownsRoutine
@@ -314,7 +314,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			// TODO handle memlim freemem here
 			StartReUps := time.Now()
 			code, err := s.GoReupsRoutine(wid, provider, item, sharedCC)
-			item.PrintItemFlags(cfg.opt.Debug, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
+			item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
 
 			DecreaseUPQueueCnt()
 			if err != nil {
@@ -324,7 +324,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				continue forGoReupsRoutine
 			}
 			speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())
-			dlog(cfg.opt.DebugWorker, "ReupsRoutine: finished item (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", wid, item.segment.Id, provider.Name, time.Since(StartReUps), speedInKBytes)
+			dlog(cfg.opt.DebugWorker && cfg.opt.BUG, "ReupsRoutine: finished item (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", wid, item.segment.Id, provider.Name, time.Since(StartReUps), speedInKBytes)
 
 			memlim.MemReturn("UR", item) // memfree GoReupsRoutine on success
 			// back to top
@@ -408,7 +408,7 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 	}
 
 	if !matchThisDL(item) {
-		item.PrintItemFlags(cfg.opt.Debug, "pushDL")
+		item.PrintItemFlags(cfg.opt.DebugFlags, false, "pushDL")
 		dlog(cfg.opt.DebugWorker && cfg.opt.BUG, " | [DV-pushDL] (nodl) matchNoDL#1 seg.Id='%s' item.flagisDL=%t item.flaginDL=%t item.flaginDLMEM=%t item.flaginUP=%t item.flagisUP=%t len(article)=%d", item.segment.Id, item.flagisDL, item.flaginDL, item.flaginDLMEM, item.flaginUP, item.flagisUP, len(item.article))
 		return false, 1, nil // not a match, item is already in DL or UP or has article
 	}
@@ -489,7 +489,7 @@ func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup
 	defer item.mux.Unlock()
 
 	if !matchThisUP(item) {
-		item.PrintItemFlags(cfg.opt.Debug, "pushUP")
+		item.PrintItemFlags(cfg.opt.DebugFlags, false, "pushUP")
 		//dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) nomatch seg.Id='%s' item.flagisDL=%t item.flaginDL=%t item.flaginDLMEM=%t item.flaginUP=%t item.flagisUP=%t", item.segment.Id, item.flagisDL, item.flaginDL, item.flaginDLMEM, item.flaginUP, item.flagisUP)
 		return false, 1, 0, nil // not a match, item is already in DL or UP or has article
 	}

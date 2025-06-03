@@ -59,6 +59,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.DebugARTICLE, "debugarticle", false, "[true|false] debug ARTICLE (default: false)")
 	flag.BoolVar(&cfg.opt.DebugIHAVE, "debugihave", false, "[true|false] debug IHAVE (default: false)")
 	flag.BoolVar(&cfg.opt.DebugPOST, "debugpost", false, "[true|false] debug POST (default: false)")
+	flag.BoolVar(&cfg.opt.DebugFlags, "debugflags", false, "[true|false] debug item flags (default: false)")
 	flag.BoolVar(&cfg.opt.DebugCR, "debugcr", false, "[true|false] debug check routine (default: false)")
 	flag.BoolVar(&cfg.opt.DebugDR, "debugdr", false, "[true|false] debug downs routine (default: false)")
 	flag.BoolVar(&cfg.opt.DebugUR, "debugur", false, "[true|false] debug reups routine (default: false)")
@@ -103,6 +104,10 @@ func ParseFlags() {
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 2 {
 			cfg.opt.YencTest = 2
 		}
+	}
+
+	if cfg.opt.MaxArtSize < 1 {
+		cfg.opt.MaxArtSize = 1 // set minimum article size to 1 byte who ever wants this!
 	}
 
 	if cfg.opt.LogOld < 0 {
