@@ -192,7 +192,7 @@ type segmentChanItem struct {
 	flaginUPMEM bool                             // if true, item is in upload memory and waits for the quaken
 	flaginYenc  bool                             // if true, item is in writing to yenc cache
 	flagisYenc  bool                             // if true, item has been written to yenc cache
-	cached      bool                             // if true, item is cached
+	flagCache   bool                             // if true, item is cached
 	checkedOn   int                              // counts up if item has been checked on a provider
 	pushedDL    int                              // a counter for debugging
 	pushedUP    int                              // a counter for debugging
@@ -273,7 +273,7 @@ func (item *segmentChanItem) PrintItemFlags(src string) {
 			}
 		}
 		if cacheON {
-			if item.cached {
+			if item.flagCache {
 				flags = append(flags, "isCached")
 			}
 		}

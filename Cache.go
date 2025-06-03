@@ -31,9 +31,9 @@ func NewCache(cachedir string, crw int, checkOnly bool, maxartsize int, yenc_wri
 		return nil
 	}
 	c = &Cache{
+		crw:        crw,
 		cachedir:   cachedir,
 		checkOnly:  checkOnly,
-		crw:        crw,
 		maxartsize: maxartsize,
 		yenc_write: yenc_write,
 		debug:      debug,
@@ -101,11 +101,12 @@ func (c *Cache) ReadCache(item *segmentChanItem) (n int) {
 
 	if n > 0 {
 		item.mux.Lock()
-		item.cached = true
+		item.flagCache = true
 		if item.size == 0 {
 			item.size = n
 		}
 		item.flaginDL = false
+		item.flaginDLMEM = false
 		item.mux.Unlock()
 	}
 	return
@@ -123,7 +124,7 @@ func (c *Cache) GoCacheChecker(cid int) {
 		dlog(c.debug, "GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
 		if exists {
 			item.mux.Lock()
-			item.cached = true
+			item.flagCache = true
 			item.mux.Unlock()
 		}
 		item.checkChan <- exists // notify
@@ -188,7 +189,7 @@ func (c *Cache) CacheReader(item *segmentChanItem) (read_bytes int) {
 			// parses the byte object from file to []string
 			item.mux.Lock()
 			item.article = strings.Split(string(fileobj)[:len(fileobj)-1], "\n")
-			item.cached = true
+			item.flagCache = true
 			if item.flaginDL {
 				item.flaginDL = false
 			}
@@ -219,7 +220,7 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 		return 0
 	} else if FileExists(filename) {
 		item.mux.Lock()
-		item.cached = true
+		item.flagCache = true
 		item.mux.Unlock()
 		return 0
 	}
@@ -250,7 +251,7 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 	} // end OpenFile
 
 	item.mux.Lock()
-	item.cached = true
+	item.flagCache = true
 	item.flaginDL = false
 	if GCounter.GetValue("postProviders") == 0 || cfg.opt.UploadLater {
 		item.article = []string{} // free memory

@@ -154,7 +154,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		// item has been read from cache
 		//DecreaseDLQueueCnt() // decrease when read from cache // DISABLED
 		//memlim.MemReturn(who+":cacheRead", item)
-		return 220, nil
+		return 920, nil
 	}
 	start := time.Now() // start time for this routine
 
