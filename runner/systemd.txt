@@ -1,0 +1,8 @@
+/etc/systemd/system/github-runner.service
+[Service]
+ExecStart=/tmp/path/to/actions-runner/run.sh --once
+ExecStopPost=/bin/rm -rf /tmp/path/to/actions-runner/_work/*
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart github-runner

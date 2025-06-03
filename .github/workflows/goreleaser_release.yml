@@ -1,17 +1,10 @@
-name: "TEST Self-Hosted GoReleaser"
+name: LIVE Self-Hosted GoReleaser
 
 on:
-  push:
-    branches:
-      - 'v0.0.2-SNAPSHOT-test-1748786444'
-    tags:
-      - "test*"
+  release:
+    types: [published]
   workflow_dispatch:
   repository_dispatch:
-  pull_request:
-    branches:
-      #- main
-      - "test*"
 
 permissions:
   contents: write
@@ -19,10 +12,8 @@ permissions:
 
 jobs:
   goreleaser:
-    name: "TEST GoReleaser"
+    name: LIVE GoReleaser
     runs-on: [self-hosted, ubu2204-gor]
-#    env:
-#      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: "@Start Clean directory"
         run: |
@@ -42,12 +33,14 @@ jobs:
       #- name: "Restore go cache"
       #  run: runner/go-cache-restore.sh
 
-      - name: "Run GoReleaser (Test Build)"
+      - name: "Run GoReleaser (Live Build)"
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --snapshot
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Set GaRuS Variables"
         run: echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV

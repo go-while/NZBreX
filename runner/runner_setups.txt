@@ -1,0 +1,47 @@
+
+### SETUP COMMANDS FOR GITHUB ACTIONS SELFHOSTED RUNNERS
+
+## get setup script
+apt -y update && apt -y full-upgrade && apt -y install psmisc vnstat
+wget https://github.com/go-while/NZBreX/raw/refs/heads/gpt-tests-1748319193/runner/runner_install_debian.sh -O /root/runner_install_debian.sh
+chmod +x /root/runner_install_debian.sh
+vnstat --create -i eth0 || vnstat --add -i eth0
+chown -R vnstat:vnstat /var/lib/vnstat
+systemctl restart vnstat
+killall -u go-while
+userdel -r go-while
+1. /root/runner_install_debian.sh (reboot)
+2. /root/runner_install_debian.sh
+3. /root/runner_install_debian.sh
+4. # finally it should tell you to supply arguments now: '$0 "SYSUSER" "USERDIR" "GITNAME" "GITREPO" "GATOKEN" "LABELS" "NAME" "GROUP"'
+
+### DEBIAN RUNNERS
+
+## setup runner-deb10
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "deb10" "runner-deb10" "default"
+
+## setup runner-deb11
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "deb11" "runner-deb11" "default"
+
+## setup runner-deb12
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "deb12" "runner-deb12" "default"
+
+### UBUNTU RUNNERS
+
+## setup runner-ubu1804
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu1804" "runner-ubu1804" "default"
+
+## setup runner-ubu2004
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2004" "runner-ubu2004" "default"
+
+## setup runner-ubu2204
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204" "runner-ubu2204" "default"
+
+## setup runner-ubu2404
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2404" "runner-ubu2404" "default"
+
+### UBUNTU RUNNERS 001-254
+# ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204" "runner-ubu2204-010" "default"
+
+### goreleaser-dedicated runners
+./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204-gor" "runner-ubu2204-gor-001" "default"

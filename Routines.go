@@ -3,517 +3,552 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
-func IsSegmentStupid(item *segmentChanItem) (crazy bool) {
+func (s *SESSION) IsSegmentStupid(item *segmentChanItem, doLock bool) (crazy bool) {
+	if doLock {
+		item.mux.RLock()
+		defer item.mux.RUnlock()
+	}
+	// no mutex here! should be locked from caller before or race cond here!
 	// dead.. or done processing? not sure....
 	// check me bug? NoDownload-flag !
-	crazy = ((len(item.availableOn) == 0 && len(item.missingOn) == len(providerList)) ||
-		((len(item.availableOn)-len(item.ignoreDlOn)) == 0 && len(item.missingOn)+len(item.ignoreDlOn) == len(providerList)))
+	crazy = ((len(item.availableOn) == 0 && len(item.missingOn) == len(s.providerList)) ||
+		((len(item.availableOn)-len(item.ignoreDlOn)) == 0 && len(item.missingOn)+len(item.ignoreDlOn) == len(s.providerList)))
 	return
 }
 
-func GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) error {
+func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (code int, err error) {
 	if cfg.opt.SloMoC > 0 {
+		dlog(cfg.opt.BUG, "GoCheckRoutine SloMoC=%d", cfg.opt.SloMoC)
 		time.Sleep(time.Duration(cfg.opt.SloMoC) * time.Millisecond)
 	}
-	Counter.incr("GoCheckRoutines")
-	defer Counter.decr("GoCheckRoutines")
+	GCounter.Incr("GoCheckRoutines")
+	defer GCounter.Decr("GoCheckRoutines")
 
-	if cfg.opt.Debug {
-		log.Printf("GoWorker (%d) checking seg.Id='%s' @ '%s' remainingInChan=%d/%d", wid, item.segment.Id, provider.Name, len(segmentChansCheck[provider.Group]), cap(segmentChansCheck[provider.Group]))
-	}
+	dlog(cfg.opt.DebugCR, "GoWorker (%d) checking seg.Id='%s' @ '%s' remainingInChan=%d/%d", wid, item.segment.Id, provider.Name, len(s.segmentChansCheck[provider.Group]), cap(s.segmentChansCheck[provider.Group]))
 
 	if cacheON && !cfg.opt.CheckCacheOnBoot {
 		cache.CheckCache(item)
 	}
-
-	connitem := SharedConnGet(sharedCC)
-	if connitem == nil {
-		newconnitem, err := provider.Conns.GetConn()
-		if err != nil {
-			log.Printf("ERROR CheckRoutine connect failed Provider '%s' err='%v'", provider.Name, err)
-			return err
-		}
-		connitem = newconnitem
+	var connitem *ConnItem
+	if sharedCC != nil {
+		connitem, err = SharedConnGet(sharedCC, provider)
+	} else {
+		connitem, err = provider.ConnPool.GetConn()
+	}
+	if err != nil {
+		return 0, fmt.Errorf("ERROR in GoCheckRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+	}
+	if connitem == nil || connitem.conn == nil {
+		return 0, fmt.Errorf("ERROR in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
-	code, err := CMD_STAT(provider, connitem, item)
-	//checkedAt := 0 // segmentBar
+	code, err = CMD_STAT(provider, connitem, item)
+	if code == 0 && err != nil {
+		// connection problem, closed?
+		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		dlog(always, "WARN checking seg.Id='%s' failed @ '%s' err='%v'", item.segment.Id, provider.Name, err)
+		return code, err
+	}
+
+	item.mux.Lock() // LOCK item for switch
 	switch code {
 	case 223:
 		// messageid found at provider
-		for pid, prov := range providerList {
+		for pid, prov := range s.providerList {
 			if prov.Group != provider.Group {
 				continue
 			}
-			/* ??? moved check NoDownload and nodl counter to pushDL() */
-
-			switch provider.NoDownload {
-			case false:
-				// pass
-			case true:
-				// check me bug? NoDownload-flag !
-				// only flag as available on provider if provider actually allows downloading...?
-				item.mux.Lock()
-				item.ignoreDlOn[pid] = true
-				item.mux.Unlock()
-			}
-
-			item.mux.Lock()
+			item.checkedOn++
 			item.availableOn[pid] = true
 			delete(item.missingOn, pid)
-			item.checkedAt++
-			item.mux.Unlock()
+			if provider.NoDownload {
+				item.ignoreDlOn[pid] = true
+			}
+			if provider.NoUpload {
+				item.ignoreUlOn[pid] = true
+			}
 		}
 		//checkedAt += item.checkedAt // segmentBar
 		provider.mux.Lock() // mutex #939d articles.checked/available++
 		provider.articles.checked++
 		provider.articles.available++
 		provider.mux.Unlock() // mutex #939d articles.checked/available++
-		//fileStatLock.Lock()
-		//fileStat[item.num].available[provider.Name]++
-		//fileStatLock.Unlock()
+
+		if cfg.opt.Csv {
+			s.fileStatLock.Lock()
+			s.fileStat[s.nzbName].available[provider.Name]++
+			s.fileStatLock.Unlock()
+		}
 
 	default:
-		if code == 0 && err != nil {
-			// connection problem, closed?
-			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-			log.Printf("WARN checking seg.Id='%s' failed @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
-			time.Sleep(time.Second * 5)
-			segmentChansCheck[provider.Group] <- item
-			return err
-
-		} else {
-			// messageid NOT found at provider
-			item.mux.Lock()
-			for id, prov := range providerList {
-				if prov.Group != provider.Group {
-					continue
-				}
-				item.missingOn[id] = true
-				if code == 451 {
-					item.dmcaOn[id] = true
-				}
-				item.checkedAt++
+		// messageid NOT found at provider
+		for id, prov := range s.providerList {
+			if prov.Group != provider.Group {
+				continue
 			}
+			item.checkedOn++
+			switch code {
+			case 430:
+				// 430: no download on this provider
+				item.missingOn[id] = true
+				err = nil // reset error
+			case 451:
+				// 451: DMCA on this provider
+				item.dmcaOn[id] = true
+				err = nil // reset error
 
-			//checkedAt += item.checkedAt // segmentBar
-			item.mux.Unlock()
-			provider.mux.Lock() // mutex #3b99 articles.checked/missing++
-			provider.articles.checked++
-			provider.articles.missing++
-			provider.mux.Unlock() // mutex #3b99 articles.checked/missing++
+			default:
+				// uknown code
+				dlog(always, "GoCheckRoutine CMD_STAT seg.Id='%s' code=%d err='%v' @ '%s'", item.segment.Id, code, err, provider.Name)
+				item.ignoreDlOn[id] = true
+				item.missingOn[id] = true
+				item.errorOn[id] = true
+			}
 		}
+
+		// update provider statistics
+		provider.mux.Lock() // mutex #3b99 articles.checked/missing++
+		provider.articles.checked++
+		provider.articles.missing++
+		provider.mux.Unlock() // mutex #3b99 articles.checked/missing++
+		if cfg.opt.Csv {
+			s.fileStatLock.Lock()
+			s.fileStat[s.nzbName].missing[provider.Name]++
+			s.fileStatLock.Unlock()
+		}
+
 	} // end switch
+	item.mux.Unlock()
 
-	/*
-		if cfg.opt.Bar && checkedAt == len(providerList) {
-			segmentBar.Increment()
-			segmentBar.SetMessage(fmt.Sprintf("item:%d", item.segment.Number))
-		}
-	*/
-
-	if cfg.opt.Debug {
-		log.Printf("GoWorker (%d) CheckRoutine quit '%s'", wid, provider.Name)
+	dlog(cfg.opt.DebugCR, "GoWorker (%d) CheckRoutine end seg.Id='%s' '%s'", wid, item.segment.Id, provider.Name)
+	if sharedCC != nil {
+		SharedConnReturn(sharedCC, connitem, provider)
+	} else {
+		provider.ConnPool.ParkConn(wid, connitem, "GoCheckRoutine")
+	}
+	if testing {
+		go func(item *segmentChanItem) {
+			s.WorkDividerChan <- &WrappedItem{wItem: item, src: "CR"} // send connitem to work divider
+		}(item)
 	}
 
-	SharedConnReturn(sharedCC, connitem)
-	//provider.Conns.ParkConn(provider, connitem)
-	return nil
+	dlog(cfg.opt.DebugCR, "GoCheckRoutine CMD_STAT seg.Id='%s' code=223 err='%v' @ '%s'", item.segment.Id, err, provider.Name)
+
+	return code, err
 } // end func GoCheckRoutine
 
-func GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) error {
-	if cfg.opt.CheckOnly {
-		return nil
-	}
+func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (int, error) {
 	if cfg.opt.SloMoD > 0 {
+		dlog(cfg.opt.BUG, "GoDownsRoutine SloMoD=%d", cfg.opt.SloMoD)
 		time.Sleep(time.Duration(cfg.opt.SloMoD) * time.Millisecond)
 	}
-	Counter.incr("GoDownsRoutines")
-	defer Counter.decr("GoDownsRoutines")
-
-	who := fmt.Sprintf("DR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)
-	memlim.MemCheckWait(who, item)
+	GCounter.Incr("GoDownsRoutines")
+	defer GCounter.Decr("GoDownsRoutines")
 
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
 		// item has been read from cache
-		Counter.decr("dlQueueCnt")       // decrease temporary counter when read from cache
-		Counter.decr("TOTAL_dlQueueCnt") // decrease total counter when read from cache
+		//DecreaseDLQueueCnt() // decrease when read from cache // DISABLED
 		//memlim.MemReturn(who+":cacheRead", item)
-		return nil
+		return 220, nil
 	}
+	start := time.Now() // start time for this routine
 
-	item.mux.RLock()                  // mutex #de94
-	if item.ignoreDlOn[provider.id] { // check me bug? NoDownload-flag !
-		item.mux.RUnlock() // mutex #de94
-		memlim.MemReturn(who+"ignoreDlOn", item)
-		return nil
+	var err error
+	var connitem *ConnItem
+	if sharedCC != nil {
+		connitem, err = SharedConnGet(sharedCC, provider)
+	} else {
+		connitem, err = provider.ConnPool.GetConn()
 	}
-	item.mux.RUnlock() // mutex #de94
-
-	connitem := SharedConnGet(sharedCC)
-	if connitem == nil {
-		newconnitem, err := provider.Conns.GetConn()
-		if err != nil {
-			memlim.MemReturn("MemRetOnERR 'GetConn':"+who, item)
-			log.Printf("ERROR GoDownsRoutine connect failed Provider '%s' err='%v'", provider.Name, err)
-			return err
-		}
-		connitem = newconnitem
+	if err != nil {
+		return 0, fmt.Errorf("ERROR in GoDownsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
+	if connitem == nil || connitem.conn == nil {
+		return 0, fmt.Errorf("ERROR in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+	}
+	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
+	startArticle := time.Now()
 	code, msg, err := CMD_ARTICLE(provider, connitem, item)
+
+	if err != nil {
+		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+		// handle connection problem / closed connection
+		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		return 0, fmt.Errorf("error in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+	}
+
+	dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE seg.Id='%s' code=%d msg='%s' err='%v' took=(%d ms)", item.segment.Id, code, msg, err, time.Since(startArticle).Milliseconds())
 
 	switch code {
 	case 220:
-		if err != nil {
-			log.Printf("GoDownsRoutine got code 220 but err='%v'", err)
+		dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE case 220: seg.Id='%s' code=220 msg='%s' err='%v'", item.segment.Id, msg, err)
+		//DecreaseDLQueueCnt() // on code 220 // DISBALED
+		if item.size == 0 {
+			dlog(always, "ERROR GoDownsRoutine CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' code=220 but item.size=0! msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, msg, err)
+			os.Exit(1) // FIXME REVIEW: should not happen, but if it does, we exit here
 		}
-		Counter.decr("dlQueueCnt") // on code 220
-		Counter.add("TMP_RXbytes", uint64(item.size))
-		Counter.add("TOTAL_RXbytes", uint64(item.size))
-
-		for pid, prov := range providerList {
+		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
+		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		s.counter.Add("TMP_RXbytes", uint64(item.size))
+		s.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		GCounter.Add("TOTAL_RXbytes", uint64(item.size))
+		// got the article, set our group to availableOn
+	flagProviderdl:
+		for pid, prov := range s.providerList {
 			if prov.Group != provider.Group {
-				continue
+				// not our group
+				continue flagProviderdl
 			}
 			item.mux.Lock() // mutex #0a11
 			item.availableOn[pid] = true
 			delete(item.missingOn, pid)
 			item.mux.Unlock() // mutex #0a11
 		}
-		item.mux.Lock()      // mutex #e96b
-		item.flagisDL = true // FIXME REVIEW should be set to false here if crc32 reports an error but code 220 is still there....
+		item.mux.Lock() // mutex #e96b
+		item.flagisDL = true
 		item.flaginDL = false
+		item.flaginDLMEM = false
 		if cfg.opt.ByPassSTAT {
-			item.checkedAt++
+			item.checkedOn++
 		}
-		item.mux.Unlock()   // mutex #e96b
+		//item.PrintItemFlags("post-CMD_ARTICLE: case 220")
+		item.mux.Unlock() // mutex #e96b
+
+		// update statistics
 		provider.mux.Lock() // mutex #918f articles.available++/downloaded++
 		if cfg.opt.ByPassSTAT {
 			provider.articles.available++
+			if cfg.opt.Csv {
+				s.fileStatLock.Lock()
+				s.fileStat[s.nzbName].available[provider.Name]++
+				s.fileStatLock.Unlock()
+			}
 		}
 		provider.articles.downloaded++
 		provider.mux.Unlock() // mutex #918f articles.available++/downloaded++
-		if cacheON {
-			cache.Add2Cache(item)
-		}
+
+		// pass item to cache.
+		dlog(cfg.opt.DebugWorker, "DEBUG GoDownsRoutine CMD_ARTICLE: reached cache.Add2Cache seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
+		cache.Add2Cache(item)
+		// pass to ParkConn
+
 	default:
-		if code == 0 && err != nil {
-			// connection problem, closed?
-			provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-
-			item.mux.RLock() // mutex #74b7
-			failed := item.fails
-			isdead := IsSegmentStupid(item)
-			//isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList) // check me bug? NoDownload-flag !
-			item.mux.RUnlock() // mutex #74b7
-
-			if !isdead && failed <= 5 {
-
-				log.Printf("WARN CMD_ARTICLE failed re-queue in 5 sec: seg.Id='%s' @ '%s' failed=%d isdead=%t code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, failed, isdead, code, msg, err)
-				item.mux.Lock() // mutex #ee45
-				item.fails++
-				item.mux.Unlock() // mutex #ee45
-				time.Sleep(time.Second * 5)
-				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE re-queued':"+who, item)
-				segmentChansDowns[provider.Group] <- item
-
-			} else if isdead {
-				Counter.decr("dlQueueCnt") // code=0 && err != nil && isdead
-				memlim.MemReturn("MemRetOnERR 'CMD_ARTICLE failed':"+who, item)
-				log.Printf("!!!! DEBUG GoDownsRoutine: isdead seg.Id='%s' code=0 or err='%v'", item.segment.Id, err)
+		dlog(cfg.opt.Debug, "GoDownsRoutine CMD_ARTICLE: case default: seg.Id='%s' code=%d msg='%s' err='%v' '%s'#'%s'", item.segment.Id, code, msg, err, provider.Name, provider.Group)
+		// downloading article failed from provider-group
+	setFlags:
+		for pid, prov := range s.providerList {
+			if prov.Group != provider.Group {
+				// not our group
+				continue setFlags
 			}
-			return err
+			// modify availableON and missingON lists in our group
+			item.mux.Lock() // mutex #821d
 
-		} else {
-			// downloading article failed from provider
-			for pid, prov := range providerList {
-				if prov.Group != provider.Group {
-					continue
-				}
-				// modify availableON and missingON lists
-				item.mux.Lock() // mutex #821d
+			switch code {
+			case 430:
 				item.missingOn[pid] = true
-				switch code {
-				case 451:
-					item.dmcaOn[pid] = true
-				case 99932:
-					// got bad_crc
-					item.errorOn[pid] = true
-				} // end switch code
-				// remove provider from availableON list
-				delete(item.availableOn, pid)
-				item.mux.Unlock() // mutex #821d
-			}
+			case 451:
+				item.dmcaOn[pid] = true
+				item.ignoreDlOn[pid] = true
+				item.missingOn[pid] = true
+			case 99932:
+				// got bad_crc
+				item.errorOn[pid] = true
+				item.ignoreDlOn[pid] = true
+				dlog(always, "CRC32 failed seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
+			default:
+				item.ignoreDlOn[pid] = true
+			} // end switch code
 
-			item.mux.Lock() // mutex #030b
-			//isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(providerList) // check me bug? NoDownload-flag !
-			isdead := IsSegmentStupid(item)
-			item.flaginDL = false
-			item.mux.Unlock() // mutex #030b
-
-			provider.mux.Lock() // mutex #24b0 articles.available--/missing++
-			if provider.articles.available > 0 {
-				provider.articles.available--
-			}
-			provider.articles.missing++
-			provider.mux.Unlock() // mutex #24b0 articles.available--/missing++
-
-			Counter.decr("dlQueueCnt")
-			if isdead {
-
-				if cfg.opt.YencWrite && Counter.get("TOTAL_yencQueueCnt") > 0 {
-					Counter.decr("yencQueueCnt")
-				}
-			}
-			if code == 430 {
-				if cfg.opt.Print430 {
-					log.Printf("INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(providerList))
-				}
-			}
-			memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)
+			// remove provider from availableON list
+			delete(item.availableOn, pid)
+			item.mux.Unlock() // mutex #821d
 		}
+
+		item.mux.Lock() // mutex #030b
+		//isdead := len(item.availableOn) == 0 && len(item.missingOn) == len(s.providerList) // check me bug? NoDownload-flag !
+		isdead := s.IsSegmentStupid(item, false)
+		item.flaginDL = false
+		item.mux.Unlock() // mutex #030b
+
+		provider.mux.Lock() // mutex #24b0 articles.available--/missing++
+		if provider.articles.available > 0 {
+			provider.articles.available--
+		}
+		provider.articles.missing++
+		provider.mux.Unlock() // mutex #24b0 articles.available--/missing++
+		if cfg.opt.Csv {
+			s.fileStatLock.Lock()
+			s.fileStat[s.nzbName].missing[provider.Name]++
+			s.fileStatLock.Unlock()
+		}
+		moreProvider := false // tmp flag if we have more providers to download from
+		for pid, prov := range s.providerList {
+			if prov.Group != provider.Group {
+				// check other groups
+				if !prov.NoDownload {
+					if item.availableOn[pid] && !item.ignoreDlOn[pid] && !item.errorOn[pid] {
+						moreProvider = true
+						break // we have at least one provider to download from
+					}
+				}
+				continue
+			}
+		}
+		if !moreProvider {
+			//DecreaseDLQueueCnt() // failed article download, CODE != 220 or 0 // DISABLED
+		}
+		if isdead {
+			if cfg.opt.YencWrite && GCounter.GetValue("TOTAL_yencQueueCnt") > 0 {
+				GCounter.Decr("yencQueueCnt")
+			}
+		}
+		dlog((code == 430 && cfg.opt.Print430), "INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
+
+		//memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)  // DISABLED
+		//}
 	} // end switch code
-	if cfg.opt.Debug {
-		log.Printf("GoWorker (%d) DownsRoutine quit '%s'", wid, provider.Name)
-	}
 
-	SharedConnReturn(sharedCC, connitem)
-	//provider.Conns.ParkConn(provider, connitem)
-	return nil
-} // end func DownsRoutine
-
-func GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) error {
-	if cfg.opt.CheckOnly {
-		return nil
+	if sharedCC != nil {
+		SharedConnReturn(sharedCC, connitem, provider)
+	} else {
+		provider.ConnPool.ParkConn(wid, connitem, "GoDownsRoutine")
 	}
+	if testing {
+		go func(item *segmentChanItem) {
+			s.WorkDividerChan <- &WrappedItem{wItem: item, src: "DR"} // send connitem to work divider
+		}(item)
+	}
+	dlog(cfg.opt.DebugDR || cfg.opt.DebugWorker, "GoDownsRoutine end seg.Id='%s' @ '%s' took=(%d ms) err='%v'", item.segment.Id, provider.Name, time.Since(start).Milliseconds(), err)
+	return code, err
+} // end func GoDownsRoutine
+
+func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (int, error) {
 	if cfg.opt.SloMoU > 0 {
+		dlog(cfg.opt.BUG, "GoReupsRoutine SloMoU=%d", cfg.opt.SloMoU)
 		time.Sleep(time.Duration(cfg.opt.SloMoU) * time.Millisecond)
 	}
-	Counter.incr("GoReupsRoutines")
-	defer Counter.decr("GoReupsRoutines")
+	GCounter.Incr("GoReupsRoutines")
+	defer GCounter.Decr("GoReupsRoutines")
+	//who := fmt.Sprintf("UR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)  // DISABLED MEMRETURN
 
-	who := fmt.Sprintf("UR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)
+	var err error
+	var connitem *ConnItem
+	if sharedCC != nil {
+		connitem, err = SharedConnGet(sharedCC, provider)
+	} else {
+		connitem, err = provider.ConnPool.GetConn()
+	}
+	if err != nil {
+		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+	}
+	if connitem == nil || connitem.conn == nil {
+		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+	}
 
-	connitem := SharedConnGet(sharedCC)
-
-	/*
-		connitem, err := provider.Conns.GetConn(wid, provider)
-		if err != nil {
-			log.Printf("ERROR GoReupsRoutine connect failed Provider '%s' err='%v'", provider.Name, err)
-			memlim.MemReturn("MemRetOnERR:"+who, item)
-			return err
-		}
-	*/
-
-	var uploaded, unwanted, retry, clearmem bool
-
-	doPOST, doIHAVE := false, false
+	var uploaded, unwanted, retry bool
+	var cmd uint8
 
 	//provider.mux.RLock() // FIXME TODO #b8bd287b:
 	if provider.PreferIHAVE && provider.capabilities.ihave {
-		doIHAVE = true
+		cmd = 2
 	} else if provider.capabilities.post {
-		doPOST = true
+		cmd = 1
 	} else if provider.capabilities.ihave {
-		doIHAVE = true
+		cmd = 2
 	} else {
 		//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
-		provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-		return fmt.Errorf("WARN selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
+		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		return 0, fmt.Errorf("WARN selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
 	}
 	//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
 
-	if cfg.opt.Debug {
-		log.Printf("ReUp: (%d) seg.Id='%s' @ '%s' doPost=%t doIHAVE=%t", wid, item.segment.Id, provider.Name, doPOST, doIHAVE)
-	}
+	dlog(cfg.opt.DebugUR || cfg.opt.DebugWorker, "ReUp: init seg.Id='%s' @ '%s'#'%s' cmd='%d' (UR=%d)", item.segment.Id, provider.Name, provider.Group, cmd, wid)
 
-	if doPOST {
-		code, _, err := CMD_POST(provider, connitem, item)
-		Counter.add("TMP_TXbytes", uint64(item.size))
-		Counter.add("TOTAL_TXbytes", uint64(item.size))
+	var code int
+	var msg string
+	var txb uint64  // tx bytes
+	freemem := true // flag to free or not to clear memory after upload
 
+	switch cmd {
+	case 1:
+		code, msg, txb, err = CMD_POST(provider, connitem, item)
 		switch code {
-
 		case 240:
-			// article posted
 			uploaded = true
-			// pass
-
 		default:
-			if code == 0 && err != nil {
-				memlim.MemReturn("MemRetOnERR 'CMD_POST':"+who, item)
-				// connection problem, closed?
-				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-				log.Printf("WARN CMD_POST failed seg.Id='%s' @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
-				time.Sleep(time.Second * 5)
-				segmentChansReups[provider.Group] <- item
-				return err
-			}
-			if code > 0 {
-				// Posting failed with any error code
-				unwanted = true // TODO checkme: maybe flag as retry?
-				// pass
-			}
+			dlog(always, "ERROR in GoReupsRoutine: CMD_POST seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+			err = fmt.Errorf("error in GoReupsRoutine: CMD_POST seg.Id='%s' @ '%s'#'%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, code, msg, err)
+			unwanted = true
 		}
 
-	} else if doIHAVE {
-		code, _, err := CMD_IHAVE(provider, connitem, item)
-		Counter.add("TMP_TXbytes", uint64(item.size))
-		Counter.add("TOTAL_TXbytes", uint64(item.size))
+	case 2:
+		code, msg, txb, err = CMD_IHAVE(provider, connitem, item)
 		switch code {
-
 		case 235:
-			// article accepted
 			uploaded = true
 			// pass
-
 		case 436:
-			// retry later
 			retry = true
 			// pass
-
-		default:
-			if code == 0 && err != nil {
-				// connection problem, closed?
-				memlim.MemReturn("MemRetOnERR 'CMD_IHAVE':"+who, item)
-				provider.Conns.CloseConn(connitem, sharedCC) // close conn on error
-				log.Printf("WARN CMD_IHAVE failed seg.Id='%s' @ '%s' err='%v' re-queued", item.segment.Id, provider.Name, err)
-				time.Sleep(time.Second * 5)
-				segmentChansReups[provider.Group] <- item
-				return err
-			}
+		case 437:
 			unwanted = true
 			// pass
-
-		} // end switch code
-	}
+		default:
+			dlog(always, "ERROR in GoReupsRoutine: CMD_IHAVE seg.Id='%s' @ '%s'#'%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, code, msg, err)
+			err = fmt.Errorf("error in GoReupsRoutine: CMD_IHAVE seg.Id='%s' @ '%s'#'%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, code, msg, err)
+			unwanted = true
+		}
+	} // end switch cmd
 
 	if uploaded {
+		item.txb += txb
+		// to calulate total speed of this session working on a nzb
+		s.counter.Add("TMP_RXbytes", uint64(item.size))
+		s.counter.Add("TOTAL_RXbytes", uint64(item.size))
 
+		// to calulate total speed of this provider
+		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
+		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+
+		// to calulate global total speed
+		GCounter.Add("TMP_TXbytes", uint64(item.size))
+		GCounter.Add("TOTAL_TXbytes", uint64(item.size))
 		// react to finished upload
 		item.mux.Lock()
-		for id, prov := range providerList {
+		// flag item on our group as available
+		for id, prov := range s.providerList {
 			if prov.Group != provider.Group {
+				// not our group
 				continue
 			}
-			item.availableOn[id] = true
+			//item.availableOn[id] = true
+			item.uploadedTo[id] = true
 			delete(item.missingOn, id)
 		}
 		item.flaginUP = false
 		item.flagisUP = true
 		item.mux.Unlock()
+		// update provider statistics
 		provider.mux.Lock() // mutex #87c9 articles.refreshed++
 		provider.articles.refreshed++
 		provider.mux.Unlock() // mutex #87c9 articles.refreshed++
-		clearmem = true
-		Counter.decr("upQueueCnt")
+		//freemem = true // DISABLED
+		//GCounter.Decr("upQueueCnt") // DISABLED
 
 	} else if unwanted {
 
 		// item is unwanted at provider, set flag.
-		log.Printf("Flag Unwanted seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		dlog(always, "Flag Unwanted seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		moreProvider := false
 		item.mux.Lock()
-		for pid, prov := range providerList {
+		for pid, prov := range s.providerList {
 			if prov.Group != provider.Group {
+				// check other groups
 				if !prov.NoUpload && (prov.capabilities.post || prov.capabilities.ihave) {
-					if item.missingOn[pid] && !item.unwantedOn[pid] {
+					if item.missingOn[pid] && !item.unwantedOn[pid] && !item.uploadedTo[pid] {
 						moreProvider = true
+						break // we have at least one more provider to upload to
 					}
 				}
 				continue
 			}
-			item.unwantedOn[pid] = true
+			item.unwantedOn[pid] = true // flag as unwanted on this provider-group
 		}
-		item.flaginUP = false
+		item.flaginUP = false // no more in upload because it was unwanted
 		item.mux.Unlock()
 
 		// TODO: need better check if we have other providers
 		// with posting capabilities and queue item to one of them
-		if !moreProvider {
-			clearmem = true
-			Counter.decr("upQueueCnt")
-			Counter.decr("TOTAL_upQueueCnt")
+		if moreProvider {
+			freemem = false
+			//GCounter.Decr("upQueueCnt") // DISABLED
+			//GCounter.Decr("TOTAL_upQueueCnt") // DISABLED
 		}
 
 	} else if retry {
 
-		log.Printf("Flag Retry seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
+		dlog(always, "Flag Retry seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 		item.mux.Lock()
 		item.retryIn = time.Now().Unix() + 15
 		item.retryOn[provider.id] = true
 		item.flaginUP = false
 		item.mux.Unlock()
-		Counter.decr("upQueueCnt")
-		Counter.decr("TOTAL_upQueueCnt")
-		//clearmem = true
+		//GCounter.Decr("upQueueCnt") // DISABLED
+		//GCounter.Decr("TOTAL_upQueueCnt") // DISABLED
+		//freemem = true //REVIEW: should we clear memory here? maybe not, because we want to retry this item later!
 	}
 
-	/*
-		if cfg.opt.Bar {
-			BarMutex.Lock()
-			if upBarStarted {
-				upBar.Increment()
-			}
-			BarMutex.Unlock()
-		}
-	*/
-
-	if clearmem {
-		if cfg.opt.Debug {
-			log.Printf("OK ReupsRoutine clearmem seg.Id='%s'", item.segment.Id)
-		}
+	if freemem {
+		dlog(cfg.opt.DebugUR || cfg.opt.DebugWorker, "GoWorker (%d) ReupsRoutine freemem seg.Id='%s'", wid, item.segment.Id)
 		// clears this item content from memory because it got uploaded
-		//doMemReturn := true
 		item.mux.Lock()
-		item.lines = []string{}
-		/* // watch out for broken wings #99ffff!
-		 * // ideas was to not release memory here until yenc has been written, if flag is set...
-		 * // but something slows down by 90% if broken wings are enabled and it freezes...
-		if item.flaginYenc {
-			doMemReturn = false
-		}*/
+		item.article = []string{} // DISABLED-NOT
 		item.mux.Unlock()
-		//if doMemReturn {
-		memlim.MemReturn(who, item)
-		//}
 	} else {
-		log.Printf("WARN ReupsRoutine NO clearmem seg.Id='%s'", item.segment.Id)
+		dlog(always, "GoWorker (%d) WARN ReupsRoutine NO freemem seg.Id='%s'", wid, item.segment.Id)
 	}
 
-	if cfg.opt.Debug {
-		log.Printf("GoWorker (%d) ReupsRoutine quit '%s'", wid, provider.Name)
+	if err != nil {
+		dlog(always, "ERROR in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+		// handle connection problem / closed connection
+		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		return 0, fmt.Errorf("error in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 	}
 
-	SharedConnReturn(sharedCC, connitem)
-	//provider.Conns.ParkConn(provider, connitem)
-	return nil
-} // end func ReupsRoutine
+	if sharedCC != nil {
+		SharedConnReturn(sharedCC, connitem, provider)
+	} else {
+		provider.ConnPool.ParkConn(wid, connitem, "GoReupsRoutine")
+	}
 
-func StopRoutines() {
+	dlog(cfg.opt.DebugUR || cfg.opt.DebugWorker, "GoWorker (%d) ReupsRoutine end seg.Id='%s' '%s'#'%s' err='%v'", wid, item.segment.Id, provider.Name, provider.Group, err)
+	return code, err
+} // end func GoReupsRoutine
+
+func (s *SESSION) StopRoutines() {
 	if cfg.opt.Debug {
 		log.Print("StopRoutines: pushing")
 	}
 	// pushing nil into the segment chans will stop the routines
-	for _, provider := range providerList {
-		if segmentChansCheck[provider.Group] != nil {
-			segmentChansCheck[provider.Group] <- nil
-		}
-		if segmentChansDowns[provider.Group] != nil {
-			segmentChansDowns[provider.Group] <- nil
-		}
-		if segmentChansReups[provider.Group] != nil {
-			segmentChansReups[provider.Group] <- nil
-		}
+	for _, provider := range s.providerList {
+		closeSegmentChannel(s.segmentChansCheck[provider.Group])
+		closeSegmentChannel(s.segmentChansDowns[provider.Group])
+		closeSegmentChannel(s.segmentChansReups[provider.Group])
+
 	}
-	// push an empty stuct to stop_chan will stop everyone listening
-	stop_chan <- struct{}{}
+	close(s.stopChan)
 	if cfg.opt.Debug {
 		log.Print("StopRoutines: released")
 	}
 } // end func StopRoutines
+
+func closeSegmentChannel(input chan *segmentChanItem) {
+	if input == nil {
+		log.Printf("closeChannel: input channel is nil")
+		return
+	}
+	select {
+	case item, ok := <-input:
+		if item != nil {
+			log.Printf("ERROR in closeSegmentChannel: LOST item seg.Id='%s'", item.segment.Id)
+		}
+		if !ok {
+			if cfg.opt.Debug {
+				log.Printf("closeSegmentChannel: channel %p already closed", input)
+			}
+			return
+		}
+	default:
+		close(input) // close the channel if it is not already closed
+		if cfg.opt.Debug {
+			log.Printf("closeSegmentChannel: closed channel %p", input)
+		}
+	}
+} // end func closeSegmentChannel

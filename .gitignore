@@ -23,8 +23,27 @@ go.work
 # test files
 test*.*
 
+# private
+*.log*
+*.old*
+*.bak*
+
+*.pem
+*.key
+*.crt
+
+bak/*
+log/
+logs/
+build/
+test/
+nzbs/tmp*
+nzbs/test*
+provider.json
+
 # github codespace
 oryxBuildBinary
 
 # dont ignore gh action yml
-!.github/workflows/build_and_publish.yml
+!.github/workflows/*.yml
+
