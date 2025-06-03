@@ -242,6 +242,8 @@ var (
 // it prints the flags that are set for the item, such as inDL, isDL, inUP, isUP, inDLMEM, inUPMEM, inYenc, isYenc
 // it will print "none" if no flags are set
 // it is called from the segmentChanItem.PrintItemFlags() method
+// src is the source of the log message
+// print is a boolean to control if the flags should be printed or not
 func (item *segmentChanItem) PrintItemFlags(print bool, src string) {
 	if !print {
 		return
