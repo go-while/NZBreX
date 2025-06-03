@@ -242,7 +242,10 @@ var (
 // it prints the flags that are set for the item, such as inDL, isDL, inUP, isUP, inDLMEM, inUPMEM, inYenc, isYenc
 // it will print "none" if no flags are set
 // it is called from the segmentChanItem.PrintItemFlags() method
-func (item *segmentChanItem) PrintItemFlags(src string) {
+func (item *segmentChanItem) PrintItemFlags(print bool, src string) {
+	if !print {
+		return
+	}
 	flags := []string{}
 	if item.flaginDL {
 		flags = append(flags, "inDL")
