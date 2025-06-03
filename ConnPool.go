@@ -842,10 +842,10 @@ func (c *ConnPool) cpSpeedmeter(byteSize int64, workerWGconnReady *sync.WaitGrou
 	if PrintStats < 5 {
 		PrintStats = 5 // defaults to min 5sec
 	}
-	cron := time.After(time.Duration(PrintStats) * time.Second)
-
 	var logStr, logStr_RX, logStr_TX string
 	var TOTAL_TXbytes, TOTAL_RXbytes uint64
+	ticker := time.NewTicker(time.Second * time.Duration(PrintStats))
+	defer ticker.Stop()
 forever:
 	for {
 		select {
@@ -855,7 +855,7 @@ forever:
 			}
 			break forever
 
-		case <-cron: // speedmeter
+		case <-ticker.C: // speedmeter
 			tmp_rxb, tmp_txb := c.counter.GetReset("TMP_RXbytes"), c.counter.GetReset("TMP_TXbytes")
 			logStr, logStr_RX, logStr_TX = "", "", ""
 			if tmp_rxb > 0 {
@@ -870,7 +870,7 @@ forever:
 				upPerc := int(float64(TOTAL_TXbytes) / float64(byteSize) * 100)
 				logStr_TX = fmt.Sprintf(" |  UL  [%3d%%] | %d / %d MiB  |  SPEED: %8d KiB/s ~%5.1f Mbps | '%s'#'%s'", upPerc, TOTAL_TXbytes/1024/1024, byteSize/1024/1024, tx_speed, mbps, c.provider.Name, c.provider.Group)
 			}
-			cron = time.After(time.Second * time.Duration(PrintStats))
+
 			if logStr_RX != "" && cfg.opt.Verbose {
 				//logStr = logStr + logStr_RX
 				log.Print(logStr_RX)
