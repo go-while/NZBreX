@@ -154,7 +154,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		// item has been read from cache
 		//DecreaseDLQueueCnt() // decrease when read from cache // DISABLED
 		//memlim.MemReturn(who+":cacheRead", item)
-		return 220, nil
+		return 920, nil
 	}
 	start := time.Now() // start time for this routine
 
@@ -193,10 +193,16 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			dlog(always, "ERROR GoDownsRoutine CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' code=220 but item.size=0! msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, msg, err)
 			os.Exit(1) // FIXME REVIEW: should not happen, but if it does, we exit here
 		}
-		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
-		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		// to calulate total download speed of this session working on a nzb
 		s.counter.Add("TMP_RXbytes", uint64(item.size))
 		s.counter.Add("TOTAL_RXbytes", uint64(item.size))
+
+		// to calulate total download speed of this provider
+		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
+		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+
+		// to calulate global total download speed
+		GCounter.Add("TMP_RXbytes", uint64(item.size))
 		GCounter.Add("TOTAL_RXbytes", uint64(item.size))
 		// got the article, set our group to availableOn
 	flagProviderdl:
@@ -217,7 +223,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		if cfg.opt.ByPassSTAT {
 			item.checkedOn++
 		}
-		//item.PrintItemFlags("post-CMD_ARTICLE: case 220")
+		item.PrintItemFlags(cfg.opt.Debug, "post-CMD_ARTICLE: case 220")
 		item.mux.Unlock() // mutex #e96b
 
 		// update statistics
@@ -409,15 +415,15 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	if uploaded {
 		item.txb += txb
-		// to calulate total speed of this session working on a nzb
-		s.counter.Add("TMP_RXbytes", uint64(item.size))
-		s.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		// to calulate total upload speed of this session working on a nzb
+		s.counter.Add("TMP_TXbytes", uint64(item.size))
+		s.counter.Add("TOTAL_TXbytes", uint64(item.size))
 
-		// to calulate total speed of this provider
-		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
-		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		// to calulate total upload speed of this provider
+		provider.ConnPool.counter.Add("TMP_TXbytes", uint64(item.size))
+		provider.ConnPool.counter.Add("TOTAL_TXbytes", uint64(item.size))
 
-		// to calulate global total speed
+		// to calulate global total upload speed
 		GCounter.Add("TMP_TXbytes", uint64(item.size))
 		GCounter.Add("TOTAL_TXbytes", uint64(item.size))
 		// react to finished upload

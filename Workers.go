@@ -196,10 +196,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			switch cfg.opt.ByPassSTAT {
 			case false:
 				code, err := s.GoCheckRoutine(wid, provider, item, sharedCC)
+				item.PrintItemFlags(cfg.opt.Debug, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 				if err != nil { // re-queue?
 					dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
 				}
-				item.PrintItemFlags(fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 			case true:
 				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
 				os.Exit(1)
@@ -250,8 +250,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			errStr := ""
 			StartDowns := time.Now()
 			code, err := s.GoDownsRoutine(wid, provider, item, sharedCC)
+			item.PrintItemFlags(cfg.opt.Debug, fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
 			DecreaseDLQueueCnt()
-			if err != nil || code != 220 {
+			if err != nil || (code != 220 && code != 920) {
 				if code != 430 {
 					// 430 is a normal error code for GoDownsRoutine, so we don't log it as an error
 					errStr = fmt.Sprintf("ERROR in GoDownsRoutine code='%d' err='%v'", code, err)
@@ -260,11 +261,21 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoDownsRoutine on error
 				continue forGoDownsRoutine
 			}
-			if code == 220 {
-				speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartDowns).Seconds())
-				dlog(cfg.opt.DebugWorker, "GoDownsRoutine: downloaded (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
+			var speedInKBytes float64
+			mode := "downloaded"
+			if item.size > 0 {
+				speedInKBytes = (float64(item.size) / 1024) / float64(time.Since(StartDowns).Seconds())
 			}
-			//item.PrintItemFlags(fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
+			switch code {
+			case 220:
+				// pass
+
+			case 920: // 920 is a special code for GoDownsRoutine to indicate that the item has been read from cache
+				mode = "cache read"
+			}
+
+			dlog(always, "GoDownsRoutine: %s (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", mode, wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
+
 			// back to top
 		} // end forGoDownsRoutine
 		dlog(always, "GoDownsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
@@ -303,6 +314,8 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			// TODO handle memlim freemem here
 			StartReUps := time.Now()
 			code, err := s.GoReupsRoutine(wid, provider, item, sharedCC)
+			item.PrintItemFlags(cfg.opt.Debug, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
+
 			DecreaseUPQueueCnt()
 			if err != nil {
 				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v'", code, err)
@@ -319,22 +332,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		dlog(always, "ReupsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	}(wid, provider, waitWorker, sharedCC, segCR) // end go func()
 
-	//workerWGconnReady.Done() // release #2 for every provider
-	// wait for all 3 routines to finish
-	if cfg.opt.DebugWorker {
-		dlog(cfg.opt.DebugWorker, "GoWorker (%d) waitWorker.Wait for routines to complete '%s'", wid, provider.Name)
-	}
-	//waitWorker.Done() // remove this GoWorker from the wait group has been set  before GoWorker
-	dlog(cfg.opt.DebugWorker, "GoWorker (%d) closing @ '%s'", wid, provider.Name)
+	dlog(cfg.opt.DebugWorker, "GoWorker (%d) waitWorker.Wait for routines to complete '%s'", wid, provider.Name)
 	waitWorker.Wait() // wait for all 3 routines to finish
+	dlog(cfg.opt.BUG, "GoWorker (%d) closing @ '%s'", wid, provider.Name)
 
 	if sharedCC != nil {
 		select {
 		case connitem := <-sharedCC:
 			if connitem != nil {
-				if cfg.opt.DebugWorker {
-					dlog(cfg.opt.DebugWorker, "GoWorker (%d) parked sharedConn @ '%s'", wid, provider.Name)
-				}
+				dlog(cfg.opt.DebugWorker, "GoWorker (%d) parked sharedConn @ '%s'", wid, provider.Name)
 				provider.ConnPool.ParkConn(wid, connitem, "GoWorker:sharedCC:finalpark")
 			}
 		default:
@@ -344,36 +350,36 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		}
 	}
 
-	waitPool.Done()        // release this GoWorker from the pool
 	KillConnPool(provider) // close the connection pool for this provider
-	dlog(cfg.opt.DebugWorker, "GoWorker (%d) quit @ '%s'", wid, provider.Name)
-	waitPool.Wait()
+	waitPool.Done()        // release this GoWorker from the pool
 
+	dlog(cfg.opt.BUG, "GoWorker (%d) quit @ '%s'", wid, provider.Name)
 } // end func GoWorker
 
 // matchThisDL checks if the item is a candidate for download
+// it returns true if the item is a candidate for download
 func matchThisDL(item *segmentChanItem) bool {
 	// item is a candidate for download if it has no size, is not in DL, not in UP, and not in DLMEM
-	return (len(item.article) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
-} // end func matchThisDL
+	switch cacheON {
+	case false:
+		// if cache is off...
+		return (len(item.article) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
 
-// matchNoDL checks if the item is not a candidate for download
-// it returns true if the item is not a candidate for download
-func matchNoDL(item *segmentChanItem) bool {
-	return (len(item.article) > 0 || item.flaginDL || item.flagisDL || item.flaginUP || item.flagisUP || item.flaginDLMEM)
-} // end func matchNoDL
+	case true:
+		if (len(item.article) > 0 || item.flagCache) && !item.flagisUP && !item.flaginUP && !item.flaginDLMEM {
+			return (!item.flaginDL && !item.flagisDL)
+		}
+		return (len(item.article) == 0 && !item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
+	}
+
+	return (!item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
+} // end func matchThisDL
 
 // matchThisUP checks if the item is a candidate for upload
 // it returns true if the item is a candidate for upload
 func matchThisUP(item *segmentChanItem) bool {
-	return (len(item.article) > 0 && item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM && !item.flaginDL)
+	return (len(item.article) > 0 && (item.flagisDL || item.flagCache) && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM && !item.flaginDL)
 } // end func matchThisUP
-
-// matchNoUP checks if the item is not a candidate for upload
-// it returns true if the item is not a candidate for upload
-func matchNoUP(item *segmentChanItem) bool {
-	return (len(item.article) == 0 && !item.flagisDL || item.flaginDLMEM || item.flaginDL || item.flaginUP || item.flagisUP)
-} // end func matchNoUP
 
 // pushDL tries to push the item to the download queue
 func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl uint64, err error) {
@@ -401,14 +407,14 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 		}
 	}
 
-	if !memlim.MemAvail() {
-		return
-	}
-	if !matchThisDL(item) || matchNoDL(item) {
+	if !matchThisDL(item) {
+		item.PrintItemFlags(cfg.opt.Debug, "pushDL")
 		dlog(cfg.opt.DebugWorker && cfg.opt.BUG, " | [DV-pushDL] (nodl) matchNoDL#1 seg.Id='%s' item.flagisDL=%t item.flaginDL=%t item.flaginDLMEM=%t item.flaginUP=%t item.flagisUP=%t len(article)=%d", item.segment.Id, item.flagisDL, item.flaginDL, item.flaginDLMEM, item.flaginUP, item.flagisUP, len(item.article))
 		return false, 1, nil // not a match, item is already in DL or UP or has article
 	}
-
+	if !memlim.MemAvail() {
+		return
+	}
 	// if we are here, we are allowed to push the item to download queue
 	// loop over the availableOn map and check if we can push the item to download
 providerDl:
@@ -416,10 +422,6 @@ providerDl:
 		if !avail {
 			dlog(always, " | [DV-pushDL] (nodl) skip seg.Id='%s' @ #'%s' not availableOn ", item.segment.Id, s.providerList[pid].Group)
 			continue providerDl
-		}
-		if matchNoDL(item) {
-			dlog(cfg.opt.DebugWorker && cfg.opt.BUG, " | [DV-pushDL] (nodl) matchNoDL#2 seg.Id='%s' @ #'%s' item.flaginDL=%t item.flaginDLMEM=%t", item.segment.Id, s.providerList[pid].Group, item.flaginDL, item.flaginDLMEM)
-			break
 		}
 		if item.ignoreDlOn[pid] {
 			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] (nodl) ignoreDlOn seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
@@ -486,11 +488,9 @@ func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup
 	item.mux.Lock() // LOCK item for the duration of this function
 	defer item.mux.Unlock()
 
-	if !matchThisUP(item) || matchNoUP(item) {
+	if !matchThisUP(item) {
+		item.PrintItemFlags(cfg.opt.Debug, "pushUP")
 		//dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) nomatch seg.Id='%s' item.flagisDL=%t item.flaginDL=%t item.flaginDLMEM=%t item.flaginUP=%t item.flagisUP=%t", item.segment.Id, item.flagisDL, item.flaginDL, item.flaginDLMEM, item.flaginUP, item.flagisUP)
-		//if !item.flagisDL {
-		//item.PrintItemFlags("pushUP")
-		//}
 		return false, 1, 0, nil // not a match, item is already in DL or UP or has article
 	}
 	dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (tryup) passed matchNoUP seg.Id='%s' item.flagisDL=%t item.flaginDL=%t item.flaginDLMEM=%t item.flaginUP=%t item.flagisUP=%t", item.segment.Id, item.flagisDL, item.flaginDL, item.flaginDLMEM, item.flaginUP, item.flagisUP)
@@ -504,14 +504,14 @@ providerUp:
 		//s.providerList[pid].mux.RLock() // FIXME TODO #b8bd287b: dynamic capas
 		flagNoUp := (s.providerList[pid].NoUpload || (!s.providerList[pid].capabilities.ihave && !s.providerList[pid].capabilities.post))
 		//s.providerList[pid].mux.RUnlock()
+		if flagNoUp {
+			noup++
+			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) flagNoUp seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
+			continue providerUp
+		}
 		if item.uploadedTo[pid] {
 			noup++
 			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) uploadedTo seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
-			continue providerUp
-		}
-		if flagNoUp || matchNoUP(item) {
-			noup++
-			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) flagNoUp or matchNoUP seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			continue providerUp
 		}
 		if item.availableOn[pid] {
@@ -683,7 +683,7 @@ forever:
 			item.mux.PrintStatus(false)
 
 			item.mux.RLock() // RLOCKS HERE #824d
-			if item.cached {
+			if item.flagCache {
 				cached++
 			}
 
@@ -910,8 +910,8 @@ forever:
 
 		// continue as long as any of this triggers because stuff is still in queues and processing
 		if checked != todo || inup > 0 || indl > 0 || inretry > 0 || inyenc > 0 || dlQ > 0 || upQ > 0 || yeQ > 0 {
-			dlog(cfg.opt.DebugWorker, "\n[DV] continue [ checked=%d !=? todo=%d | TupQ=%d !=? isup=%d || TdlQ=%d !=? isdl=%d || inup=%d > 0? || indl=%d > 0? || inretry=%d > 0? || dlQ=%d > 0? || upQ=%d > 0? || yeQ=%d > 0? ]\n",
-				checked, todo, TupQ, isup, TdlQ, isdl, inup, indl, inretry, dlQ, upQ, yeQ)
+			dlog(cfg.opt.DebugWorker, "\n[DV] continue [ allOk=%d | checked=%d !=? todo=%d | done=%d | TupQ=%d !=? isup=%d || TdlQ=%d !=? isdl=%d || inup=%d > 0? || indl=%d > 0? || inretry=%d > 0? || dlQ=%d > 0? || upQ=%d > 0? || yeQ=%d > 0? ]\n",
+				allOk, checked, todo, done, TupQ, isup, TdlQ, isdl, inup, indl, inretry, dlQ, upQ, yeQ)
 			continue forever
 		}
 

@@ -192,7 +192,7 @@ type segmentChanItem struct {
 	flaginUPMEM bool                             // if true, item is in upload memory and waits for the quaken
 	flaginYenc  bool                             // if true, item is in writing to yenc cache
 	flagisYenc  bool                             // if true, item has been written to yenc cache
-	cached      bool                             // if true, item is cached
+	flagCache   bool                             // if true, item is cached
 	checkedOn   int                              // counts up if item has been checked on a provider
 	pushedDL    int                              // a counter for debugging
 	pushedUP    int                              // a counter for debugging
@@ -242,7 +242,12 @@ var (
 // it prints the flags that are set for the item, such as inDL, isDL, inUP, isUP, inDLMEM, inUPMEM, inYenc, isYenc
 // it will print "none" if no flags are set
 // it is called from the segmentChanItem.PrintItemFlags() method
-func (item *segmentChanItem) PrintItemFlags(src string) {
+// src is the source of the log message
+// print is a boolean to control if the flags should be printed or not
+func (item *segmentChanItem) PrintItemFlags(print bool, src string) {
+	if !print {
+		return
+	}
 	flags := []string{}
 	if item.flaginDL {
 		flags = append(flags, "inDL")
@@ -273,7 +278,7 @@ func (item *segmentChanItem) PrintItemFlags(src string) {
 			}
 		}
 		if cacheON {
-			if item.cached {
+			if item.flagCache {
 				flags = append(flags, "isCached")
 			}
 		}
