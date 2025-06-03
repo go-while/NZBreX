@@ -1,21 +1,15 @@
 package main
 
 import (
-	//"bytes"
-	//"bufio"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/textproto"
+	"strings"
+	"time"
 
 	"github.com/go-while/yenc" // fork of chrisfarms with little mods
-
-	//"os"
-	//"path/filepath"
-	"strings"
-	"sync"
-	"time"
 )
 
 var (
@@ -26,67 +20,6 @@ var (
 	// but I dont even know if any provider allowes more than 1 MiB articles
 	MaxReadLines = 16384
 )
-
-func GoSpeedMeter(byteSize int64, waitWorker *sync.WaitGroup) {
-	defer waitWorker.Done()
-	if cfg.opt.PrintStats < 0 {
-		// don't start speedmeter if PrintStats < 0   (set to -1 to disable)
-		return
-	}
-	PrintStats := cfg.opt.PrintStats
-	if PrintStats < 5 {
-		PrintStats = 5 // defaults to min 5sec
-	}
-	cron := time.After(time.Duration(PrintStats) * time.Second)
-
-	var logStr, logStr_RX, logStr_TX string
-	var TOTAL_TXbytes, TOTAL_RXbytes uint64
-forever:
-	for {
-		select { // speedmeter
-		case quit := <-stop_chan: // speedmeter
-			if cfg.opt.Debug {
-				log.Print("GoSpeedMeter stop_chan")
-			}
-			stop_chan <- quit // speedmeter
-			if cfg.opt.Debug {
-				log.Print("GoSpeedMeter returns")
-			}
-			break forever
-
-		case <-cron: // speedmeter
-			tmp_rxb, tmp_txb := GCounter.GetReset("TMP_RXbytes"), GCounter.GetReset("TMP_TXbytes")
-			logStr, logStr_RX, logStr_TX = "", "", ""
-			if tmp_rxb > 0 {
-				TOTAL_RXbytes += tmp_rxb
-				rx_speed, mbps := ConvertSpeed(int64(tmp_txb), PrintStats)
-				dlPerc := int(float64(TOTAL_RXbytes) / float64(byteSize) * 100)
-				logStr_RX = fmt.Sprintf(" |  DL  [%3d%%] | %d / %d MiB  |  SPEED: %6d KiB/s ~%3.1f Mbps", dlPerc, TOTAL_RXbytes/1024/1024, byteSize/1024/1024, rx_speed, mbps)
-			}
-			if tmp_txb > 0 {
-				TOTAL_TXbytes += tmp_txb
-				tx_speed, mbps := ConvertSpeed(int64(tmp_txb), PrintStats)
-				upPerc := int(float64(TOTAL_TXbytes) / float64(byteSize) * 100)
-				logStr_TX = fmt.Sprintf(" |  UL  [%3d%%] | %d / %d MiB  |  SPEED: %6d KiB/s ~%3.1f Mbps", upPerc, TOTAL_TXbytes/1024/1024, byteSize/1024/1024, tx_speed, mbps)
-			}
-			cron = time.After(time.Second * time.Duration(PrintStats))
-			if logStr_RX != "" && cfg.opt.Verbose {
-				//logStr = logStr + logStr_RX
-				log.Print(logStr_RX)
-			}
-			if logStr_TX != "" && cfg.opt.Verbose {
-				//logStr = logStr + logStr_TX
-				log.Print(logStr_TX)
-			}
-			if logStr != "" && cfg.opt.Verbose {
-				log.Print(logStr)
-			}
-		}
-	} // end for
-	if cfg.opt.Debug {
-		log.Print("GoSpeedMeter quit")
-	}
-} // end func GoSpeedMeter
 
 func CMD_STAT(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, error) {
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
@@ -145,7 +78,7 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 		err := readDotLines(provider, item, connitem.srvtp, "ARTICLE")
 		if err != nil {
 			dlog(always, "ERROR in CMD_ARTICLE srvtp.ReadDotLines @ '%s' err='%v'", provider.Name, err)
-			return code, msg, err
+			return 0, "", err
 		}
 		item.mux.Lock()
 		if item.badcrc > 0 {
@@ -175,13 +108,13 @@ func CMD_ARTICLE(provider *Provider, connitem *ConnItem, item *segmentChanItem) 
 	return code, msg, fmt.Errorf("error in CMD_ARTICLE got unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
 } // end func CMD_ARTICLE
 
-func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, uint64, error) {
+func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, string, uint64, error) {
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil || connitem.writer == nil {
-		return 0, 0, fmt.Errorf("error CMD_IHAVE connitem nil")
+		return 0, "", 0, fmt.Errorf("error CMD_IHAVE connitem nil")
 	}
 	if debugthis {
 		memlim.MemReturn("fake ihave", item)
-		return 235, uint64(item.segment.Bytes), nil
+		return 235, "fake ihave", uint64(item.segment.Bytes), nil
 	}
 	start := time.Now()
 	/*
@@ -201,40 +134,38 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 	id, err := connitem.srvtp.Cmd("IHAVE <%s>", item.segment.Id)
 	if err != nil {
 		dlog(always, "ERROR CMD_IHAVE @ '%s' srvtp.Cmd err='%v'", provider.Name, err)
-		return 0, 0, err
+		return 0, "", 0, err
 	}
+
 	connitem.srvtp.StartResponse(id)
 	code, msg, err := connitem.srvtp.ReadCodeLine(335)
+	if err != nil {
+		dlog(always, "ERROR CMD_IHAVE srvtp.ReadCodeLine @ '%s' err='%v'", provider.Name, err)
+		return code, msg, 0, err
+	}
 	connitem.srvtp.EndResponse(id)
+
 	switch code {
 	case 335:
 		// Send article to be transferred
-		// pass
 		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 335 sendit seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 
 	case 435:
 		// Article not wanted
 		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 435 unwanted seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
-		return code, 0, nil
+		return code, msg, 0, nil
 
 	case 436:
 		// Transfer not possible; try again later
 		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 436 retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
-		return code, 0, nil
-	/*
-		case 502:
-			// FIXME TODO #b8bd287b do we need/want dynamic capabilities while running?
-			//provider.mux.Lock()
-			//provider.capabilities.ihave = false
-			//provider.mux.Unlock()
-			dlog(always, "ERROR code=%d in CMD_IHAVE @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
-			return code, 0, nil
-	*/
-	default:
-		return code, 0, fmt.Errorf("error CMD_IHAVE unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
-	}
-	var txb uint64
+		return code, msg, 0, nil
 
+	default:
+		dlog(always, "ERROR CMD_IHAVE got unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
+		return code, msg, 0, fmt.Errorf("error CMD_IHAVE unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, provider.Name, time.Since(start), err)
+	}
+
+	var txb uint64
 	// Send article
 	switch wireformat {
 	case true:
@@ -247,7 +178,7 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 		// Implementing this is optional and only impacts data formatting, not core functionality.
 	case false:
 		if len(item.article) == 0 {
-			return 0, txb, fmt.Errorf("error CMD_IHAVE: item.article is empty")
+			return 0, msg, txb, fmt.Errorf("error CMD_IHAVE: item.article is empty")
 		}
 		for _, line := range item.article {
 			// dot-stuffing !
@@ -259,48 +190,51 @@ func CMD_IHAVE(provider *Provider, connitem *ConnItem, item *segmentChanItem) (i
 			}
 			n, err := io.WriteString(connitem.writer, line+CRLF)
 			if err != nil {
-				return 0, txb, fmt.Errorf("error CMD_IHAVE WriteString writer @ '%s' err='%v'", provider.Name, err)
+				return 0, msg, txb, fmt.Errorf("error CMD_IHAVE WriteString writer @ '%s' err='%v'", provider.Name, err)
 			}
 			txb += uint64(n)
 		}
 		if _, err := io.WriteString(connitem.writer, DOT+CRLF); err != nil {
-			return 0, txb, fmt.Errorf("error CMD_IHAVE writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
+			return 0, msg, txb, fmt.Errorf("error CMD_IHAVE writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
 		}
 		if err := connitem.writer.Flush(); err != nil {
-			return 0, txb, fmt.Errorf("error CMD_IHAVE writer.Flush @ '%s' err='%v'", provider.Name, err)
+			return 0, msg, txb, fmt.Errorf("error CMD_IHAVE writer.Flush @ '%s' err='%v'", provider.Name, err)
 		}
 	} // end switch wireformat
 
 	code, msg, err = connitem.srvtp.ReadCodeLine(235)
+	if err != nil {
+		dlog(always, "ERROR CMD_IHAVE srvtp.ReadCodeLine @ '%s' err='%v'", provider.Name, err)
+		return code, msg, txb, err
+	}
 	switch code {
 	case 235:
 		//Article transferred OK
 		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 235 OK seg.Id='%s' @ '%s' msg='%s' txb=%d", item.segment.Id, provider.Name, msg, txb)
-		return code, txb, nil
+		return code, msg, txb, nil
 
 	case 436:
 		// Transfer failed; try again later
 		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 436 transfer failed, retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
-		return code, txb, nil
+		return code, msg, txb, nil
 
 	case 437:
 		//  Transfer rejected; do not retry
 		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 437 transfer rejected, no retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, provider.Name, msg, err)
-		return code, txb, nil
-
+		return code, msg, txb, nil
 	}
 
-	return code, txb, fmt.Errorf("error in CMD_IHAVE uncatched return: code=%d msg='%s' err='%v'", code, msg, err)
+	return code, msg, txb, fmt.Errorf("error in CMD_IHAVE uncatched return: code=%d msg='%s' err='%v'", code, msg, err)
 } // end func CMD_IHAVE
 
-func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, uint64, error) {
+func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (int, string, uint64, error) {
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil || connitem.writer == nil {
-		return 0, 0, fmt.Errorf("error CMD_POST srvtp=nil")
+		return 0, "", 0, fmt.Errorf("error CMD_POST srvtp=nil")
 	}
 	id, err := connitem.srvtp.Cmd("POST")
 	if err != nil {
 		dlog(always, "ERROR CMD_POST @ '%s' srvtp.Cmd err='%v'", provider.Name, err)
-		return 0, 0, err
+		return 0, "", 0, err
 	}
 	connitem.srvtp.StartResponse(id)
 	code, msg, err := connitem.srvtp.ReadCodeLine(340)
@@ -322,10 +256,10 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 			GCounter.Decr("postProviders")
 		*/
 		dlog(always, "ERROR code=%d in CMD_POST @ '%s' msg='%s' err='%v'", code, provider.Name, msg, err)
-		return code, 0, nil
+		return code, "", 0, nil
 	default:
 		// uncatched return code
-		return code, 0, err
+		return code, "", 0, err
 	}
 
 	var txb uint64
@@ -339,27 +273,27 @@ func CMD_POST(provider *Provider, connitem *ConnItem, item *segmentChanItem) (in
 		}
 		n, err := io.WriteString(connitem.writer, line+CRLF)
 		if err != nil {
-			return 0, txb, fmt.Errorf("error CMD_POST WriteString writer @ '%s' err='%v'", provider.Name, err)
+			return 0, "", txb, fmt.Errorf("error CMD_POST WriteString writer @ '%s' err='%v'", provider.Name, err)
 		}
 		txb += uint64(n)
 	}
 	if _, err := io.WriteString(connitem.writer, DOT+CRLF); err != nil {
-		return 0, txb, fmt.Errorf("error CMD_POST writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
+		return 0, "", txb, fmt.Errorf("error CMD_POST writer DOT+CRLF @ '%s' err='%v'", provider.Name, err)
 	}
 	if err := connitem.writer.Flush(); err != nil {
-		return 0, txb, fmt.Errorf("error CMD_POST writer.Flush @ '%s' err='%v'", provider.Name, err)
+		return 0, "", txb, fmt.Errorf("error CMD_POST writer.Flush @ '%s' err='%v'", provider.Name, err)
 	}
 	code, msg, err = connitem.srvtp.ReadCodeLine(240)
 	switch code {
 	case 240:
 		// Article received OK (posted)
-		return code, txb, nil
+		return code, msg, txb, nil
 	case 441:
 		// Posting failed
-		return code, txb, nil
+		return code, msg, txb, nil
 	}
 
-	return code, txb, fmt.Errorf("error in CMD_POST uncatched return: code=%d msg='%s' err='%v'", code, msg, err)
+	return code, msg, txb, fmt.Errorf("error in CMD_POST uncatched return: code=%d msg='%s' err='%v'", code, msg, err)
 } // end func CMD_POST
 
 func readDotLines(provider *Provider, item *segmentChanItem, srvtp *textproto.Conn, what string) error {
@@ -555,7 +489,7 @@ readlines:
 				}
 			*/
 			item.mux.Unlock()
-			DecreaseDLQueueCnt() // FIXME NEEDS REVIEW
+			// DecreaseDLQueueCnt() // FIXME NEEDS REVIEW // DISABLED
 			dlog(always, "ERROR readArticleDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, provider.Name)
 			return nil
 		}

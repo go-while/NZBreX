@@ -84,6 +84,11 @@ func ParseFlags() {
 		RunProf()
 	}
 
+	if cfg.opt.UploadLater && cfg.opt.Cachedir == "" {
+		dlog(always, "ERROR : you can not use -uploadlater without -cd=/path/to/cache/dir because it needs a cache dir!")
+		os.Exit(1)
+	}
+
 	if cfg.opt.LogAppend && cfg.opt.LogOld > 0 {
 		dlog(always, "ERROR : you can not use -logappend with -logold > 0 because it will not rotate logs!")
 		os.Exit(1)

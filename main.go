@@ -39,7 +39,6 @@ var (
 	cfg        *Config        // global config object
 	//globalmux  sync.RWMutex    // global mutex for all routines to use
 	globalmux *loggedrwmutex.LoggedSyncRWMutex // debug mutex
-	stop_chan chan struct{}                    // push a single 'struct{}{}' into this chan and all readers will re-push it and return itsef to quit
 	core_chan chan struct{}                    // limits cpu usage
 	memlim    *MemLimiter                      // limits number of objects in ram
 	cache     *Cache                           // cache object
@@ -59,7 +58,7 @@ func init() {
 	loggedrwmutex.GlobalDebug = (appVersion == "debug")
 	loggedrwmutex.DisableLogging = true
 	globalmux = &loggedrwmutex.LoggedSyncRWMutex{Name: "GLOBALMUX"}
-	stop_chan = make(chan struct{}, 1)
+	//stopChan = make(chan struct{}, 1)
 	setupSigusr1Dump()
 	GCounter = NewCounter(10)
 	cfg = &Config{opt: &CFG{}}
@@ -87,7 +86,7 @@ func main() {
 	}
 
 	if cfg.opt.NzbDir == "" && nzbfile != "" {
-		wg.Add(1)
+		wg.Add(1) // waitSession
 		go func(nzbfile string, wg *sync.WaitGroup) {
 			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: nzbfile='%s'", nzbfile)
 			if err := thisProcessor.LaunchSession(nil, nzbfile, wg); err != nil {

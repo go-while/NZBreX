@@ -18,7 +18,6 @@ import (
 	"os"
 
 	"github.com/go-while/go-loggedrwmutex"
-	//"sync"
 )
 
 type MemLimiter struct {
@@ -32,7 +31,7 @@ type MemLimiter struct {
 
 func NewMemLimiter(value int) *MemLimiter {
 	if value <= 0 {
-		value = 1 // can't have 0 objects in ram...
+		value = 2 // can't have 0 objects in ram...
 	}
 	memlim := &MemLimiter{
 		memchan: make(chan struct{}, value),
@@ -66,20 +65,19 @@ func (m *MemLimiter) ViewData() (data []string) {
 
 func (m *MemLimiter) MemAvail() (retbool bool) {
 	m.mux.RLock()
-	retbool = (m.waiting <= m.mem_max)
+	retbool = (m.waiting < m.mem_max)
 	m.mux.RUnlock()
 	return
 }
 
 func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
 
-	GCounter.Incr("TOTAL_MemLockWait")
 	GCounter.Incr("MemLockWait")
 	defer GCounter.Decr("MemLockWait")
+	defer GCounter.Incr("TOTAL_MemLock")
 
 	m.mux.Lock()
 	if m.memdata[item] {
-		m.mux.Unlock()
 		dlog(always, "ERROR ! MemLimit tried to lock an item already in mem! seg.Id='%s' who='%s'", item.segment.Id, who)
 		os.Exit(1) // this is a bug! we should never try to lock an item already in mem!
 		return
@@ -107,35 +105,31 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
 
 	m.mux.Lock()
 	m.waiting--
-	dlog(cfg.opt.DebugMemlim, "NewMemLock seg.Id='%s' m.waiting=%d who='%s'", item.segment.Id, m.waiting, who)
+	dlog(cfg.opt.DebugMemlim, "NewMemLock gotSLOT seg.Id='%s' m.waiting=%d who='%s'", item.segment.Id, m.waiting, who)
 	m.mux.Unlock()
-
-	dlog(cfg.opt.DebugMemlim, "MemLockWait got SLOT seg.Id='%s' who='%s'", item.segment.Id, who)
 } // end func memlim.MemLockWait
 
 // MemReturn removes the item from mem and returns the slot to the chan
 // it is called after the item has been uploaded or written to cache
 // it is also called if no upload and is written to cache
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
-	dlog(cfg.opt.DebugMemlim, "MemReturn enter seg.Id='%s' who='%s'", item.segment.Id, who)
-	GCounter.Incr("WAIT_MemReturn")
-	defer GCounter.Decr("WAIT_MemReturn")
+	//dlog(cfg.opt.DebugMemlim, "MemReturn free seg.Id='%s' who='%s'", item.segment.Id, who)
+	defer GCounter.Incr("TOTAL_MemReturned")
 
-	// first: remove map entry from mem
+	// remove map entry from mem
 	m.mux.Lock()
 	delete(m.memdata, item)
 	m.mux.Unlock()
 
-	// then free the slot
+	// return the slot
 	select {
 	case m.memchan <- struct{}{}: // return mem slot into chan
 		//pass
 	default:
 		// wtf chan is full?? that's a bug!
 		dlog(always, "ERROR on MemReturn chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
-		return
+		os.Exit(1) // this is a bug! we should never return a slot to a full chan!
 	}
 
-	GCounter.Incr("TOTAL_MemReturned")
 	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.Id, who)
 } // end func memlim.MemReturn

@@ -7,7 +7,9 @@ import (
 	"github.com/go-while/go-loggedrwmutex"
 )
 
-const UseSharedCC = false // temporary devel flag
+const UseSharedCC = false     // experimental devel flag, to test sharedConn between routines
+const UseReadDeadConn = false // experimental devel flag, to test reading from dead connections
+const UseNoDeadline = true    // experimental devel flag, to test reading from dead connections
 
 const always = true // flag for dlog
 
@@ -154,23 +156,34 @@ type segmentChanItem struct {
 	// cache, download, and upload routines.
 	// segmentChanItem is used to store information about a segment/article
 	// that is being processed in the segment channel.
+	//
+	// !! DEVELOPER NOTE !!
+	// When adding new fields to this item struct, make sure to initialize them properly in the LaunchSession function.
+	// You find the item creation in Sessions.go around maybe line 250 (at time of writing this comment).
+	// You may have noticed, this struct organizes the variables by types
+	// When adding new fields, please keep the order.
+	// Then you can easily find the fields you have to add in the initialization code.
 	//mux         sync.RWMutex
 	mux         *loggedrwmutex.LoggedSyncRWMutex // mutex to protect the segmentChanItem struct
 	s           *SESSION                         // links to where it belongs
 	segment     *nzbparser.NzbSegment            // segment/article to download
 	file        *nzbparser.NzbFile               // file to which the segment belongs
+	hashedId    string                           // hashed segment id, used for cache filename
+	nzbhashname *string                          // pointer to the nzb hash name, used for cache directory
+	readChan    chan int                         // to notify, cache has loaded the file to item.lines
+	checkChan   chan bool                        // to notify if item exists in cache
 	missingOn   map[int]bool                     // [provider.id]bool
 	availableOn map[int]bool                     // [provider.id]bool
 	ignoreDlOn  map[int]bool                     // [provider.id]bool
+	ignoreUlOn  map[int]bool                     // [provider.id]bool
 	unwantedOn  map[int]bool                     // [provider.id]bool
+	uploadedTo  map[int]bool                     // [provider.id]bool
 	retryOn     map[int]bool                     // [provider.id]bool
 	errorOn     map[int]bool                     // [provider.id]bool // not in use ... ?!
 	dmcaOn      map[int]bool                     // [provider.id]bool
 	article     []string                         // contains the downloaded segment/article
 	head        []string                         // contains the head
 	body        []string                         // contains the body
-	pushedDL    int                              // a counter for debugging
-	pushedUP    int                              // a counter for debugging
 	flaginDL    bool                             // if true, item is in download
 	flagisDL    bool                             // if true, item has been downloaded
 	flaginUP    bool                             // if true, item is in upload
@@ -179,17 +192,17 @@ type segmentChanItem struct {
 	flaginUPMEM bool                             // if true, item is in upload memory and waits for the quaken
 	flaginYenc  bool                             // if true, item is in writing to yenc cache
 	flagisYenc  bool                             // if true, item has been written to yenc cache
-	checkedOn   int                              // counts up if item has been checked on a provider
-	hashedId    string                           // hashed segment id, used for cache filename
 	cached      bool                             // if true, item is cached
-	readChan    chan int                         // to notify, cache has loaded the file to item.lines
-	checkChan   chan bool                        // to notify if item exists in cache
+	checkedOn   int                              // counts up if item has been checked on a provider
+	pushedDL    int                              // a counter for debugging
+	pushedUP    int                              // a counter for debugging
 	size        int                              // size of the segment/article in bytes
 	dlcnt       int                              // download count, used for retrying
 	badcrc      int                              // number of bad crc checks, used for retrying
 	fails       int                              // number of fails, used for retrying
 	retryIn     int64                            // retry in seconds, used for retrying
-	nzbhashname *string                          // pointer to the nzb hash name, used for cache directory
+	rxb         uint64                           // total bytes received for this item, used for statistics
+	txb         uint64                           // total bytes transferred for this item, used for statistics
 } // end segmentChanItem struct
 
 // fileStatistic is used to store statistics about a file
@@ -223,3 +236,51 @@ var (
 		"Organization:",
 	}
 )
+
+// PrintItemFlags prints the flags of the segmentChanItem
+// it is used for debugging and logging purposes
+// it prints the flags that are set for the item, such as inDL, isDL, inUP, isUP, inDLMEM, inUPMEM, inYenc, isYenc
+// it will print "none" if no flags are set
+// it is called from the segmentChanItem.PrintItemFlags() method
+func (item *segmentChanItem) PrintItemFlags(src string) {
+	flags := []string{}
+	if item.flaginDL {
+		flags = append(flags, "inDL")
+	}
+	if item.flagisDL {
+		flags = append(flags, "isDL")
+	}
+	if item.flaginUP {
+		flags = append(flags, "inUP")
+	}
+	if item.flagisUP {
+		flags = append(flags, "isUP")
+	}
+	if item.flaginDLMEM {
+		flags = append(flags, "inDLMEM")
+	}
+	if item.flaginUPMEM {
+		flags = append(flags, "inUPMEM")
+	}
+
+	if cfg.opt.BUG {
+		if cfg.opt.YencWrite {
+			if item.flaginYenc {
+				flags = append(flags, "inYenc")
+			}
+			if item.flagisYenc {
+				flags = append(flags, "isYenc")
+			}
+		}
+		if cacheON {
+			if item.cached {
+				flags = append(flags, "isCached")
+			}
+		}
+	}
+	if len(flags) > 0 {
+		dlog(always, "src='%s' ItemFlags: '%s' seg.Id='%s'", src, flags, item.segment.Id)
+	} else {
+		dlog(cfg.opt.BUG, "src='%s' ItemFlags: none seg.Id='%s'", src, item.segment.Id)
+	}
+} // end func segmentChanItem.PrintItemFlags

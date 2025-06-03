@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -144,13 +145,18 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 				providerACL[Group]["NoUpload"] = true
 			}
 
+			if !slices.Contains(s.providerGroups, Group) {
+				// add group to providerGroups if not already present
+				s.providerGroups = append(s.providerGroups, Group)
+			}
+
 			// link to this provider
 			provider := cfg.providers[n]
 			p := &provider
 			// provider is ready to connect
 			p.id = id
 			p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: p.Name}
-			NewConnPool(p, workerWGconnEstablish)
+			NewConnPool(s, p, workerWGconnEstablish)
 			s.providerList = append(s.providerList, p)
 			dlog(cfg.opt.Debug, "CFG Loaded Provider (id=%d) '%s'", id, p.Name)
 			id++
@@ -563,13 +569,31 @@ func LogToFile(filename string, append bool) (err error) {
 func DecreaseDLQueueCnt() {
 	// this is used to decrease the dlQueueCnt counter
 	GCounter.Decr("dlQueueCnt")
-	GCounter.Decr("TOTAL_dlQueueCnt")
+}
+
+func IncreaseDLQueueCnt() {
+	// this is used to decrease the dlQueueCnt counter
+	GCounter.Incr("dlQueueCnt")
+	GCounter.Incr("TOTAL_dlQueueCnt")
+	//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
+	//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
+}
+
+func DecreaseUPQueueCnt() {
+	// this is used to decrease the upQueueCnt counter
+	GCounter.Decr("upQueueCnt")
+}
+
+func IncreaseUPQueueCnt() {
+	// this is used to decrease the upQueueCnt counter
+	GCounter.Incr("upQueueCnt")
+	GCounter.Incr("TOTAL_upQueueCnt")
 }
 
 func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Duration, min, max int64) int64 {
 	// Defensive: avoid division by zero
 	if pushed == 0 {
-		return max / 3
+		return max / 3 // our max is 15s so if nothing had been pushed, we sleep 5s
 	}
 
 	// Calculate work ratio: how much was done versus remaining
@@ -593,4 +617,11 @@ func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Du
 
 func fatal() bool {
 	return true
+}
+
+// GetImpossibleCloseCaseVariablesToString returns a string representation of the impossible close case variables.
+// This is used for debugging purposes to understand the state of the system when an impossible close case occurs.
+func GetImpossibleCloseCaseVariablesToString(segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64) string {
+	return fmt.Sprintf("segm=%d\n allOk=%d\n done=%d\n dead=%d\n isdl=%d\n indl=%d\n inup=%d\n isup=%d\n checked=%d\n dmca=%d\n nodl=%d\n noup=%d\n cached=%d\n inretry=%d\n inyenc=%d\n isyenc=%d\n dlQ=%d\n upQ=%d\n yeQ=%d\n",
+		segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ)
 }

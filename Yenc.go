@@ -39,7 +39,7 @@ func (s *SESSION) YencMerge(result *string) {
 		go func(filename string, waitMerge *sync.WaitGroup) {
 			defer returnCoreLimiter()
 			defer waitMerge.Done()
-			target := filepath.Join(cfg.opt.Cachedir, s.nzbHash, "yenc", filename)
+			target := filepath.Join(cfg.opt.Cachedir, s.nzbHashedname, "yenc", filename)
 			if FileExists(target) {
 				dlog(always, "ERROR YencMerge: exists target='%s'", target)
 				return
