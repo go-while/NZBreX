@@ -860,7 +860,7 @@ forever:
 			logStr, logStr_RX, logStr_TX = "", "", ""
 			if tmp_rxb > 0 {
 				TOTAL_RXbytes += tmp_rxb
-				rx_speed, mbps := ConvertSpeed(int64(tmp_txb), PrintStats)
+				rx_speed, mbps := ConvertSpeed(int64(tmp_rxb), PrintStats)
 				dlPerc := int(float64(TOTAL_RXbytes) / float64(byteSize) * 100)
 				logStr_RX = fmt.Sprintf(" |  DL  [%3d%%] | %d / %d MiB  |  SPEED: %8d KiB/s ~%5.1f Mbps | '%s'#'%s'", dlPerc, TOTAL_RXbytes/1024/1024, byteSize/1024/1024, rx_speed, mbps, c.provider.Name, c.provider.Group)
 			}
