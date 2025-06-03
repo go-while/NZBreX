@@ -136,7 +136,7 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 	ConnPools[provider.id] = provider.ConnPool
 	PoolsLock.Unlock()
 	if !cfg.opt.CheckOnly {
-		go provider.ConnPool.cpSpeedmeter(s.nzbSize, workerWGconnReady) // start speed meter for this ConnPool / Provider
+		go Speedmeter(s.nzbSize, provider.ConnPool, nil, workerWGconnReady) // start speed meter for this ConnPool / Provider
 	}
 	go provider.ConnPool.WatchOpenConnsThread(workerWGconnReady)
 	// no return value as we mutate the provider pointer!
@@ -367,6 +367,7 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 		c.openConns--
 		dlog(always, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
 		c.mux.Unlock() // mutex c460
+		return
 	}
 	c.mux.Unlock() // mutex c459a
 	return
@@ -831,60 +832,60 @@ func ReturnSharedConnToPoolAndClose(sharedCC chan *ConnItem, provider *Provider,
 	provider.ConnPool.CloseConn(connitem, sharedCC) // close the connection and return it to the shared channel
 }
 
-func (c *ConnPool) cpSpeedmeter(byteSize int64, workerWGconnReady *sync.WaitGroup) {
+func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnReady *sync.WaitGroup) error {
 	workerWGconnReady.Wait()
 
-	if cfg.opt.PrintStats < 0 {
-		// don't start speedmeter if PrintStats < 0   (set to -1 to disable)
-		return
+	if cfg.opt.PrintStats <= 0 {
+		return nil
 	}
 	PrintStats := cfg.opt.PrintStats
-	if PrintStats < 5 {
-		PrintStats = 5 // defaults to min 5sec
+	if PrintStats < 1 {
+		PrintStats = 1
 	}
-	var logStr, logStr_RX, logStr_TX string
-	var TOTAL_TXbytes, TOTAL_RXbytes uint64
+
+	var name, group string
+	var counter *Counter_uint64
+	switch {
+	case cp == nil && cnt == nil:
+		name, group, counter = "Global", "Speedmeter", GCounter
+	case cp != nil && cnt == nil:
+		name, group, counter = cp.provider.Name, cp.provider.Group, cp.counter
+	case cp == nil && cnt != nil:
+		name, group, counter = "Global", "Speedmeter", cnt
+	default:
+		return fmt.Errorf("error in Speedmeter: supply cp or cnt or nothing to use global counter, but not both")
+	}
+
+	var totalTX, totalRX uint64
 	ticker := time.NewTicker(time.Second * time.Duration(PrintStats))
 	defer ticker.Stop()
-forever:
-	for {
-		select {
-		case _, ok := <-c.s.stopChan: // speedmeter
-			if !ok {
-				log.Print("GoSpeedMeter stopChan closed")
-			}
-			break forever
+	for range ticker.C {
+		var tmpRX, tmpTX uint64
+		globalmux.Lock()
+		tmpRX, tmpTX = counter.GetReset("TMP_RXbytes"), counter.GetReset("TMP_TXbytes")
+		totalRX += tmpRX
+		totalTX += tmpTX
+		globalmux.Unlock()
 
-		case <-ticker.C: // speedmeter
-			tmp_rxb, tmp_txb := c.counter.GetReset("TMP_RXbytes"), c.counter.GetReset("TMP_TXbytes")
-			logStr, logStr_RX, logStr_TX = "", "", ""
-			if tmp_rxb > 0 {
-				TOTAL_RXbytes += tmp_rxb
-				rx_speed, mbps := ConvertSpeed(int64(tmp_rxb), PrintStats)
-				dlPerc := int(float64(TOTAL_RXbytes) / float64(byteSize) * 100)
-				logStr_RX = fmt.Sprintf(" |  DL  [%3d%%] | %d / %d MiB  |  SPEED: %8d KiB/s ~%5.1f Mbps | '%s'#'%s'", dlPerc, TOTAL_RXbytes/1024/1024, byteSize/1024/1024, rx_speed, mbps, c.provider.Name, c.provider.Group)
-			}
-			if tmp_txb > 0 {
-				TOTAL_TXbytes += tmp_txb
-				tx_speed, mbps := ConvertSpeed(int64(tmp_txb), PrintStats)
-				upPerc := int(float64(TOTAL_TXbytes) / float64(byteSize) * 100)
-				logStr_TX = fmt.Sprintf(" |  UL  [%3d%%] | %d / %d MiB  |  SPEED: %8d KiB/s ~%5.1f Mbps | '%s'#'%s'", upPerc, TOTAL_TXbytes/1024/1024, byteSize/1024/1024, tx_speed, mbps, c.provider.Name, c.provider.Group)
-			}
+		// always print both RX and TX, even if one is zero (for consistency)
+		rxSpeed, rxMbps := ConvertSpeed(int64(tmpRX), PrintStats)
+		txSpeed, txMbps := ConvertSpeed(int64(tmpTX), PrintStats)
+		dlPerc := int(float64(totalRX) / float64(byteSize) * 100)
+		upPerc := int(float64(totalTX) / float64(byteSize) * 100)
+		printSpeedTable(dlPerc, upPerc, totalRX, totalTX, byteSize, rxSpeed, txSpeed, rxMbps, txMbps, name, group)
 
-			if logStr_RX != "" && cfg.opt.Verbose {
-				//logStr = logStr + logStr_RX
-				log.Print(logStr_RX)
-			}
-			if logStr_TX != "" && cfg.opt.Verbose {
-				//logStr = logStr + logStr_TX
-				log.Print(logStr_TX)
-			}
-			if logStr != "" && cfg.opt.Verbose {
-				log.Print(logStr)
-			}
-		}
-	} // end for
-	if cfg.opt.Debug {
-		log.Print("GoSpeedMeter quit")
 	}
-} // end func GoSpeedMeter
+	return nil
+}
+
+func printSpeedTable(dlPerc, upPerc int, totalRX uint64, totalTX uint64, byteSize int64, rxSpeed int64, txSpeed int64, rxMbps float64, txMbps float64, provider string, group string) {
+	// Clear, modern, minimalistic CLI style
+	roooow := " │ %s │ %3d%% │  %5d MiB  │  %s%6d KiB/s  │  %6.1f Mbps  │  %-9s #%-6s \n"
+	if txSpeed > 0 {
+		log.Printf(roooow, "UL", upPerc, totalTX/1024/1024, "---> ", txSpeed, txMbps, provider, group)
+	}
+	if rxSpeed > 0 {
+		log.Printf(roooow, "DL", dlPerc, totalRX/1024/1024, "<--- ", rxSpeed, rxMbps, provider, group)
+	}
+	//fmt.Println(footer)
+}

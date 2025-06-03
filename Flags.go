@@ -106,6 +106,10 @@ func ParseFlags() {
 		}
 	}
 
+	if cfg.opt.MaxArtSize < 1 {
+		cfg.opt.MaxArtSize = 1 // set minimum article size to 1 byte who ever wants this!
+	}
+
 	if cfg.opt.LogOld < 0 {
 		cfg.opt.LogOld = 0 // disable log rotation
 	}

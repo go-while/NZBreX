@@ -174,7 +174,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
 	startArticle := time.Now()
-	code, msg, err := CMD_ARTICLE(provider, connitem, item)
+	code, msg, rxb, err := CMD_ARTICLE(provider, connitem, item)
 
 	if err != nil {
 		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
@@ -217,6 +217,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 			item.mux.Unlock() // mutex #0a11
 		}
 		item.mux.Lock() // mutex #e96b
+		item.rxb += rxb
 		item.flagisDL = true
 		item.flaginDL = false
 		item.flaginDLMEM = false
