@@ -12,6 +12,6 @@ require (
 	github.com/Tensai75/subjectparser v0.1.0 // indirect
 	github.com/go-while/go-loggedrwmutex v0.0.0-20250601032232-b0aa20cdcb2c
 	github.com/gorilla/mux v1.8.1 // indirect
-	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/text v0.15.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 )
