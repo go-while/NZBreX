@@ -274,7 +274,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				mode = "cache read"
 			}
 
-			dlog(always, "GoDownsRoutine: %s (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", mode, wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
+			dlog(cfg.opt.DebugWorker && cfg.opt.BUG, "GoDownsRoutine: %s (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", mode, wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
 
 			// back to top
 		} // end forGoDownsRoutine
@@ -324,7 +324,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				continue forGoReupsRoutine
 			}
 			speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())
-			dlog(cfg.opt.DebugWorker, "ReupsRoutine: finished item (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", wid, item.segment.Id, provider.Name, time.Since(StartReUps), speedInKBytes)
+			dlog(cfg.opt.DebugWorker && cfg.opt.BUG, "ReupsRoutine: finished item (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", wid, item.segment.Id, provider.Name, time.Since(StartReUps), speedInKBytes)
 
 			memlim.MemReturn("UR", item) // memfree GoReupsRoutine on success
 			// back to top
