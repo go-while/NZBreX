@@ -40,9 +40,9 @@ var otherReadLineCommands = map[string]struct{}{
 }
 
 var itemReadLineCommands = map[string]struct{}{
-	"ARTICLE": {},
-	"HEAD":    {},
-	"BODY":    {},
+	cmdARTICLE: {},
+	cmdHEAD:    {},
+	cmdBODY:    {},
 }
 
 // CMD_STAT checks if the article exists on the server
@@ -102,7 +102,7 @@ func CMD_ARTICLE(connitem *ConnItem, item *segmentChanItem) (int, string, uint64
 		// old textproto.ReadDotLines replaced with new function: readArticleDotLines
 		// to clean up headers directly while fetching from network
 		// and decoding yenc on the fly
-		rcode, rxb, _, err := readDotLines(connitem, item, "ARTICLE")
+		rcode, rxb, _, err := readDotLines(connitem, item, cmdARTICLE)
 		if err != nil {
 			dlog(always, "ERROR in CMD_ARTICLE srvtp.ReadDotLines @ '%s' err='%v' code=%d rcode=%d", connitem.c.provider.Name, err, code, rcode)
 			return code, "", uint64(rxb), err
@@ -345,7 +345,7 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	}
 
 	var parseHeader bool
-	if what == "ARTICLE" || what == "HEAD" {
+	if what == cmdARTICLE || what == cmdHEAD {
 		parseHeader = true
 	}
 	var ignoreNextContinuedLine bool
@@ -416,9 +416,9 @@ readlines:
 			break
 		}
 
-		if !parseHeader && what != "HEAD" {
+		if !parseHeader && what != cmdHEAD {
 			i++ // counts body lines
-			if what == "ARTICLE" || what == "BODY" {
+			if what == cmdARTICLE || what == cmdBODY {
 				// dot-stuffing on received lines
 				/*
 					Receiver Side: How to Handle Dot-Stuffing
@@ -434,12 +434,12 @@ readlines:
 				}
 			}
 
-			if what == "ARTICLE" || what == "BODY" || IsOtherCommand(what) {
+			if what == cmdARTICLE || what == cmdBODY || IsOtherCommand(what) {
 				// if we are in ARTICLE or BODY or any other multiline command, we store the line
 				content = append(content, line)
 			}
 
-			if cfg.opt.YencCRC && (what == "ARTICLE" || what == "BODY") {
+			if cfg.opt.YencCRC && (what == cmdARTICLE || what == cmdBODY) {
 				switch cfg.opt.YencTest {
 				case 1:
 					// case 1 needs double the memory
@@ -455,7 +455,7 @@ readlines:
 
 	dlog(cfg.opt.Debug, "readArticleDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d ms) what='%s'", item.segment.Id, rxb, len(content), time.Since(start).Milliseconds(), what)
 
-	if cfg.opt.YencCRC && (what == "ARTICLE" || what == "BODY") {
+	if cfg.opt.YencCRC && (what == cmdARTICLE || what == cmdBODY) {
 		yencstart := time.Now()
 		getCoreLimiter()
 		defer returnCoreLimiter()
@@ -512,14 +512,14 @@ readlines:
 	item.mux.Lock()
 
 	switch what {
-	case "ARTICLE":
+	case cmdARTICLE:
 		item.article = content
 		item.size = rxb
 		item.dlcnt++
-	case "BODY":
+	case cmdBODY:
 		item.body = content
 		item.bodysize = rxb
-	case "HEAD":
+	case cmdHEAD:
 		item.head = content
 		item.headsize = rxb
 	default:

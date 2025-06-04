@@ -296,3 +296,12 @@ func (item *segmentChanItem) PrintItemFlags(print bool, doLock bool, src string)
 		dlog(cfg.opt.BUG, "src='%s' ItemFlags: none seg.Id='%s'", src, item.segment.Id)
 	}
 } // end func segmentChanItem.PrintItemFlags
+
+const (
+	cmdARTICLE = "ARTICLE"
+	cmdHEAD    = "HEAD"
+	cmdBODY    = "BODY"
+	cmdSTAT    = "STAT"
+	cmdIHAVE   = "IHAVE"
+	cmdPOST    = "POST"
+)

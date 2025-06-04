@@ -322,6 +322,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		//}
 	} // end switch code
 
+	// parkconn
 	if sharedCC != nil {
 		SharedConnReturn(sharedCC, connitem, provider)
 	} else {
@@ -355,7 +356,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	if err != nil {
 		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
-	if connitem == nil || connitem.conn == nil {
+	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
 		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
