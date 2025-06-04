@@ -56,6 +56,7 @@ var (
 
 // holds an active connection to share around
 type ConnItem struct {
+	c         *ConnPool // pointer to the ConnPool which created this ConnItem
 	conn      net.Conn
 	connid    uint64 // unique connection id
 	srvtp     *textproto.Conn
@@ -252,7 +253,7 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 	}
 	dlog(cfg.opt.DebugConnPool, "ConnPool connect welcome '%s' time0=(%d ms) time00=(%d ms) time000=(%d ms)", c.provider.Name, time.Since(time0).Milliseconds(), time.Since(time00).Milliseconds(), time.Since(time000).Milliseconds())
 	if !c.wants_auth {
-		return &ConnItem{connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
+		return &ConnItem{connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn), c: c}, err
 	}
 	return c.auth(srvtp, conn, start)
 } // end func connect
