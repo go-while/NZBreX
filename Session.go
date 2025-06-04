@@ -250,7 +250,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 					make(map[int]bool, len(s.providerList)),
 					[]string{}, []string{}, []string{}, // []string fields
 					false, false, false, false, false, false, false, false, false, // bool fields
-					0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // int fields
+					0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // int fields
 				s.segmentList = append(s.segmentList, item)
 			}
 		}

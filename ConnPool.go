@@ -56,6 +56,7 @@ var (
 
 // holds an active connection to share around
 type ConnItem struct {
+	c         *ConnPool // pointer to the ConnPool which created this ConnItem
 	conn      net.Conn
 	connid    uint64 // unique connection id
 	srvtp     *textproto.Conn
@@ -252,7 +253,7 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 	}
 	dlog(cfg.opt.DebugConnPool, "ConnPool connect welcome '%s' time0=(%d ms) time00=(%d ms) time000=(%d ms)", c.provider.Name, time.Since(time0).Milliseconds(), time.Since(time00).Milliseconds(), time.Since(time000).Milliseconds())
 	if !c.wants_auth {
-		return &ConnItem{connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
+		return &ConnItem{c: c, connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
 	}
 	return c.auth(srvtp, conn, start)
 } // end func connect
@@ -309,7 +310,7 @@ func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (
 		return nil, err
 	}
 	time5 := time.Now()
-	connitem = &ConnItem{connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}
+	connitem = &ConnItem{c: c, connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}
 	dlog(cfg.opt.DebugConnPool, "ConnPool AUTH took=(%d ms) time1=(%d ms) time2=(%d ms) time3=(%d ms) time4=(%d ms) time5=(%d ms) '%s'", time.Since(start).Milliseconds(), time.Since(time1).Milliseconds(), time.Since(time2).Milliseconds(), time.Since(time3).Milliseconds(), time.Since(time4).Milliseconds(), time.Since(time5).Milliseconds(), c.provider.Name)
 	dlog(cfg.opt.BUG, "ConnPool AUTH '%s' err='%v' newConnItem='%#v'", c.provider.Name, err, connitem)
 	return connitem, err

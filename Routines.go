@@ -46,7 +46,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		return 0, fmt.Errorf("ERROR in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
-	code, err = CMD_STAT(provider, connitem, item)
+	code, err = CMD_STAT(connitem, item)
 	if code == 0 && err != nil {
 		// connection problem, closed?
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
@@ -174,7 +174,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
 	startArticle := time.Now()
-	code, msg, rxb, err := CMD_ARTICLE(provider, connitem, item)
+	code, msg, rxb, err := CMD_ARTICLE(connitem, item)
 
 	if err != nil {
 		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
@@ -322,6 +322,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		//}
 	} // end switch code
 
+	// parkconn
 	if sharedCC != nil {
 		SharedConnReturn(sharedCC, connitem, provider)
 	} else {
@@ -355,7 +356,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	if err != nil {
 		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
-	if connitem == nil || connitem.conn == nil {
+	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
 		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
@@ -385,7 +386,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	switch cmd {
 	case 1:
-		code, msg, txb, err = CMD_POST(provider, connitem, item)
+		code, msg, txb, err = CMD_POST(connitem, item)
 		switch code {
 		case 240:
 			uploaded = true
@@ -396,7 +397,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		}
 
 	case 2:
-		code, msg, txb, err = CMD_IHAVE(provider, connitem, item)
+		code, msg, txb, err = CMD_IHAVE(connitem, item)
 		switch code {
 		case 235:
 			uploaded = true
