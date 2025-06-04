@@ -197,7 +197,9 @@ type segmentChanItem struct {
 	checkedOn   int                              // counts up if item has been checked on a provider
 	pushedDL    int                              // a counter for debugging
 	pushedUP    int                              // a counter for debugging
-	size        int                              // size of the segment/article in bytes
+	size        int                              // size of the segment / full article in bytes (used with readDotLines(item,connitem,"ARTICLE"))
+	headsize    int                              // size of the head in bytes (used with readDotLines(item,connitem,"HEAD"))
+	bodysize    int                              // size of the body in bytes (used with readDotLines(item,connitem,"BODY"))
 	dlcnt       int                              // download count, used for retrying
 	badcrc      int                              // number of bad crc checks, used for retrying
 	fails       int                              // number of fails, used for retrying
