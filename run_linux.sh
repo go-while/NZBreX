@@ -2,7 +2,7 @@
 ./build.sh || exit 1
 nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb.gz
 test "$1" != "" && nzbfile="$1"
-rm /cache/nzbrex/* -r
+rm -rf /cache/nzbrex/*
 ./NZBreX \
 	-chansize=500 \
         -checkfirst=true -checkonly=false \
