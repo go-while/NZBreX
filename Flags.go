@@ -33,7 +33,7 @@ func ParseFlags() {
 	flag.StringVar(&cfg.opt.CleanHeadersFile, "cleanhdrfile", "", "loads unwanted headers to cleanup from /path/to/cleanHeaders.txt")
 	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false)")
 	flag.IntVar(&cfg.opt.YencTest, "yenctest", 2, "select mode 1 (bytes) or 2 (lines) or 3 (direct) to use in -crc32. (experimental/testing) mode 2 should use less mem and 3 is experimental. (default: 2)")
-	flag.IntVar(&cfg.opt.YencCpu, "yenccpu", 4, fmt.Sprintf("limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
+	flag.IntVar(&cfg.opt.YencCpu, "yenccpu", 0, fmt.Sprintf("limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
 	flag.IntVar(&cfg.opt.YencAsyncCpu, "yencasync", 64, fmt.Sprintf("limits async parallel decoding with -crc32=true and -yenctest=3. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
 	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (experimental/testing) (default: false)")
 	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (experimental/testing) (default: false)")
