@@ -627,6 +627,9 @@ func (d *Decoder) ParseTrailer(line string) error {
 			} else if crc64 > math.MaxUint32 {
 				return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
 			} else {
+				if crc64 > math.MaxUint32 {
+					return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
+				}
 				d.Fullcrc32 = uint32(crc64)
 				d.Part.Crc32 = uint32(crc64) // why it has not been set by default... i dont know
 			}
