@@ -1,4 +1,4 @@
-[![Latest Release)](https://img.shields.io/github/v/release/go-while/nzbrefreshX?logo=github)](https://github.com/go-while/nzbrefreshX/releases/latest)
+[![Latest Release)](https://img.shields.io/github/v/release/go-while/NZBreX?logo=github)](https://github.com/go-while/NZBreX/releases/latest)
 
 # NZB Refresh X (NZBreX)
 
