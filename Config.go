@@ -66,6 +66,7 @@ type CFG struct {
 	Verify           bool   `json:"Verify"`           // if true, verify articles after upload
 	YencCRC          bool   `json:"YencCRC"`          // if true, crc32 will be checked while downloading yenc articles
 	YencCpu          int    `json:"YencCpu"`          // number of cpu cores to use for yenc decoding, 0 = runtime.NumCPU()
+	YencAsyncCpu     int    `json:"YencAsyncCpu"`     // number of cpu cores to use for async yenc decoding, 0 = runtime.NumCPU()
 	YencTest         int    `json:"YencTest"`         // 1 = bytes, 2 = lines, used with YencCRC
 	YencWrite        bool   `json:"YencWrite"`        // if true, yenc parts will be written to cache
 	YencMerge        bool   `json:"YencMerge"`        // if true, yenc parts will be merged into target files
@@ -247,6 +248,7 @@ var (
 // it is called from the segmentChanItem.PrintItemFlags() method
 // src is the source of the log message
 // print is a boolean to control if the flags should be printed or not
+// doLock is a boolean to control if the mutex should be locked or not
 func (item *segmentChanItem) PrintItemFlags(print bool, doLock bool, src string) {
 	if !print {
 		return

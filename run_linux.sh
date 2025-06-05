@@ -1,7 +1,8 @@
 #!/bin/bash
+./build.sh || exit 1
 nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb.gz
 test "$1" != "" && nzbfile="$1"
-
+rm /cache/nzbrex/* -r
 ./NZBreX \
 	-chansize=500 \
         -checkfirst=true -checkonly=false \
@@ -10,6 +11,7 @@ test "$1" != "" && nzbfile="$1"
 	-debug=false -debugmemlim=false -debugcache=false \
 	-debugsharedcc=false -debugconnpool=false -debugworker=false \
 	-debugBUG=false -debugflags=false \
-	-log=false -verbose=true -print430=false -crc32=false -yencout=false -yencmerge=false -yencdelparts=false \
+	-log=false -verbose=true -print430=false \
+        -yenctest=3 -yencasync=64 -crc32=true -yencout=true -yencmerge=true -yencdelparts=true \
         -cleanhdrfile=cleanHeaders.txt -prof=false
 

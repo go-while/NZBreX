@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-while/yenc" // fork of chrisfarms with little mods
+	"github.com/go-while/NZBreX/yenc" // fork of chrisfarms with little mods
 )
 
 type Cache struct {

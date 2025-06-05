@@ -303,6 +303,12 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 			core_chan <- struct{}{} // fill chan with empty structs to suck out and return
 		}
 	}
+	if async_core_chan == nil || cap(async_core_chan) != cfg.opt.YencAsyncCpu {
+		async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
+		for i := 1; i <= cfg.opt.YencAsyncCpu; i++ {
+			async_core_chan <- struct{}{} // fill chan with empty structs to suck out and return
+		}
+	}
 	globalmux.Unlock()
 
 	dlog(cfg.opt.Debug, "Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
