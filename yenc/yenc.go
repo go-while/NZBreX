@@ -616,12 +616,16 @@ func (d *Decoder) ParseTrailer(line string) error {
 		case "pcrc32":
 			if crc64, err := strconv.ParseUint(kv[1], 16, 64); err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: pcrc32 parse error '%s' err='%v'", kv[1], err)
+			} else if crc64 > math.MaxUint32 {
+				return fmt.Errorf("error in yenc.ParseTrailer: pcrc32 value '%s' exceeds uint32 range", kv[1])
 			} else {
 				d.Part.Crc32 = uint32(crc64)
 			}
 		case "crc32":
 			if crc64, err := strconv.ParseUint(kv[1], 16, 64); err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: crc32 parse error '%s' err='%v'", kv[1], err)
+			} else if crc64 > math.MaxUint32 {
+				return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
 			} else {
 				d.Fullcrc32 = uint32(crc64)
 				d.Part.Crc32 = uint32(crc64) // why it has not been set by default... i dont know
