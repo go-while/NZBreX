@@ -1,9 +1,8 @@
 #!/bin/bash
 nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb.gz
-test "$1" != "" && nzbfile="$1"
-
+test "$1" != "" && nzbfile="$1" 
+rm -rf /cache/nzbrex/*
 # to run -race on linux: exclude the signals_windows with grep -v
-
 go run -race $(ls *.go|grep -v signals_windows) \
 	-chansize=500 \
         -checkfirst=true -checkonly=false \
@@ -12,6 +11,7 @@ go run -race $(ls *.go|grep -v signals_windows) \
 	-debug=false -debugmemlim=false -debugcache=false \
 	-debugsharedcc=false -debugconnpool=false -debugworker=false \
 	-debugBUG=false -debugflags=false \
-	-log=false -verbose=true -print430=false -crc32=false -yencout=false -yencmerge=false -yencdelparts=false \
+	-log=false -verbose=true -print430=false \
+	-yenctest=3 -yencasync=64 -crc32=true -yencout=true -yencmerge=true -yencdelparts=true \
         -cleanhdrfile=cleanHeaders.txt -prof=false
 

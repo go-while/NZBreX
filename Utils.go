@@ -33,6 +33,14 @@ func returnCoreLimiter() {
 	core_chan <- struct{}{}
 }
 
+func getAsyncCoreLimiter() {
+	<-async_core_chan
+}
+
+func returnAsyncCoreLimiter() {
+	async_core_chan <- struct{}{}
+}
+
 /*
 nzbfile=&nzbparser.Nzb{Comment:"", Meta:map[string]string{},
 	Files:nzbparser.NzbFiles{

@@ -7,13 +7,14 @@ package main
  *     github.com/Tensai75/nzbrefresh#commit:cc2a8b7  (MIT License)
  *
  * Includes Code:
+ *     github.com/go-while/NZBreX/yenc				  (MIT License)
+ *	   github.com/go-while/go-loggedrwmutex           (MIT License)
  *     github.com/go-while/go-cpu-mem-profiler        (MIT License)
  *
  * Foreign Includes:
  *     github.com/Tensai75/nzbparser#commit:a1e0d80   (MIT License)
  *     github.com/Tensai75/cmpb#commit:16fb79f        (MIT License)
  *     github.com/fatih/color#commit:4c0661           (MIT License)
- *     github.com/go-yenc/yenc ( gopkg.in/yenc.v0 )   (MIT License)
  *
  */
 
@@ -38,12 +39,13 @@ var (
 	Prof       *prof.Profiler // cpu/mem profiler
 	cfg        *Config        // global config object
 	//globalmux  sync.RWMutex    // global mutex for all routines to use
-	globalmux *loggedrwmutex.LoggedSyncRWMutex // debug mutex
-	core_chan chan struct{}                    // limits cpu usage
-	memlim    *MemLimiter                      // limits number of objects in ram
-	cache     *Cache                           // cache object
-	cacheON   bool                             // will be true if cache is enabled
-	GCounter  *Counter_uint64                  // a global counter
+	globalmux       *loggedrwmutex.LoggedSyncRWMutex // debug mutex
+	core_chan       chan struct{}                    // limits cpu usage
+	async_core_chan chan struct{}                    // limits cpu usage
+	memlim          *MemLimiter                      // limits number of objects in ram
+	cache           *Cache                           // cache object
+	cacheON         bool                             // will be true if cache is enabled
+	GCounter        *Counter_uint64                  // a global counter
 
 	// flags
 	booted   time.Time // not a flag
