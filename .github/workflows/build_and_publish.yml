@@ -350,6 +350,7 @@ jobs:
       - name: "compile rapidyenc linux-arm64"
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
+          cd rapidyenc && ./build_rapidyenc_linux_arm64.sh
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
