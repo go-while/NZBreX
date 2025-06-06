@@ -22,18 +22,27 @@ func NewDecoder() (*Decoder, error) {
 	decoder := &Decoder{
 		ry: nil, // initialize with nil, will be set later
 	}
-	err := decoder.NewRapidYencDecoder() // initialize RapidYenc
+	err := decoder.newRapidYencDecoder() // initialize RapidYenc
 	if err != nil || decoder.ry == nil {
 		return nil, fmt.Errorf("Failed to initialize RapidYenc err='%v'", err)
 	}
 	return decoder, nil
 }
 
-func (d *Decoder) NewRapidYencDecoder() error {
+func (d *Decoder) newRapidYencDecoder() error {
 	// create a new RapidYenc instance
 	if d.ry != nil {
 		return fmt.Errorf("rapidYenc already initialized in this decoder")
 	}
 	d.ry = rapidyenc.AcquireDecoder()
+	return nil
+}
+
+func (d *Decoder) ReleaseRapidYencDecoder() error {
+	if d.ry == nil {
+		return fmt.Errorf("rapidYenc not initialized in this decoder")
+	}
+	rapidyenc.ReleaseDecoder(d.ry)
+	d.ry = nil // reset to nil after release
 	return nil
 }

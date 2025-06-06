@@ -38,6 +38,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (experimental/testing) (default: false)")
 	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (experimental/testing) (default: false)")
 	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (experimental/testing) (default: false)")
+	flag.BoolVar(&cfg.opt.RapidYenc, "rapidyenc", false, "[true|false] use rapidyenc for yenc parts (experimental/testing) (default: false)")
 	// debug output flags
 	flag.BoolVar(&runProf, "prof", false, "starts profiler (for debugging)\n       @mem: waits 20sec and runs 120 sec\n       @cpu: waits 20 sec and captures to end")
 	flag.StringVar(&webProf, "profweb", "", "start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' (default: empty = dont start websrv)")
@@ -103,8 +104,21 @@ func ParseFlags() {
 
 	if cfg.opt.YencCRC {
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 3 {
-			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1 or 2 or 3 (default: 2)", cfg.opt.YencTest)
+			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1-3 (default: 2)", cfg.opt.YencTest)
 			os.Exit(1)
+		}
+	}
+
+	if cfg.opt.YencCpu < 0 {
+		dlog(always, "ERROR: you can not use -yenccpu=%d because it must be >= 0 (default: 0)", cfg.opt.YencCpu)
+		os.Exit(1)
+	}
+
+	if cfg.opt.RapidYenc {
+		if !compiledwithRapidyenc {
+			dlog(always, "ERROR: you can not use -rapidyenc because this binary was not compiled with rapidyenc support!")
+		} else {
+			cfg.opt.YencTest = 4 // set to 4 for rapidyenc
 		}
 	}
 

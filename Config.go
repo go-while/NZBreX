@@ -71,6 +71,7 @@ type CFG struct {
 	YencWrite        bool   `json:"YencWrite"`        // if true, yenc parts will be written to cache
 	YencMerge        bool   `json:"YencMerge"`        // if true, yenc parts will be merged into target files
 	YencDelParts     bool   `json:"YencDelParts"`     // if true, yenc parts will be deleted after merge
+	RapidYenc        bool   `json:"RapidYenc"`        // if true, rapidyenc will be used for yenc parts
 	Csv              bool   `json:"Csv"`              // if true, write a csv file for every nzb file
 	Log              bool   `json:"Log"`              // if true, log to file
 	LogAppend        bool   `json:"LogAppend"`        // if true, append to log file instead of overwriting
