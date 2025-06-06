@@ -6,7 +6,7 @@ package rapidyenc
 #cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_windows_amd64.a -lstdc++
 #cgo linux,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_amd64.a -lstdc++
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_arm64.a -lstdc++
-#include "{SRCDIR}/src/rapidyenc.h"
+#include "rapidyenc.h"
 */
 import "C"
 import (
