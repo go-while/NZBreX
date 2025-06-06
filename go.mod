@@ -7,7 +7,7 @@ require (
 	github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83
 )
 
-require github.com/go-while/NZBreX/rapidyenc v0.0.0-20250606134543-b03c26c587b6 // indirect
+require github.com/go-while/NZBreX/rapidyenc v0.0.0-20250606134803-38e59f369a1c // indirect
 
 require (
 	github.com/Tensai75/subjectparser v0.1.0 // indirect
