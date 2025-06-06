@@ -4,5 +4,8 @@ cd rapidyenc && ./crossbuild_rapidyenc_win.sh && cd ../
 
 export GOOS=windows
 export GOARCH=amd64
-go build -o NZBreX_ry.exe -tags windows .
+export CGO_ENABLED=1
+export CC=x86_64-w64-mingw32-gcc
+
+go build -o NZBreX_ry.exe -tags "windows rapidyenc"  .
 exit $?
