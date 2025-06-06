@@ -130,10 +130,10 @@ jobs:
 
           # Windows cross-builds
           # amd64
-          #- runner_label: ubu2204
-          #  os: windows
-          #  arch: amd64
-          #  name: windows-amd64
+          - runner_label: ubu2204
+            os: windows
+            arch: amd64
+            name: windows-amd64
           # arm64
           #- runner_label: ubu2204
           #  os: windows
