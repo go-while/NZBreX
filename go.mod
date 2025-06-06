@@ -9,6 +9,8 @@ require (
 
 require github.com/go-while/rapidyenc v0.0.0-20250606131034-1f244108e1b5
 
+require github.com/go-while/NZBreX/rapidyenc v0.0.0-20250606133156-aebe590f90c1 // indirect
+
 require (
 	github.com/Tensai75/subjectparser v0.1.0 // indirect
 	github.com/go-while/go-loggedrwmutex v0.0.0-20250601032232-b0aa20cdcb2c
