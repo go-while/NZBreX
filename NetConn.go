@@ -735,12 +735,12 @@ readlines:
 			getAsyncCoreLimiter()
 			if decoded, err := rydecoder.Read(ydec); err != nil || decoded == 0 {
 				returnAsyncCoreLimiter()
-				log.Printf("ERROR async decodeBodyChan rydecoder.ReadBody: seg.Id='%s' @ '%s' err='%v'", item.segment.Id, connitem.c.provider.Name, err)
+				log.Printf("ERROR async decodeBodyChan rydecoder.Read: seg.Id='%s' @ '%s' err='%v'", item.segment.Id, connitem.c.provider.Name, err)
 				isBadCrc = true // we got a broken yenc body line
 				break           // the case 4
 			} else {
 				// we got a decoded yenc line
-				dlog(always, "async decodeBodyChan rydecoder.ReadBody: seg.Id='%s' @ '%s' decoded=%d", item.segment.Id, connitem.c.provider.Name, decoded)
+				dlog(always, "async decodeBodyChan rydecoder.Read: seg.Id='%s' @ '%s' decoded=%d", item.segment.Id, connitem.c.provider.Name, decoded)
 			}
 			returnAsyncCoreLimiter()
 
