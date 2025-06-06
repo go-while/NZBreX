@@ -8,14 +8,12 @@ builds:
     main: .
     binary: NZBreX
     ignore:
-      goarch:
-        - 386
-      goos:
-        - windows
-        - darwin
-        - freebsd
-        - openbsd
-        - netbsd
+      - goarch: 386
+      - goos: windows
+      - goos: darwin
+      - goos: freebsd
+      - goos: openbsd
+      - goos: netbsd
     goos:
       - linux
       #- darwin
