@@ -342,7 +342,7 @@ jobs:
 
       - name: "compile rapidyenc windows-amd64"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
-        run: cd rapidyenc && ./crossbuild_rapidyenc_win.sh.sh
+        run: cd rapidyenc && ./crossbuild_rapidyenc_win.sh
 
       - name: "Set up ARM64 cross-compiler (only for arm64)"
         if: ${{ matrix.goarch == 'arm64' }}
