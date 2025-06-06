@@ -7,6 +7,15 @@ builds:
   - id: linux
     main: .
     binary: NZBreX
+    ignore:
+      - goarch:
+        - 386
+      - goos:
+        - windows
+        - darwin
+        - freebsd
+        - openbsd
+        - netbsd
     goos:
       - linux
       #- darwin
@@ -21,7 +30,7 @@ builds:
     ldflags:
       - "-s -w -X main.appVersion={{.Version}}"
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
 
   #- id: windows
   #  main: .
@@ -48,14 +57,14 @@ archives:
       - README*
       - "{{ .ArtifactPath }}"
 
-  - id: win
-    ids: [windows]
-    formats: [zip]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - LICENSE*
-      - README*
-      - "{{ .ArtifactPath }}"
+  #- id: win
+  #  ids: [windows]
+  #  formats: [zip]
+  #  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  #  files:
+  #    - LICENSE*
+  #    - README*
+  #    - "{{ .ArtifactPath }}"
 
 checksum:
   name_template: "checksums.txt"
