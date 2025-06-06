@@ -57,10 +57,10 @@ jobs:
 
           # FreeBSD cross-builds
           # amd64
-          #- runner_label: ubu2204
-          #  os: freebsd
-          #  arch: amd64
-          #  name: freebsd-amd64
+          - runner_label: ubu2204
+            os: freebsd
+            arch: amd64
+            name: freebsd-amd64
           # arm64
           #- runner_label: ubu2204
           #  os: freebsd
