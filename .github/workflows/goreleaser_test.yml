@@ -45,7 +45,7 @@ jobs:
         run: cd rapidyenc && ./clone_rapidyenc.sh
 
       - name: "compile rapidyenc"
-        run: ./build_rapidyenc.sh
+        run: cd rapidyenc && ./build_rapidyenc.sh
 
       - name: "Run GoReleaser (Test Build)"
         uses: goreleaser/goreleaser-action@v6
