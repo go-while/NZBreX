@@ -47,6 +47,13 @@ jobs:
       - name: "compile rapidyenc"
         run: cd rapidyenc && ./build_rapidyenc.sh
 
+      - name: "Set up ARM64 cross-compiler (only for arm64)"
+        if: ${{ matrix.goarch == 'arm64' }}
+        run: |
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
       - name: "Run GoReleaser (Test Build)"
         uses: goreleaser/goreleaser-action@v6
         with:
