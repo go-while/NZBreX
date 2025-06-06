@@ -22,6 +22,7 @@ go.work
 vendor/
 rapidyenc/rapidyenc
 rapidyenc/librapidyenc.a
+rapidyenc/librapidyenc.dll
 
 # test files
 test*.*
