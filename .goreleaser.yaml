@@ -10,7 +10,7 @@ builds:
     ignore:
       - goarch: 386
       - goos: windows
-      - goos: darwin
+      #- goos: darwin
       - goos: freebsd
       - goos: openbsd
       - goos: netbsd
