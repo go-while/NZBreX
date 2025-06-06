@@ -5,8 +5,10 @@ package rapidyenc
 #cgo darwin LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo windows,386   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
+#cgo windows,arm   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo linux,amd64   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo linux,386     LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
+#cgo linux,arm     LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo linux,arm64   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #include "rapidyenc.h"
 */
