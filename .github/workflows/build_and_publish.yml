@@ -170,16 +170,16 @@ jobs:
             arch: arm64
             name: debian-10-arm64
             libc: glibc
-          #- runner_label: deb11
-          #  os: linux
-          #  arch: arm64
-          #  name: debian-11-arm64
-          #  libc: glibc
-          #- runner_label: deb12
-          #  os: linux
-          #  arch: arm64
-          #  name: debian-12-arm64
-          #  #libc: glibc
+          - runner_label: deb11
+            os: linux
+            arch: arm64
+            name: debian-11-arm64
+            libc: glibc
+          - runner_label: deb12
+            os: linux
+            arch: arm64
+            name: debian-12-arm64
+            libc: glibc
 
           # Debian 10-12 self-hosted builds 32-bit ARM
           # armv7
