@@ -387,10 +387,11 @@ jobs:
         run: |
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
           # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
+          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')-SNAPSHOT"
           if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
+            VERSION="${SAFE_VERSION}"
           else
-            VERSION="${GITHUB_REF_NAME}-SNAPSHOT"
+            VERSION="${SAFE_VERSION}-SNAPSHOT"
           fi
           # Strip leading 'v' if present
           VERSION="${VERSION#v}"
