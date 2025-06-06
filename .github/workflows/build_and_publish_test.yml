@@ -3,7 +3,7 @@ name: "TEST Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'testing'
+      - 'rapidyenc'
     tags:
       - "test*"
   release:
