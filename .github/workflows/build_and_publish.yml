@@ -237,21 +237,21 @@ jobs:
 
           # Ubuntu 20.04 - 24.04 self-hosted builds arm64
           # arm64
-          #- runner_label: ubu2004
-          #  os: linux
-          #  arch: arm64
-          #  name: ubuntu-20.04-arm64
-          #  libc: glibc
-          #- runner_label: ubu2204
-          #  os: linux
-          #  arch: arm64
-          #  name: ubuntu-22.04-arm64
-          #  libc: glibc
-          #- runner_label: ubu2404
-          #  os: linux
-          #  arch: arm64
-          #  name: ubuntu-24.04-arm64
-          #  libc: glibc
+          - runner_label: ubu2004
+            os: linux
+            arch: arm64
+            name: ubuntu-20.04-arm64
+            libc: glibc
+          - runner_label: ubu2204
+            os: linux
+            arch: arm64
+            name: ubuntu-22.04-arm64
+            libc: glibc
+          - runner_label: ubu2404
+            os: linux
+            arch: arm64
+            name: ubuntu-24.04-arm64
+            libc: glibc
 
           # Ubuntu 20.04 - 24.04 self-hosted builds 32-bit ARM
           # armv7

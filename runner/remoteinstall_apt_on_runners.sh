@@ -131,7 +131,7 @@ while IFS="" read -r line; do
   echo -e -n "\n\n... updating $HOST ... "
 
   ### install apt packages
-  install_apt_packages "$IP" "$HOST" #>> "$RESPONSES_FILE" 2>&1
+  install_apt_packages "$IP" "$HOST" >> "$RESPONSES_FILE" 2>&1
   ret=$?; echo " code $ret"
   echo -e "\n" >> "$RESPONSES_FILE"
 
