@@ -23,20 +23,20 @@ builds:
     env:
       - CGO_ENABLED=0
 
-  - id: windows
-    main: .
-    binary: NZBreX
-    goos:
-      - windows
-    goarch:
-      - amd64
-      #- arm64
-      #- 386
-      #- arm
-    ldflags:
-      - "-s -w -X main.appVersion={{.Version}}"
-    env:
-      - CGO_ENABLED=0
+  #- id: windows
+  #  main: .
+  #  binary: NZBreX
+  #  goos:
+  #    - windows
+  #  goarch:
+  #    - amd64
+  #    #- arm64
+  #    #- 386
+  #    #- arm
+  #  ldflags:
+  #    - "-s -w -X main.appVersion={{.Version}}"
+  #  env:
+  #    - CGO_ENABLED=0
 
 archives:
   - id: unix
