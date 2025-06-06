@@ -8,22 +8,22 @@ builds:
     main: .
     binary: NZBreX
     ignore:
-      - goarch: 386
+      #- goarch: 386
       - goos: windows
       - goos: darwin
-      #- goos: freebsd
-      #- goos: openbsd
-      #- goos: netbsd
+      - goos: freebsd
+      - goos: openbsd
+      - goos: netbsd
     goos:
       - linux
       #- darwin
-      - freebsd
-      - openbsd
-      - netbsd
+      #- freebsd
+      #- openbsd
+      #- netbsd
     goarch:
       - amd64
       #- arm64
-      #- 386
+      - 386
       #- arm
     ldflags:
       - "-s -w -X main.appVersion={{.Version}}"
