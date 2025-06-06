@@ -6,7 +6,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/mnightingale/rapidyenc"
+	"github.com/go-while/rapidyenc" //"github.com/mnightingale/rapidyenc"
 )
 
 // compiler flags

@@ -3,7 +3,7 @@ nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb.gz
 test "$1" != "" && nzbfile="$1" 
 rm -rf /cache/nzbrex/*
 # to run -race on linux: exclude the signals_windows with grep -v
-go run -tags rapidyenc -race . \
+go run -tags rapidyenc1 -race . \
 	-chansize=500 \
         -checkfirst=true -checkonly=false \
         -nzb="$nzbfile" -provider="provider.json" \
