@@ -9,19 +9,19 @@ builds:
     binary: NZBreX
     goos:
       - linux
-      - darwin
-      - freebsd
-      - openbsd
-      - netbsd
+      #- darwin
+      #- freebsd
+      #- openbsd
+      #- netbsd
     goarch:
       - amd64
-      - arm64
-      - 386
-      - arm
+      #- arm64
+      #- 386
+      #- arm
     ldflags:
       - "-s -w -X main.appVersion={{.Version}}"
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
 
   - id: windows
     main: .
@@ -30,13 +30,13 @@ builds:
       - windows
     goarch:
       - amd64
-      - arm64
-      - 386
-      - arm
+      #- arm64
+      #- 386
+      #- arm
     ldflags:
       - "-s -w -X main.appVersion={{.Version}}"
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
 
 archives:
   - id: unix

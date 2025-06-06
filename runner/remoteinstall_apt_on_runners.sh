@@ -135,7 +135,7 @@ while IFS="" read -r line; do
 
   ### execute updates
   #update_0001 "$IP" "$HOST"
-  update_0002 "$IP" "$HOST"
+  #update_0002 "$IP" "$HOST"
 
   ### restart runners
   #restart_runners_remote "$IP" "$HOST"
