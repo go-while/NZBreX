@@ -3,7 +3,7 @@ name: "Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'devtesting'
+      - 'testing'
     tags:
       - "test*"
   release:
@@ -26,7 +26,7 @@ jobs:
       - self-hosted
       - ${{ matrix.runner_label }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           # Alpine Linux cross-builds (musl)
@@ -332,6 +332,29 @@ jobs:
 
 #      - name: "Restore go cache"
 #        run: runner/go-cache-restore.sh
+
+      - name: "clone rapidyenc"
+        run: cd rapidyenc && ./clone_rapidyenc.sh
+
+      - name: "compile rapidyenc"
+        if: matrix.os == 'linux' && matrix.arch == 'amd64'
+        run: cd rapidyenc && ./build_rapidyenc.sh
+        if: matrix.os == 'windows' && matrix.arch == 'amd64'
+        run: cd rapidyenc && ./crossbuild_rapidyenc_win.sh.sh
+
+      - name: "Set up ARM64 cross-compiler (only for arm64)"
+        if: ${{ matrix.goarch == 'arm64' }}
+        run: |
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
+      - name: "Set up Win386 cross-compiler"
+        if: ${{ matrix.goarch == '386' }} && ${{ matrix.os == 'windows' }}
+        run: |
+          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+          echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
       # Run tests with race detector for supported platforms
       - name: "Run race detector tests (amd64/linux only)"
