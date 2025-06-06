@@ -5,11 +5,12 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"hash/crc32"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecode(t *testing.T) {

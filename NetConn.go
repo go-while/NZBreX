@@ -9,7 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-while/NZBreX/yenc" // fork of chrisfarms with little mods
+	"github.com/go-while/NZBreX/rapidyenc" // fork of chrisfarms with little mods
+	"github.com/go-while/NZBreX/yenc"      // fork of chrisfarms with little mods
 )
 
 const debugthis = false // set to true to debug CMD_ARTICLE without a real server connection
@@ -354,11 +355,11 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	var decodeBodyChan chan *string
 	var counter *Counter_uint64
 	var releaseDecoder chan struct{}
-	var rydecoder *Decoder // pointer to RapidYenc decoder, if enabled
+	var rydecoder *rapidyenc.Decoder // pointer to RapidYenc decoder, if enabled
 
 	switch cfg.opt.YencTest {
 	case 4:
-		rydecoder, err = NewRapidYencDecoder()
+		rydecoder = rapidyenc.AcquireDecoder()
 
 	case 3:
 		// yenc test 3 means we parse yenc lines directly to the decoder as we read them from the textproto.Conn
@@ -732,7 +733,7 @@ readlines:
 			}
 			// rapidyenc test 4
 			getAsyncCoreLimiter()
-			if decoded, err := rydecoder.RY.Read(ydec); err != nil || decoded == 0 {
+			if decoded, err := rydecoder.Read(ydec); err != nil || decoded == 0 {
 				returnAsyncCoreLimiter()
 				log.Printf("ERROR async decodeBodyChan rydecoder.ReadBody: seg.Id='%s' @ '%s' err='%v'", item.segment.Id, connitem.c.provider.Name, err)
 				isBadCrc = true // we got a broken yenc body line
@@ -742,9 +743,10 @@ readlines:
 				dlog(always, "async decodeBodyChan rydecoder.ReadBody: seg.Id='%s' @ '%s' decoded=%d", item.segment.Id, connitem.c.provider.Name, decoded)
 			}
 			returnAsyncCoreLimiter()
+
 		} // end switch yencTest
 		dlog(cfg.opt.DebugWorker, "readArticleDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(yencstart).Microseconds(), time.Since(start).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
-
+		rapidyenc.ReleaseDecoder(rydecoder)
 		if isBadCrc {
 			item.mux.Lock()
 			item.badcrc++

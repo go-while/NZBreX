@@ -103,8 +103,8 @@ func ParseFlags() {
 	}
 
 	if cfg.opt.YencCRC {
-		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 3 {
-			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1-3 (default: 2)", cfg.opt.YencTest)
+		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 4 {
+			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1-4 (default: 2)", cfg.opt.YencTest)
 			os.Exit(1)
 		}
 	}
@@ -115,11 +115,8 @@ func ParseFlags() {
 	}
 
 	if cfg.opt.RapidYenc {
-		if !compiledwithRapidyenc {
-			dlog(always, "ERROR: you can not use -rapidyenc because this binary was not compiled with rapidyenc support!")
-		} else {
-			cfg.opt.YencTest = 4 // set to 4 for rapidyenc
-		}
+		cfg.opt.YencTest = 4 // set to 4 for rapidyenc
+		dlog(always, "Using rapidyenc for yenc parts. -yenctest is set to 4 automatically.")
 	}
 
 	if cfg.opt.MaxArtSize < 1 {
