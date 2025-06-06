@@ -54,6 +54,7 @@ var (
 	webProf  string    // flag
 	nzbfile  string    // flag
 	testmode bool      // flag: used to test compilation
+
 )
 
 func init() {
@@ -71,7 +72,11 @@ func init() {
 func main() {
 	//colors := new(cmpb.BarColors)
 	ParseFlags()
-
+	if compiledwithRapidyenc {
+		dlog(always, "rapidyenc enabled!")
+	} else {
+		dlog(always, "rapidyenc NOT enabled!")
+	}
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
 	go GoMutexStatus()

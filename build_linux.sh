@@ -1,2 +1,2 @@
-go build -o NZBreX -tags other
+go build -o NZBreX -tags other .
 exit $?
