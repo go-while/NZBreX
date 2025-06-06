@@ -623,10 +623,6 @@ func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Du
 	return newSleep
 }
 
-func fatal() bool {
-	return true
-}
-
 // GetImpossibleCloseCaseVariablesToString returns a string representation of the impossible close case variables.
 // This is used for debugging purposes to understand the state of the system when an impossible close case occurs.
 func GetImpossibleCloseCaseVariablesToString(segm, allOk, done, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64) string {
