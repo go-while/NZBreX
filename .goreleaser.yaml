@@ -30,20 +30,20 @@ builds:
     env:
       - CGO_ENABLED=1
 
-  #- id: windows
-  #  main: .
-  #  binary: NZBreX
-  #  goos:
-  #    - windows
-  #  goarch:
-  #    - amd64
-  #    #- arm64
-  #    #- 386
-  #    #- arm
-  #  ldflags:
-  #    - "-s -w -X main.appVersion={{.Version}}"
-  #  env:
-  #    - CGO_ENABLED=0
+  - id: windows
+    main: .
+    binary: NZBreX
+    goos:
+      - windows
+    goarch:
+      - amd64
+      #- arm64
+      #- 386
+      #- arm
+    ldflags:
+      - "-s -w -X main.appVersion={{.Version}}"
+    env:
+      - CGO_ENABLED=1
 
 archives:
   - id: unix
@@ -55,14 +55,14 @@ archives:
       - README*
       - "{{ .ArtifactPath }}"
 
-  #- id: win
-  #  ids: [windows]
-  #  formats: [zip]
-  #  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-  #  files:
-  #    - LICENSE*
-  #    - README*
-  #    - "{{ .ArtifactPath }}"
+  - id: win
+    ids: [windows]
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+      - "{{ .ArtifactPath }}"
 
 checksum:
   name_template: "checksums.txt"
