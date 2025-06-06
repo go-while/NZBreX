@@ -20,6 +20,7 @@
 # Go workspace file
 go.work
 vendor/
+rapidyenc/rapidyenc
 
 # test files
 test*.*
