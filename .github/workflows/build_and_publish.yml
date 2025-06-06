@@ -179,7 +179,7 @@ jobs:
             os: linux
             arch: arm64
             name: debian-12-arm64
-            libc: glibc
+            #libc: glibc
 
           # Debian 10-12 self-hosted builds 32-bit ARM
           # armv7
