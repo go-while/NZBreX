@@ -6,7 +6,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/go-while/NZBreX/rapidyenc"
+	"github.com/mnightingale/rapidyenc"
 )
 
 type Decoder struct {

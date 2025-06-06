@@ -5,6 +5,7 @@ go 1.24.3
 require (
 	github.com/Tensai75/nzbparser v0.1.0
 	github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83
+	github.com/mnightingale/rapidyenc v0.0.0-20240809192858-2494683cdd67
 )
 
 require (
