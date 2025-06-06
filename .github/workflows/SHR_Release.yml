@@ -1,4 +1,4 @@
-name: "Self-Hosted Runners main-PULL Test"
+name: "SHR Release"
 
 on:
   release:
@@ -436,7 +436,7 @@ jobs:
           tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
             -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
             -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
-          #
+
           # .xz (tar + xz)
           tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
             -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
@@ -545,17 +545,16 @@ jobs:
 #          retention-days: 1
 #          if-no-files-found: warn
 
-#      - name: "Upload Release Assets to github"
-#        if: github.event_name == 'release'
-#        uses: softprops/action-gh-release@v2
-#        with:
-#          files: |
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
+      - name: "Upload Release Assets to github"
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
 
 #      - name: "Backup go cache"
 #        run: runner/go-cache-backup.sh
