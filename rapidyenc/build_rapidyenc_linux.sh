@@ -1,4 +1,5 @@
 cd rapidyenc || exit 2
+rm -rf build
 mkdir -p build 
 cd build || exit 3
 cmake .. || exit 4
