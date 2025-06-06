@@ -42,10 +42,10 @@ jobs:
       #- name: "Restore go cache"
       #  run: runner/go-cache-restore.sh
       - name: "clone rapidyenc"
-        run: rapidyenc/clone_rapidyenc.sh
+        run: cd rapidyenc && ./clone_rapidyenc.sh
 
       - name: "compile rapidyenc"
-        run: rapidyenc/build_rapidyenc.sh
+        run: ./build_rapidyenc.sh
 
       - name: "Run GoReleaser (Test Build)"
         uses: goreleaser/goreleaser-action@v6
