@@ -3,7 +3,7 @@ name: "Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'testing'
+      - 'devtesting'
     tags:
       - "test*"
   release:
