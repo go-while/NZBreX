@@ -645,7 +645,10 @@ func (d *Decoder) ParseTrailerNew(line string) error {
 			// parse part number as int
 			// this is the part number of the part trailer
 			// it is used to check the part order
-			partNum, _ := strconv.Atoi(kv[1])
+			partNum, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return fmt.Errorf("error in yenc.ParseTrailer: part parse error '%s' err='%v'", kv[1], err)
+			}
 			if partNum != d.Part.Number {
 				return fmt.Errorf("yenc: =yend header out of order expected part %d got %d", d.Part.Number, partNum)
 			}
