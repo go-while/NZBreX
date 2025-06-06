@@ -3,7 +3,7 @@ name: "TEST Self-Hosted GoReleaser"
 on:
   push:
     branches:
-      - 'v0.0.3-testing'
+      - 'testing'
     tags:
       - "test*"
   workflow_dispatch:
