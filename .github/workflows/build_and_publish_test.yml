@@ -294,8 +294,7 @@ jobs:
         run: |
           echo "deleting workspace"
           rm -rf dist build ${{ github.workspace }}/
-          mkdir -vp ${{ github.workspace }}
-          mkdir -p builds/${{ matrix.name }}/usr/bin
+          mkdir -vp ${{ github.workspace }}/builds
 
       - name: "Checkout code"
         uses: actions/checkout@v4
