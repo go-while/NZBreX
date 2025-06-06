@@ -11,7 +11,6 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -468,7 +467,7 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 				if Debug1 {
 					log.Printf("yenc.Decoder d.Buf =yend d.Part.Body=%d", len(d.Part.Body))
 				}
-				return d.ParseTrailer(string(line))
+				return d.ParseTrailerNew(string(line))
 			}
 			// decode
 			b := d.DecodeLine(line)
@@ -507,7 +506,7 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 			if Debug3 {
 				log.Printf("yenc.Decoder yenctest=3 found =yend seg.Id='%s' d.Part.Body=%d", *d.SegId, len(d.Part.Body))
 			}
-			return d.ParseTrailer(line)
+			return d.ParseTrailerNew(line)
 		}
 		switch SimdMode {
 		case 0:
@@ -599,8 +598,19 @@ func (d *Decoder) DecodeLineNew(line string) []byte {
 	return decoded
 }
 
-func (d *Decoder) ParseTrailer(line string) error {
-	// split on space for headers
+// parseUint32 parses an unsigned integer string in the given base, ensuring it fits in a uint32.
+func parseUint32(s string, base int) (uint32, error) {
+	v, err := strconv.ParseUint(s, base, 32)
+	if err != nil {
+		return 0, err
+	}
+	if v > 0xFFFFFFFF {
+		return 0, fmt.Errorf("value '%s' overflows uint32", s)
+	}
+	return uint32(v), nil
+}
+
+func (d *Decoder) ParseTrailerNew(line string) error {
 	parts := strings.Split(line, " ")
 	for i := range parts {
 		kv := strings.Split(strings.TrimSpace(parts[i]), "=")
@@ -609,32 +619,32 @@ func (d *Decoder) ParseTrailer(line string) error {
 		}
 		switch kv[0] {
 		case "size":
+			// parse size as int64
 			if size, err := strconv.ParseInt(kv[1], 10, 64); err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: size parse error '%s' err='%v'", kv[1], err)
 			} else {
 				d.Part.Size = size
 			}
 		case "pcrc32":
-			if crc64, err := strconv.ParseUint(kv[1], 16, 64); err != nil {
+			// parse pcrc32 as uint32 in base 16
+			// this is the part crc32
+			crc, err := parseUint32(kv[1], 16)
+			if err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: pcrc32 parse error '%s' err='%v'", kv[1], err)
-			} else if crc64 > math.MaxUint32 {
-				return fmt.Errorf("error in yenc.ParseTrailer: pcrc32 value '%s' exceeds uint32 range", kv[1])
-			} else {
-				d.Part.Crc32 = uint32(crc64)
 			}
+			d.Part.Crc32 = crc
 		case "crc32":
-			if crc64, err := strconv.ParseUint(kv[1], 16, 64); err != nil {
+			// parse crc32 as uint32 in base 16
+			// this is the full crc32 of the part body
+			crc, err := parseUint32(kv[1], 16)
+			if err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: crc32 parse error '%s' err='%v'", kv[1], err)
-			} else if crc64 > math.MaxUint32 {
-				return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
-			} else {
-				if crc64 > math.MaxUint32 {
-					return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
-				}
-				d.Fullcrc32 = uint32(crc64)
-				d.Part.Crc32 = uint32(crc64) // why it has not been set by default... i dont know
 			}
+			d.Fullcrc32 = crc
 		case "part":
+			// parse part number as int
+			// this is the part number of the part trailer
+			// it is used to check the part order
 			partNum, _ := strconv.Atoi(kv[1])
 			if partNum != d.Part.Number {
 				return fmt.Errorf("yenc: =yend header out of order expected part %d got %d", d.Part.Number, partNum)
@@ -642,7 +652,7 @@ func (d *Decoder) ParseTrailer(line string) error {
 		}
 	}
 	return nil
-}
+} // end func ParseTrailer
 
 func (d *Decoder) Validate() error {
 	if Debug1 {
@@ -738,7 +748,7 @@ func (d *Decoder) DecodeYencLinesSIMD() error {
 		}
 		if strings.HasPrefix(*line, "=yend") {
 			//log.Printf("... parseTrailer")
-			if err := d.ParseTrailer(*line); err != nil {
+			if err := d.ParseTrailerNew(*line); err != nil {
 				return fmt.Errorf("error parsing trailer at line %d: %w", i, err)
 			}
 			continue
@@ -787,7 +797,7 @@ func (d *Decoder) DecodeYenc() ([]byte, error) {
 		}
 		if strings.HasPrefix(*line, "=yend") {
 			//log.Printf("... parseTrailer")
-			if err := d.ParseTrailer(*line); err != nil {
+			if err := d.ParseTrailerNew(*line); err != nil {
 				return nil, err
 			}
 			continue
