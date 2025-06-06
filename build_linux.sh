@@ -1,2 +1,2 @@
-go build -o NZBreX $(ls *.go|grep -v signals_windows) 
+go build -o NZBreX -tags other
 exit $?
