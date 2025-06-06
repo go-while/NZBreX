@@ -33,6 +33,12 @@ jobs:
       #- name: "Restore go cache"
       #  run: runner/go-cache-restore.sh
 
+      - name: "clone rapidyenc"
+        run: cd rapidyenc && ./clone_rapidyenc.sh
+
+      - name: "compile rapidyenc"
+        run: cd rapidyenc && ./build_rapidyenc.sh
+
       - name: "Run GoReleaser (Live Build)"
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -43,14 +49,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Set GaRuS Variables"
-        run: echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        run: |
+          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
+          echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "VERSION=${SAFE_VERSION}" >> $GITHUB_ENV
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
         run: .goreleaser/post_upload_GaRuS.sh
         env:
           BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_NAME: ${{ env.VERSION }}
           GITHUB_SHA7: ${{ env.GITHUB_SHA7 }}
           COMPILER: "GOR"
 

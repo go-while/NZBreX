@@ -381,7 +381,7 @@ jobs:
         run: |
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
           # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
-          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')-SNAPSHOT"
+          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
           if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
             VERSION="${SAFE_VERSION}"
           else
@@ -409,7 +409,7 @@ jobs:
             binary_name=NZBreX
           fi
           echo "BINARY=$binary_name" >> $GITHUB_ENV
-          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
+          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
             exit 1
@@ -449,7 +449,7 @@ jobs:
           matrix_distro="${{ matrix.distro }}"
           if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" -o -z "${{ matrix.libc }}" ]; then
             mkdir -p builds/${{ matrix.name }}/DEBIAN
-            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+            VERSION=$(echo "${{ env.VERSION }}" | sed 's/^v//')
             if [[ ! $VERSION =~ ^[0-9] ]]; then
               VERSION="0.0.$(date +%s)-$VERSION"
             fi
@@ -481,7 +481,7 @@ jobs:
               test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
               if curl --silent -f -F "file=@$file$FNstr" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
-                   -H "X-Git-Ref: ${{ github.ref_name }}" \
+                   -H "X-Git-Ref: ${{ env.VERSION }}" \
                    -H "X-Git-SHA7: ${{ env.SHA7 }}" \
                    -H "X-Git-Comp: ${{ env.COMPILER }}" \
                    -H "X-Git-MATRIX: ${{ matrix.name }}" \
@@ -521,7 +521,7 @@ jobs:
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
           #
-          DIST="dist.${{ github.ref_name }}-${{ env.SHA7 }}.$(hostname).tgz"
+          DIST="dist.${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.$(hostname).tgz"
           if [ -e "$DIST" ]; then
             echo "$DIST already exists. Skipping tar."
           else
