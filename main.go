@@ -73,9 +73,9 @@ func main() {
 	//colors := new(cmpb.BarColors)
 	ParseFlags()
 	if compiledwithRapidyenc {
-		dlog(always, "rapidyenc enabled!")
+		dlog(always, "compiled with rapidyenc!")
 	} else {
-		dlog(always, "rapidyenc NOT enabled!")
+		dlog(always, "NOT compiled with rapidyenc!")
 	}
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
