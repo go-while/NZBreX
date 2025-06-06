@@ -22,7 +22,7 @@ builds:
       #- netbsd
     goarch:
       - amd64
-      #- arm64
+      - arm64
       #- 386
       #- arm
     ldflags:
