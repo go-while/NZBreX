@@ -525,6 +525,20 @@ jobs:
           cp -v "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
+          #
+          DIST="dist.${{ github.ref_name }}-${{ env.SHA7 }}.$(hostname).tgz"
+          if [ -e "$DIST" ]; then
+            echo "$DIST already exists. Skipping tar."
+          else
+            tar -czf "$DIST" dist/
+            echo "Created $DIST from dist/."
+            du -b "$DIST"; du -hs "$DIST";
+            sha256sum "$DIST" > "${DIST}.sha256sum"
+            sha512sum "$DIST" > "${DIST}.sha512sum"
+            upload_with_retry "${DIST}.sha512sum"
+            upload_with_retry "${DIST}.sha256sum"
+            upload_with_retry "${DIST}"
+          fi
 
 
 #      - name: "Upload Binary to github blob storage"
