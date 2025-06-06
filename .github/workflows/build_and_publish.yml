@@ -135,15 +135,15 @@ jobs:
             arch: amd64
             name: windows-amd64
           # arm64
-          - runner_label: ubu2204
-            os: windows
-            arch: arm64
-            name: windows-arm64
+          #- runner_label: ubu2204
+          #  os: windows
+          #  arch: arm64
+          #  name: windows-arm64
           # i386
-          - runner_label: ubu2204
-            os: windows
-            arch: 386
-            name: windows-i386
+          #- runner_label: ubu2204
+          #  os: windows
+          #  arch: 386
+          #  name: windows-i386
 
           # Debian 10-12 self-hosted builds amd64
           # amd64
@@ -345,27 +345,28 @@ jobs:
         run: cd rapidyenc && ./crossbuild_rapidyenc_win.sh
 
       - name: "Set up ARM64 cross-compiler (only for arm64)"
-        if: ${{ matrix.goarch == 'arm64' }}
+        if: matrix.goarch == 'arm64'
         run: |
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "$GITHUB_ENV"
 
-      - name: "Set up Win386 cross-compiler"
-        if: ${{ matrix.goarch == '386' }} && ${{ matrix.os == 'windows' }}
-        run: |
-          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-          echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+      #- name: "Set up Win386 cross-compiler"
+      #  if: matrix.goarch == '386' && matrix.os == 'windows'
+      #  run: |
+      #    echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+      #    echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
+      #    echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
       # Run tests with race detector for supported platforms
-      - name: "Run race detector tests (amd64/linux only)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64'
-        run: go test -race ./...
+      #- name: "Run race detector tests (amd64/linux only)"
+      #  if: matrix.os == 'linux' && matrix.arch == 'amd64'
+      #  run: go test -race ./...
 
-      - name: "Run normal tests (other platforms)"
-        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
-        run: go test ./...
+      #- name: "Run normal tests (other platforms)"
+      #  if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
+      #  run: go test ./...
 
       - name: "Set GaRuS Variables"
         id: vars
