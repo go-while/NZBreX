@@ -31,11 +31,11 @@ jobs:
         include:
           # Alpine Linux cross-builds (musl)
           # amd64
-          #- runner_label: ubu2204
-          #  os: linux
-          #  arch: amd64
-          #  name: alpine-amd64
-          #  libc: musl
+          - runner_label: ubu2204
+            os: linux
+            arch: amd64
+            name: alpine-amd64
+            libc: musl
           # arm64
           #- runner_label: ubu2204
           #  os: linux
