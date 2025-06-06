@@ -4,6 +4,8 @@ github.com/Tensai75/subjectparser v0.1.0 h1:6fEWnRov8lDHxJS2EWqY6VonwYfrIRN+k8h8
 github.com/Tensai75/subjectparser v0.1.0/go.mod h1:PNBFBnkOGbVDfX+56ZmC4GKSpqoRMCF1Y44xYd7NLGI=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/go-while/NZBreX/rapidyenc v0.0.0-20250606133156-aebe590f90c1 h1:6xzzSBGXAspUcfEXbjTHT35oKvdVy1g9eI4Yq2qMWNU=
+github.com/go-while/NZBreX/rapidyenc v0.0.0-20250606133156-aebe590f90c1/go.mod h1:E/m6jt2CPmPKnTEDlvnlXZo/b71UFKP4rvMFL+SSxLw=
 github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83 h1:vehfiL7LsK8bJQZdVuJxcMem4AP2HwPEQ8orUUnIA+E=
 github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83/go.mod h1:31AY7BccUb7qvKi4LQCwLOYsvcza9TdQtl/zHEIOcRE=
 github.com/go-while/go-loggedrwmutex v0.0.0-20250601032232-b0aa20cdcb2c h1:sDQuzVfH/JKw6k06m85cWNKsB27QSH496GZeImozJic=
