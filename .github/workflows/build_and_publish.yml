@@ -37,11 +37,11 @@ jobs:
             name: alpine-amd64
             libc: musl
           # arm64
-          #- runner_label: ubu2204
-          #  os: linux
-          #  arch: arm64
-          #  name: alpine-arm64
-          #  libc: musl
+          - runner_label: ubu2204
+            os: linux
+            arch: arm64
+            name: alpine-arm64
+            libc: musl
           # i386
           #- runner_label: ubu2204
           #  os: linux
