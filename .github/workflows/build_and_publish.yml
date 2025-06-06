@@ -530,8 +530,9 @@ jobs:
           if [ -e "$DIST" ]; then
             echo "$DIST already exists. Skipping tar."
           else
-            tar -czf "$DIST" dist/
-            echo "Created $DIST from dist/."
+            ls -lha
+            tar -czvf "$DIST" builds/
+            echo "Created $DIST from builds/"
             du -b "$DIST"; du -hs "$DIST";
             sha256sum "$DIST" > "${DIST}.sha256sum"
             sha512sum "$DIST" > "${DIST}.sha512sum"
