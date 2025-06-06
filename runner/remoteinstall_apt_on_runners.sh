@@ -1,10 +1,15 @@
 #!/bin/bash
 
-set -e
+#set -e
 
 # Packages to install
-INSTALL_PACKAGES="aptitude gcc-aarch64-linux-gnu clang binutils-aarch64-linux-gnu mingw-w64 gcc-mingw-w64-x86-64 build-essential cmake ca-certificates curl g++-mingw-w64-x86-64 g++-mingw-w64-i686 g++-aarch64-linux-gnu gcc-arm-linux-gnueabi git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip"
+#
+# packages0 installs arm64, amd64, win64 packages
+INSTALL_PACKAGES0="clang gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu mingw-w64 gcc-mingw-w64-x86-64 build-essential cmake ca-certificates curl g++-mingw-w64-x86-64 g++-mingw-w64-i686 g++-aarch64-linux-gnu gcc-arm-linux-gnueabi git dpkg-dev haveged musl-tools nano nginx net-tools htop psmisc sudo tar tmux unattended-upgrades vim vnstat vnstati wget zip aptitude"
 
+INSTALL_PACKAGES_i386="gcc-multilib g++-multilib"
+
+INSTALL_PACKAGES=$INSTALL_PACKAGES0
 # deb10 libstdc++-dev-arm64-cross
 
 CHECK_RUNNERS_URL="https://github.com/go-while/NZBreX/raw/ee7ab8d8bdbc675c32c4dc7044d50092e03c72df/runner/check_runners.sh"
@@ -131,7 +136,7 @@ while IFS="" read -r line; do
   echo -e -n "\n\n... updating $HOST ... "
 
   ### install apt packages
-  install_apt_packages "$IP" "$HOST" >> "$RESPONSES_FILE" 2>&1
+  install_apt_packages "$IP" "$HOST" # >> "$RESPONSES_FILE" 2>&1
   ret=$?; echo " code $ret"
   echo -e "\n" >> "$RESPONSES_FILE"
 
