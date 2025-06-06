@@ -1,4 +1,4 @@
-//go:build rapidyenc1
+//go:build rapidyenc
 
 package main
 
@@ -13,17 +13,17 @@ import (
 const compiledwithRapidyenc bool = true
 
 type Decoder struct {
-	ry *rapidyenc.Decoder // pointer to RapidYenc instance
+	RY *rapidyenc.Decoder // pointer to RapidYenc instance
 	// other fields can be added as needed
 	// e.g., options, state, etc.
 }
 
-func NewDecoder() (*Decoder, error) {
+func NewRapidYencDecoder() (*Decoder, error) {
 	decoder := &Decoder{
-		ry: nil, // initialize with nil, will be set later
+		RY: nil, // initialize with nil, will be set later
 	}
 	err := decoder.newRapidYencDecoder() // initialize RapidYenc
-	if err != nil || decoder.ry == nil {
+	if err != nil || decoder.RY == nil {
 		return nil, fmt.Errorf("Failed to initialize RapidYenc err='%v'", err)
 	}
 	return decoder, nil
@@ -31,18 +31,18 @@ func NewDecoder() (*Decoder, error) {
 
 func (d *Decoder) newRapidYencDecoder() error {
 	// create a new RapidYenc instance
-	if d.ry != nil {
+	if d.RY != nil {
 		return fmt.Errorf("rapidYenc already initialized in this decoder")
 	}
-	d.ry = rapidyenc.AcquireDecoder()
+	d.RY = rapidyenc.AcquireDecoder()
 	return nil
 }
 
 func (d *Decoder) ReleaseRapidYencDecoder() error {
-	if d.ry == nil {
+	if d.RY == nil {
 		return fmt.Errorf("rapidYenc not initialized in this decoder")
 	}
-	rapidyenc.ReleaseDecoder(d.ry)
-	d.ry = nil // reset to nil after release
+	rapidyenc.ReleaseDecoder(d.RY)
+	d.RY = nil // reset to nil after release
 	return nil
 }

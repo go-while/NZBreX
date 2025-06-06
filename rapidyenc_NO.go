@@ -1,4 +1,4 @@
-//go:build !rapidyenc1
+//go:build !rapidyenc
 
 package main
 

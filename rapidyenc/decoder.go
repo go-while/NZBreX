@@ -1,3 +1,5 @@
+//go:build rapidyenc
+
 package rapidyenc
 
 /*
