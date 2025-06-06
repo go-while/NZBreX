@@ -16,13 +16,13 @@ builds:
       - goos: netbsd
     goos:
       - linux
-      #- darwin
+      - darwin
       #- freebsd
       #- openbsd
       #- netbsd
     goarch:
       - amd64
-      - arm64
+      #- arm64
       #- 386
       #- arm
     ldflags:
