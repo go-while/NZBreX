@@ -31,102 +31,102 @@ jobs:
         include:
           # Alpine Linux cross-builds (musl)
           # amd64
-          - runner_label: ubu2204
-            os: linux
-            arch: amd64
-            name: alpine-amd64
-            libc: musl
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: amd64
+          #  name: alpine-amd64
+          #  libc: musl
           # arm64
-          - runner_label: ubu2204
-            os: linux
-            arch: arm64
-            name: alpine-arm64
-            libc: musl
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: arm64
+          #  name: alpine-arm64
+          #  libc: musl
           # i386
-          - runner_label: ubu2204
-            os: linux
-            arch: 386
-            name: alpine-i386
-            libc: musl
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: 386
+          #  name: alpine-i386
+          #  libc: musl
           # armv7
-          - runner_label: ubu2204
-            os: linux
-            arch: arm
-            name: alpine-armv7
-            libc: musl
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: arm
+          #  name: alpine-armv7
+          #  libc: musl
 
           # FreeBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: freebsd
-            arch: amd64
-            name: freebsd-amd64
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: amd64
+          #  name: freebsd-amd64
           # arm64
-          - runner_label: ubu2204
-            os: freebsd
-            arch: arm64
-            name: freebsd-arm64
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: arm64
+          #  name: freebsd-arm64
           # i386
-          - runner_label: ubu2204
-            os: freebsd
-            arch: 386
-            name: freebsd-i386
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: 386
+          #  name: freebsd-i386
           # armv7
-          - runner_label: ubu2204
-            os: freebsd
-            arch: arm
-            name: freebsd-armv7
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: arm
+          #  name: freebsd-armv7
 
           # OpenBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: openbsd
-            arch: amd64
-            name: openbsd-amd64
-          # arm64
-          - runner_label: ubu2204
-            os: openbsd
-            arch: arm64
-            name: openbsd-arm64
-          # i386
-          - runner_label: ubu2204
-            os: openbsd
-            arch: 386
-            name: openbsd-i386
+          #- runner_label: ubu2204
+          #  os: openbsd
+          #  arch: amd64
+          #  name: openbsd-amd64
+          ## arm64
+          #- runner_label: ubu2204
+          #  os: openbsd
+          #  arch: arm64
+          #  name: openbsd-arm64
+          ## i386
+          #- runner_label: ubu2204
+          #  os: openbsd
+          #  arch: 386
+          #  name: openbsd-i386
 
           # NetBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: netbsd
-            arch: amd64
-            name: netbsd-amd64
-          # arm64
-          - runner_label: ubu2204
-            os: netbsd
-            arch: arm64
-            name: netbsd-arm64
-          # i386
-          - runner_label: ubu2204
-            os: netbsd
-            arch: 386
-            name: netbsd-i386
-          # armv7
-          - runner_label: ubu2204
-            os: netbsd
-            arch: arm
-            name: netbsd-armv7
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: amd64
+          #  name: netbsd-amd64
+          ## arm64
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: arm64
+          #  name: netbsd-arm64
+          ## i386
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: 386
+          #  name: netbsd-i386
+          ## armv7
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: arm
+          #  name: netbsd-armv7
 
           # macOS cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: darwin
-            arch: amd64
-            name: macos-amd64
-          # arm64
-          - runner_label: ubu2204
-            os: darwin
-            arch: arm64
-            name: macos-arm64
+          #- runner_label: ubu2204
+          #  os: darwin
+          #  arch: amd64
+          #  name: macos-amd64
+          ## arm64
+          #- runner_label: ubu2204
+          #  os: darwin
+          #  arch: arm64
+          #  name: macos-arm64
 
           # Windows cross-builds
           # amd64
@@ -165,57 +165,57 @@ jobs:
 
           # Debian 10-12 self-hosted builds arm64
           # arm64
-          - runner_label: deb10
-            os: linux
-            arch: arm64
-            name: debian-10-arm64
-            libc: glibc
-          - runner_label: deb11
-            os: linux
-            arch: arm64
-            name: debian-11-arm64
-            libc: glibc
-          - runner_label: deb12
-            os: linux
-            arch: arm64
-            name: debian-12-arm64
-            libc: glibc
+          #- runner_label: deb10
+          #  os: linux
+          #  arch: arm64
+          #  name: debian-10-arm64
+          #  libc: glibc
+          #- runner_label: deb11
+          #  os: linux
+          #  arch: arm64
+          #  name: debian-11-arm64
+          #  libc: glibc
+          #- runner_label: deb12
+          #  os: linux
+          #  arch: arm64
+          #  name: debian-12-arm64
+          #  libc: glibc
 
           # Debian 10-12 self-hosted builds 32-bit ARM
           # armv7
-          - runner_label: deb10
-            os: linux
-            arch: arm
-            name: debian-10-armv7
-            libc: glibc
-          - runner_label: deb11
-            os: linux
-            arch: arm
-            name: debian-11-armv7
-            libc: glibc
-          - runner_label: deb12
-            os: linux
-            arch: arm
-            name: debian-12-armv7
-            libc: glibc
+          #- runner_label: deb10
+          #  os: linux
+          #  arch: arm
+          #  name: debian-10-armv7
+          #  libc: glibc
+          #- runner_label: deb11
+          #  os: linux
+          #  arch: arm
+          #  name: debian-11-armv7
+          #  libc: glibc
+          #- runner_label: deb12
+          #  os: linux
+          #  arch: arm
+          #  name: debian-12-armv7
+          #  libc: glibc
 
           # Debian 10-12 self-hosted builds i386
           # i386
-          - runner_label: deb10
-            os: linux
-            arch: 386
-            name: debian-10-i386
-            libc: glibc
-          - runner_label: deb11
-            os: linux
-            arch: 386
-            name: debian-11-i386
-            libc: glibc
-          - runner_label: deb12
-            os: linux
-            arch: 386
-            name: debian-12-i386
-            libc: glibc
+          #- runner_label: deb10
+          #  os: linux
+          #  arch: 386
+          #  name: debian-10-i386
+          #  libc: glibc
+          #- runner_label: deb11
+          #  os: linux
+          #  arch: 386
+          #  name: debian-11-i386
+          #  libc: glibc
+          #- runner_label: deb12
+          #  os: linux
+          #  arch: 386
+          #  name: debian-12-i386
+          #  libc: glibc
 
           # Ubuntu 20.04 - 24.04 self-hosted builds amd64
           # amd64
@@ -237,57 +237,57 @@ jobs:
 
           # Ubuntu 20.04 - 24.04 self-hosted builds arm64
           # arm64
-          - runner_label: ubu2004
-            os: linux
-            arch: arm64
-            name: ubuntu-20.04-arm64
-            libc: glibc
-          - runner_label: ubu2204
-            os: linux
-            arch: arm64
-            name: ubuntu-22.04-arm64
-            libc: glibc
-          - runner_label: ubu2404
-            os: linux
-            arch: arm64
-            name: ubuntu-24.04-arm64
-            libc: glibc
+          #- runner_label: ubu2004
+          #  os: linux
+          #  arch: arm64
+          #  name: ubuntu-20.04-arm64
+          #  libc: glibc
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: arm64
+          #  name: ubuntu-22.04-arm64
+          #  libc: glibc
+          #- runner_label: ubu2404
+          #  os: linux
+          #  arch: arm64
+          #  name: ubuntu-24.04-arm64
+          #  libc: glibc
 
           # Ubuntu 20.04 - 24.04 self-hosted builds 32-bit ARM
           # armv7
-          - runner_label: ubu2004
-            os: linux
-            arch: arm
-            name: ubuntu-20.04-armv7
-            libc: glibc
-          - runner_label: ubu2204
-            os: linux
-            arch: arm
-            name: ubuntu-22.04-armv7
-            libc: glibc
-          - runner_label: ubu2404
-            os: linux
-            arch: arm
-            name: ubuntu-24.04-armv7
-            libc: glibc
+          #- runner_label: ubu2004
+          #  os: linux
+          #  arch: arm
+          #  name: ubuntu-20.04-armv7
+          #  libc: glibc
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: arm
+          #  name: ubuntu-22.04-armv7
+          #  libc: glibc
+          #- runner_label: ubu2404
+          #  os: linux
+          #  arch: arm
+          #  name: ubuntu-24.04-armv7
+          #  libc: glibc
 
           # Ubuntu 20.04 - 24.04 self-hosted builds i386
           # i386
-          - runner_label: ubu2004
-            os: linux
-            arch: 386
-            name: ubuntu-20.04-i386
-            libc: glibc
-          - runner_label: ubu2204
-            os: linux
-            arch: 386
-            name: ubuntu-22.04-i386
-            libc: glibc
-          - runner_label: ubu2404
-            os: linux
-            arch: 386
-            name: ubuntu-24.04-i386
-            libc: glibc
+          #- runner_label: ubu2004
+          #  os: linux
+          #  arch: 386
+          #  name: ubuntu-20.04-i386
+          #  libc: glibc
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: 386
+          #  name: ubuntu-22.04-i386
+          #  libc: glibc
+          #- runner_label: ubu2404
+          #  os: linux
+          #  arch: 386
+          #  name: ubuntu-24.04-i386
+          #  libc: glibc
 
     steps:
       - name: "@Start Clean directory"
@@ -336,9 +336,11 @@ jobs:
       - name: "clone rapidyenc"
         run: cd rapidyenc && ./clone_rapidyenc.sh
 
-      - name: "compile rapidyenc"
+      - name: "compile rapidyenc linux-amd64"
         if: matrix.os == 'linux' && matrix.arch == 'amd64'
         run: cd rapidyenc && ./build_rapidyenc.sh
+
+      - name: "compile rapidyenc windows-amd64"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
         run: cd rapidyenc && ./crossbuild_rapidyenc_win.sh.sh
 
