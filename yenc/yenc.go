@@ -522,8 +522,8 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 			}
 		case 1:
 			// Decode the line using SIMD
-			if decoded, ok := DecodeLineSIMD([]byte(line)); !ok {
-				return fmt.Errorf("error yenc.Decoder yenctest=3 SimdMode=1 DecodeLineSIMD")
+			if decoded, ok := DecodeLineSIMD1([]byte(line)); !ok {
+				return fmt.Errorf("error yenc.Decoder yenctest=3 SimdMode=1 DecodeLineSIMD1")
 			} else {
 				// Update the part body with the decoded data
 				d.Part.Body = append(d.Part.Body, decoded...)
@@ -533,9 +533,8 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 			}
 		case 2:
 			// Decode the line using SIMD2
-			decoded := []byte(line)
 			// DecodeLineSIMD2 returns true if successful
-			if ok := DecodeLineSIMD2(decoded); !ok {
+			if decoded, ok := DecodeLineSIMD2([]byte(line)); !ok {
 				return fmt.Errorf("error yenc.Decoder mode=3 SimdMode=2 DecodeLineSIMD2")
 			} else {
 				// Update the part body with the decoded data
@@ -603,9 +602,6 @@ func parseUint32(s string, base int) (uint32, error) {
 	v, err := strconv.ParseUint(s, base, 32)
 	if err != nil {
 		return 0, err
-	}
-	if v > 0xFFFFFFFF {
-		return 0, fmt.Errorf("value '%s' overflows uint32", s)
 	}
 	return uint32(v), nil
 }
@@ -679,7 +675,7 @@ func Sub42Bulk(dst, src []byte) {
 	}
 }
 
-func DecodeLineSIMD2(line []byte) bool {
+func DecodeLineSIMD2(line []byte) ([]byte, bool) {
 	read := 0
 	write := 0
 
@@ -699,7 +695,7 @@ func DecodeLineSIMD2(line []byte) bool {
 		if read < len(line) && line[read] == '=' {
 			if read+1 >= len(line) {
 				// Incomplete escape
-				return false
+				return nil, false
 			}
 			// Escaped byte: subtract 42 and 64
 			line[write] = (line[read+1] - 42 - 64) & 0xFF
@@ -707,12 +703,11 @@ func DecodeLineSIMD2(line []byte) bool {
 			read += 2
 		}
 	}
-	// Truncate to decoded length
-	line = line[:write]
-	return true
-} // end func DecodeLineSIMD2 (written by AI! GPT-4.1)
+	// Truncate to decoded length and return
+	return line[:write], true
+}
 
-func DecodeLineSIMD(line []byte) ([]byte, bool) {
+func DecodeLineSIMD1(line []byte) ([]byte, bool) {
 	decoded := make([]byte, 0, len(line))
 	i := 0
 	for i < len(line) {
@@ -741,7 +736,7 @@ func DecodeLineSIMD(line []byte) ([]byte, bool) {
 		}
 	}
 	return decoded, true
-} // end func DecodeLineSIMD (written by AI! GPT-4.1)
+} // end func DecodeLineSIMD1 (written by AI! GPT-4.1)
 
 func (d *Decoder) DecodeYencLinesSIMD() error {
 	// Iterate over each line of the article
@@ -759,7 +754,8 @@ func (d *Decoder) DecodeYencLinesSIMD() error {
 
 		switch SimdMode {
 		case 1:
-			if decoded, ok := DecodeLineSIMD([]byte(*line)); !ok {
+			// Decode the line using SIMD1
+			if decoded, ok := DecodeLineSIMD1([]byte(*line)); !ok {
 				return fmt.Errorf("error decoding line %d", i)
 			} else {
 				// Update the part body with the decoded data
@@ -771,18 +767,16 @@ func (d *Decoder) DecodeYencLinesSIMD() error {
 
 		case 2:
 			if SimdMode == 2 {
-				// Decode the line using SIMD
-				decoded := []byte(*line)
 				// Decode the line using SIMD2
-				if !DecodeLineSIMD2(decoded) {
+				if decoded, ok := DecodeLineSIMD2([]byte(*line)); !ok {
 					return fmt.Errorf("error decoding line %d: incomplete escape sequence", i)
+				} else {
+					// Update the part body with the decoded data
+					d.Part.Body = append(d.Part.Body, decoded...)
+					// Update the crc hash
+					d.Part.crcHash.Write(decoded)
+					d.crcHash.Write(decoded)
 				}
-
-				// Update the part body with the decoded data
-				d.Part.Body = append(d.Part.Body, decoded...)
-				// Update the crc hash
-				d.Part.crcHash.Write(decoded)
-				d.crcHash.Write(decoded)
 			}
 		}
 	}
