@@ -354,14 +354,19 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	var decodeBodyChan chan *string
 	var counter *Counter_uint64
 	var releaseDecoder chan struct{}
-	//var yencReturnErr chan error // channel to receive errors from yenc decoder
-	//var yencReturnsOK chan error // channel to receive errors from yenc decoder
-	if cfg.opt.YencTest == 3 {
+	var rydecoder *Decoder // pointer to RapidYenc decoder, if enabled
+
+	switch cfg.opt.YencTest {
+	case 4:
+		rydecoder, err = NewRapidYencDecoder()
+
+	case 3:
 		// yenc test 3 means we parse yenc lines directly to the decoder as we read them from the textproto.Conn
 		decoder = yenc.NewDecoder(nil, nil, ydat, 1)
 		decoder.SegId = &item.segment.Id
 		counter = NewCounter(2)
 		releaseDecoder = make(chan struct{}, 1) // channel to release the decoder after processing
+
 		if async {
 			decodeBodyChan = make(chan *string, 6666) // buffered channel for yenc lines
 			// launch a new goroutine to parse body lines async
@@ -387,28 +392,31 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 						continue readChan // if we already got a broken yenc line, skip further processing
 					}
 
-					getAsyncCoreLimiter()
+					switch cfg.opt.YencTest {
+					case 3:
+						getAsyncCoreLimiter()
+						if err := decoder.ReadBody(*line, true); err != nil {
+							broken = true // we got a broken yenc multipart line
+							log.Printf("ERROR async decodeBodyChan decoder.ReadBody: seg.Id='%s' @ '%s' err='%v'", segId, provName, err)
+							cERR++
+							counter.Incr("ERR")
+							returnAsyncCoreLimiter()
+							break readChan
+						}
+						returnAsyncCoreLimiter()
 
-					if err := decoder.ReadBody(*line, true); err != nil {
-						broken = true // we got a broken yenc multipart line
-						log.Printf("ERROR async decodeBodyChan decoder.ReadBody: seg.Id='%s' @ '%s' err='%v'", segId, provName, err)
-						cERR++
-						counter.Incr("ERR")
-						//returnAsyncCoreLimiter()
-						break readChan
+						cOK++
+						counter.Incr("OK")
+
 					}
-
-					returnAsyncCoreLimiter()
-
-					cOK++
-					counter.Incr("OK")
 
 					continue readChan
 				} // end for range decodeBodyChan
+				// we are done with the decodeBodyChan, now we can release the decoder (via defer)
 				dlog(always, "END async decoder cOK=%d cERR=%d took=(%d µs) seg.Id='%s' @ '%s'", cOK, cERR, time.Since(start).Microseconds(), segId, provName)
 			}(item.segment.Id, connitem.c.provider.Name, decodeBodyChan, counter, releaseDecoder)
 		} // end if async
-	}
+	} // end case 3
 	start := time.Now()
 	i := 0
 readlines:
@@ -505,9 +513,13 @@ readlines:
 				case 2:
 					// case 2
 					ydat = append(ydat, &line) // as []*string line per line needs less mem allocs
+				case 4:
+					// rapidyenc test 4
+					ydec = append(ydec, line+CRLF...) // append the line to the buffer
 				case 3:
 					// case 3
-					// parse yenc lines directly
+					// parse yenc lines directly and asynchronously
+					// to the decoder as we read them from the textproto.Conn
 					switch gotYencHeader {
 					case true:
 						if brokenYenc {
@@ -713,6 +725,23 @@ readlines:
 				cache.WriteYenc(item, decoder.Part)
 			}
 
+		case 4:
+			if rydecoder == nil {
+				dlog(always, "error readArticleDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+				break
+			}
+			// rapidyenc test 4
+			getAsyncCoreLimiter()
+			if decoded, err := rydecoder.RY.Read(ydec); err != nil || decoded == 0 {
+				returnAsyncCoreLimiter()
+				log.Printf("ERROR async decodeBodyChan rydecoder.ReadBody: seg.Id='%s' @ '%s' err='%v'", item.segment.Id, connitem.c.provider.Name, err)
+				isBadCrc = true // we got a broken yenc body line
+				break           // the case 4
+			} else {
+				// we got a decoded yenc line
+				dlog(always, "async decodeBodyChan rydecoder.ReadBody: seg.Id='%s' @ '%s' decoded=%d", item.segment.Id, connitem.c.provider.Name, decoded)
+			}
+			returnAsyncCoreLimiter()
 		} // end switch yencTest
 		dlog(cfg.opt.DebugWorker, "readArticleDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(yencstart).Microseconds(), time.Since(start).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
 
