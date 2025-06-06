@@ -10,16 +10,16 @@ builds:
     ignore:
       - goarch: 386
       - goos: windows
-      #- goos: darwin
-      - goos: freebsd
-      - goos: openbsd
-      - goos: netbsd
+      - goos: darwin
+      #- goos: freebsd
+      #- goos: openbsd
+      #- goos: netbsd
     goos:
       - linux
-      - darwin
-      #- freebsd
-      #- openbsd
-      #- netbsd
+      #- darwin
+      - freebsd
+      - openbsd
+      - netbsd
     goarch:
       - amd64
       #- arm64
