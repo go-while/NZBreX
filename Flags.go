@@ -87,23 +87,23 @@ func ParseFlags() {
 	}
 
 	if cfg.opt.UploadLater && cfg.opt.Cachedir == "" {
-		dlog(always, "ERROR : you can not use -uploadlater without -cd=/path/to/cache/dir because it needs a cache dir!")
+		dlog(always, "ERROR: you can not use -uploadlater without -cd=/path/to/cache/dir because it needs a cache dir!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.LogAppend && cfg.opt.LogOld > 0 {
-		dlog(always, "ERROR : you can not use -logappend with -logold > 0 because it will not rotate logs!")
+		dlog(always, "ERROR: you can not use -logappend with -logold > 0 because it will not rotate logs!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
-		dlog(always, "ERROR : you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
+		dlog(always, "ERROR: you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.YencCRC {
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 3 {
-			dlog(always, "ERROR : you can not use -crc32 with -yenctest=%d because it must be 1 or 2 or 3 (default: 2)", cfg.opt.YencTest)
+			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1 or 2 or 3 (default: 2)", cfg.opt.YencTest)
 			os.Exit(1)
 		}
 	}
