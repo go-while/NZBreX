@@ -348,7 +348,7 @@ jobs:
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
       - name: "compile rapidyenc linux-arm64"
-        if: matrix.os == 'linux' && matrix.goarch == 'arm64'
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
