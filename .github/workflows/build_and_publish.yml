@@ -340,6 +340,10 @@ jobs:
         if: matrix.os == 'linux' && matrix.arch == 'amd64'
         run: cd rapidyenc && ./build_rapidyenc_linux.sh
 
+      #- name: "compile rapidyenc linux-386"
+      #  if: matrix.os == 'linux' && matrix.arch == '386'
+      #  run: cd rapidyenc && ./build_rapidyenc_linux_386.sh
+
       - name: "compile rapidyenc windows-amd64"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
         run: |
