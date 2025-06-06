@@ -12,7 +12,7 @@ on:
   repository_dispatch:
   pull_request:
     branches:
-      #- main
+      - main
       - "test*"
 
 permissions:
