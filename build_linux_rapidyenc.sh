@@ -1,2 +1,2 @@
-go build -o NZBreX_ry -tags other -tags rapidyenc1 .
+go build -o NZBreX_ry -tags "other rapidyenc1" .
 exit $?
