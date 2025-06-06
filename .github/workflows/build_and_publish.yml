@@ -57,10 +57,10 @@ jobs:
 
           # FreeBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: freebsd
-            arch: amd64
-            name: freebsd-amd64
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: amd64
+          #  name: freebsd-amd64
           # arm64
           #- runner_label: ubu2204
           #  os: freebsd
@@ -175,11 +175,11 @@ jobs:
           #  arch: arm64
           #  name: debian-11-arm64
           #  libc: glibc
-          #- runner_label: deb12
-          #  os: linux
-          #  arch: arm64
-          #  name: debian-12-arm64
-          #  libc: glibc
+          - runner_label: deb12
+            os: linux
+            arch: arm64
+            name: debian-12-arm64
+            libc: glibc
 
           # Debian 10-12 self-hosted builds 32-bit ARM
           # armv7
@@ -347,13 +347,12 @@ jobs:
           echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
-      #- name: "Set up ARM64 cross-compiler (only for arm64)"
-      #  if: matrix.goarch == 'arm64'
-      #  run: |
-      #    echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-      #    echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-      #    echo "CGO_ENABLED=1" >> $GITHUB_ENV
-      #    echo "$GITHUB_ENV"
+      - name: "compile rapidyenc linux-arm64"
+        if: matrix.os == 'linux' && matrix.goarch == 'arm64'
+        run: |
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
       #- name: "Set up Win386 cross-compiler"
       #  if: matrix.goarch == '386' && matrix.os == 'windows'
