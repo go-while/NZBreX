@@ -308,14 +308,19 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				continue
 			}
 		}
-		if !moreProvider {
-			//DecreaseDLQueueCnt() // failed article download, CODE != 220 or 0 // DISABLED
-		}
-		if isdead {
-			if cfg.opt.YencWrite && GCounter.GetValue("TOTAL_yencQueueCnt") > 0 {
-				GCounter.Decr("yencQueueCnt")
+		/*
+			if !moreProvider {
+				//DecreaseDLQueueCnt() // failed article download, CODE != 220 or 0 // DISABLED
 			}
-		}
+
+			if isdead {
+
+					if cfg.opt.YencWrite && GCounter.GetValue("TOTAL_yencQueueCnt") > 0 {
+						GCounter.Decr("yencQueueCnt") // DISABLED
+					}
+
+			}
+		*/
 		dlog((code == 430 && cfg.opt.Print430), "INFO DownsRoutine code=430 msg='%s' seg.Id='%s' seg.N=%d isdead=%t availableOn=%d ignoreDlOn=%d missingOn=%d pl=%d", msg, item.segment.Id, item.segment.Number, isdead, len(item.availableOn), len(item.ignoreDlOn), len(item.missingOn), len(s.providerList))
 
 		//memlim.MemReturn("MemRetOnERR 'downloading article failed':"+who, item)  // DISABLED
