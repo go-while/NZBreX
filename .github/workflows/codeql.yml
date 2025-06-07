@@ -43,8 +43,8 @@ jobs:
         queries: security-extended,security-and-quality # Removed '+' as it is unnecessary and unconventional
 
     - name: Build (manual, for C/C++)
-      if: matrix.language != 'actions'
-      # dont check for language! go needs to compile this too!
+      if: matrix.language == 'c-cpp'
+      # Run the build step only for C/C++ jobs
       run: |
         cd rapidyenc
         ./clone_rapidyenc.sh
