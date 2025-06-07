@@ -294,11 +294,13 @@ transform:
 				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
 					bodyLine = bodyLine[:len(bodyLine)-2]
 				}
+
 				dlog(d.debug2, "DecodeIncremental input: %q\n", bodyLine)
-				nd, ns, end, derr := d.DecodeIncremental(dst[nDst:], bodyLine, &d.State)
+				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
 				if derr != nil && derr != io.EOF {
 					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
 				}
+
 				if nd > 0 {
 					d.hash.Write(dst[nDst : nDst+nd])
 					d.actualSize += int64(nd)
@@ -458,9 +460,9 @@ var (
 
 var decodeInitOnce sync.Once
 
+// DecodeIncremental decodes yEnc encoded data incrementally.
 // DecodeIncremental stops decoding when a yEnc/NNTP end sequence is found
-func (d *Decoder) DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, err error) {
-	dlog(d.debug2, "DecodeIncremental called with src length:", len(src))
+func DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, err error) {
 	decodeInitOnce.Do(func() {
 		C.rapidyenc_decode_init()
 	})
