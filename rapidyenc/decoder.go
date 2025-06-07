@@ -22,6 +22,7 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"log"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -44,6 +45,25 @@ func AcquireDecoder() *Decoder {
 		return NewDecoder(defaultBufSize)
 	}
 	return v.(*Decoder)
+}
+
+// AcquireDecoderWithReader returns an empty Decoder instance from Decoder pool
+// with the specified reader set.
+//
+// The returned Decoder instance may be passed to ReleaseDecoder when it is
+// no longer needed. This allows Decoder recycling, reduces GC pressure
+// and usually improves performance.
+// The reader must be set before the first call to Read, otherwise it will panic.
+func AcquireDecoderWithReader(reader io.Reader) *Decoder {
+	v := decoderPool.Get()
+	var dec *Decoder
+	if v == nil {
+		dec = NewDecoder(defaultBufSize)
+	} else {
+		dec = v.(*Decoder)
+	}
+	dec.SetReader(reader)
+	return dec
 }
 
 // ReleaseDecoder returns dec acquired via AcquireDecoder to Decoder pool.
@@ -97,18 +117,38 @@ type Decoder struct {
 	// transformComplete is whether the transformation is complete,
 	// regardless of whether it was successful.
 	transformComplete bool
+
+	debug1 bool    // debug mode, prints debug messages
+	debug2 bool    // debug mode, prints more floody debug messages
+	segId  *string // segment ID, if supplied, used for debugging
 }
 
 func NewDecoder(bufSize int) *Decoder {
+	segId := "" // empty segment ID pointer by default to prevent nil pointer dereference
 	return &Decoder{
-		dst:  make([]byte, bufSize),
-		src:  make([]byte, bufSize),
-		hash: crc32.NewIEEE(),
+		dst:   make([]byte, bufSize),
+		src:   make([]byte, bufSize),
+		hash:  crc32.NewIEEE(),
+		segId: &segId,
 	}
 }
 
+// SetReader sets the io.Reader for the Decoder instance.
+// It must be called before the first call to Read, otherwise it will panic.
 func (d *Decoder) SetReader(reader io.Reader) {
 	d.r = reader
+}
+
+// SetDebugON enables debug mode, which prints debug messages to the console.
+// This is useful for debugging the yEnc decoding process.
+// has to be set before the first call to Read, otherwise it will data race.
+func (d *Decoder) SetDebug(debug1 bool, debug2 bool) {
+	d.debug1 = debug1
+	d.debug2 = debug2
+}
+
+func (d *Decoder) SetSegmentId(segId *string) {
+	d.segId = segId
 }
 
 func (d *Decoder) Meta() Meta {
@@ -126,6 +166,17 @@ var (
 func (d *Decoder) Read(p []byte) (int, error) {
 	n, err := 0, error(nil)
 	for {
+		// Defensive: clamp d.dst0 and d.dst1 to valid range BEFORE using them
+		if d.dst0 < 0 {
+			d.dst0 = 0
+		}
+		if d.dst1 > len(d.dst) {
+			d.dst1 = len(d.dst)
+		}
+		if d.dst0 > d.dst1 {
+			d.dst0 = d.dst1
+		}
+
 		// Copy out any transformed bytes and return the final error if we are done.
 		if d.dst0 != d.dst1 {
 			n = copy(p, d.dst[d.dst0:d.dst1])
@@ -146,22 +197,23 @@ func (d *Decoder) Read(p []byte) (int, error) {
 			d.dst0 = 0
 			d.dst1, n, err = d.Transform(d.dst, d.src[d.src0:d.src1], d.err == io.EOF)
 			d.src0 += n
+			// Clamp again after increment
+			if d.src0 < 0 {
+				d.src0 = 0
+			}
+			if d.src0 > d.src1 {
+				d.src0 = d.src1
+			}
 
 			switch {
 			case err == nil:
-				// The Transform call was successful; we are complete if we
-				// cannot read more bytes into src.
 				d.transformComplete = d.err != nil
 				continue
 			case errors.Is(err, transform.ErrShortDst) && (d.dst1 != 0 || n != 0):
-				// Make room in dst by copying out, and try again.
 				continue
 			case errors.Is(err, transform.ErrShortSrc) && d.src1-d.src0 != len(d.src) && d.err == nil:
-				// Read more bytes into src via the code below, and try again.
 			default:
 				d.transformComplete = true
-				// The reader error (d.err) takes precedence over the
-				// transformer error (err) unless d.err is nil or io.EOF.
 				if d.err == nil || d.err == io.EOF {
 					d.err = err
 				}
@@ -172,6 +224,13 @@ func (d *Decoder) Read(p []byte) (int, error) {
 		// Move any untransformed source bytes to the start of the buffer
 		// and read more bytes.
 		if d.src0 != 0 {
+			// Clamp d.src0 BEFORE slicing!
+			if d.src0 < 0 {
+				d.src0 = 0
+			}
+			if d.src0 > d.src1 {
+				d.src0 = d.src1
+			}
 			d.src0, d.src1 = 0, copy(d.src, d.src[d.src0:d.src1])
 		}
 		n, d.err = d.r.Read(d.src[d.src1:])
@@ -184,34 +243,11 @@ func (d *Decoder) Read(p []byte) (int, error) {
 // for the footer and EOF pattern (.\r\n)
 func (d *Decoder) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
 transform:
-	if d.body && d.format == FormatYenc {
-		nd, ns, end, _ := DecodeIncremental(dst[nDst:], src[nSrc:], &d.State)
-		if nd > 0 {
-			d.hash.Write(dst[nDst : nDst+nd])
-			d.actualSize += int64(nd)
-			nDst += nd
-		}
-
-		switch end {
-		case EndControl:
-			nSrc += ns - 2
-			d.body = false
-		case EndArticle:
-			nSrc += ns - 3
-			d.body = false
-		default:
-			if d.State == StateCRLFEQ {
-				d.State = StateCRLF
-				nSrc += ns - 1
-			} else {
-				nSrc += ns
-			}
-			return nDst, nSrc, transform.ErrShortSrc
-		}
-	}
-
 	// Line by line processing
 	for {
+		if nSrc < 0 {
+			nSrc = 0
+		}
 		// Article EOF
 		if bytes.HasPrefix(src[nSrc:], []byte(".\r\n")) {
 			d.m.Hash = d.hash.Sum32()
@@ -224,7 +260,11 @@ transform:
 			} else if (!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
 			} else if d.crc && d.expectedCrc != d.m.Hash {
-				err = fmt.Errorf("[rapidyenc] expected decoded data to have CRC32 hash %#08x but got %#08x: %w", d.expectedCrc, d.m.Hash, ErrCrcMismatch)
+				// If we have a segment ID, use it for debugging
+				// otherwise use an empty string.
+				errStr := fmt.Sprintf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s'", d.expectedCrc, d.m.Hash, *d.segId)
+				dlog(always, "%s", errStr)
+				err = fmt.Errorf("%s: %w", errStr, ErrCrcMismatch)
 			} else {
 				err = io.EOF
 			}
@@ -245,10 +285,35 @@ transform:
 
 		switch d.format {
 		case FormatYenc:
-			d.processYenc(line)
-			goto transform
+			// Header/trailer lines
+			if bytes.HasPrefix(line, []byte("=ybegin ")) ||
+				bytes.HasPrefix(line, []byte("=ypart ")) ||
+				bytes.HasPrefix(line, []byte("=yend ")) {
+				d.processYenc(line)
+				goto transform
+			}
+			// If we're in the body, decode this line
+			if d.body {
+				// Remove trailing \r\n for decoding
+				bodyLine := line
+				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
+					bodyLine = bodyLine[:len(bodyLine)-2]
+				}
+
+				dlog(d.debug2, "DecodeIncremental input: %q\n", bodyLine)
+				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
+				if derr != nil && derr != io.EOF {
+					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
+				}
+
+				if nd > 0 {
+					d.hash.Write(dst[nDst : nDst+nd])
+					d.actualSize += int64(nd)
+					nDst += nd
+				}
+				continue
+			}
 		case FormatUU:
-			// TODO: does not uudecode, for now just copies encoded data
 			nDst += copy(dst[nDst:], line)
 		}
 	}
@@ -285,9 +350,20 @@ func (d *Decoder) Reset() {
 
 	d.err = nil
 	d.transformComplete = false
+
+	d.debug1 = false
+	d.debug2 = false
+	if d.segId != nil {
+		// Reset the segment ID to an empty string
+		// to prevent nil pointer dereference.
+		// If a new segment ID is needed, it should be set via SetSegmentId.
+		segId := ""
+		d.segId = &segId
+	}
 }
 
 func (d *Decoder) processYenc(line []byte) {
+	dlog(d.debug2, "rapidyenc.processYenc(%s)", line)
 	if bytes.HasPrefix(line, []byte("=ybegin ")) {
 		d.begin = true
 		d.m.Size, _ = extractInt(line, []byte(" size="))
@@ -295,6 +371,9 @@ func (d *Decoder) processYenc(line []byte) {
 		if _, err := extractInt(line, []byte(" part=")); err != nil {
 			d.body = true
 			d.m.End = d.m.Size
+			dlog(d.debug1, "DEBUG: yEnc single-part, body starts")
+		} else {
+			dlog(d.debug1, "DEBUG: yEnc multi-part, waiting for =ypart")
 		}
 	} else if bytes.HasPrefix(line, []byte("=ypart ")) {
 		d.part = true
@@ -305,6 +384,7 @@ func (d *Decoder) processYenc(line []byte) {
 		if endPos, err := extractInt(line, []byte(" end=")); err == nil {
 			d.m.End = endPos - 1
 		}
+		dlog(d.debug1, "DEBUG: =ypart found, body starts")
 	} else if bytes.HasPrefix(line, []byte("=yend ")) {
 		d.end = true
 		if d.part {
@@ -317,6 +397,7 @@ func (d *Decoder) processYenc(line []byte) {
 			d.crc = true
 		}
 		d.endSize, _ = extractInt(line, []byte(" size="))
+		dlog(d.debug1, "DEBUG: =yend found")
 	}
 }
 
@@ -389,6 +470,7 @@ var (
 
 var decodeInitOnce sync.Once
 
+// DecodeIncremental decodes yEnc encoded data incrementally.
 // DecodeIncremental stops decoding when a yEnc/NNTP end sequence is found
 func DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, err error) {
 	decodeInitOnce.Do(func() {
@@ -477,3 +559,17 @@ func extractCRC(data, substr []byte) (uint32, error) {
 	_, err := hex.Decode(parsed, parsed)
 	return binary.BigEndian.Uint32(parsed), err
 }
+
+// debugging functions
+const always = true // always log
+
+// dlog is a debug log function that logs messages based on the logthis flag.
+// If logthis is true, it logs the formatted message with the provided arguments.
+// If logthis is false, it does nothing.
+// It is used to control logging behavior in the code, allowing for easy toggling of debug output.
+func dlog(logthis bool, format string, a ...any) {
+	if !logthis {
+		return
+	}
+	log.Printf(format, a...)
+} // end dlog
