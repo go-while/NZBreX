@@ -39,7 +39,7 @@ var (
 	//  via: rapidyenc.DefaultBufSize = 64*1024 // 64 KiB
 	DefaultBufSize = int(constBufSize) // Default buffer size for Decoder instances
 
-	// private variables for the package
+	// private variables for the package to stay compatible with the old API
 	defaultBufSize = DefaultBufSize
 )
 
