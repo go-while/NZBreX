@@ -357,14 +357,14 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	var releaseDecoder chan struct{} // channel to release the decoder after processing in case 3
 	var rydecoder *rapidyenc.Decoder // pointer to RapidYenc decoder, if enabled in case 4
 	var pipeReader *io.PipeReader
-	var PipeWriter *io.PipeWriter
+	var pipeWriter *io.PipeWriter
 	var decodedData []byte
 	var ryDoneChan chan error // channel to signal when RapidYenc decoding is done
 
 	switch cfg.opt.YencTest {
 	case 4:
 		// use rapidyenc to decode the body lines
-		pipeReader, PipeWriter = io.Pipe()
+		pipeReader, pipeWriter = io.Pipe()
 		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc AcquireDecoderWithReader for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 		rydecoder = rapidyenc.AcquireDecoderWithReader(pipeReader)
 		if rydecoder == nil {
@@ -557,8 +557,8 @@ readlines:
 					// rapidyenc test 4
 					//ydec = append(ydec, line+CRLF...) // append the line to the byte buffer
 					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
-					if _, err := PipeWriter.Write([]byte(line + CRLF)); err != nil {
-						PipeWriter.CloseWithError(err)
+					if _, err := pipeWriter.Write([]byte(line + CRLF)); err != nil {
+						pipeWriter.CloseWithError(err)
 						connitem.c.CloseConn(connitem, nil)
 						dlog(always, "ERROR readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
 						return 0, rxb, nil, fmt.Errorf("error readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
@@ -652,9 +652,9 @@ readlines:
 	} // end for readlines
 
 	// case 4: we are done reading lines, close the pipe writer
-	if PipeWriter != nil {
-		PipeWriter.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
-		PipeWriter.Close()                   // <-- THIS IS CRUCIAL!
+	if pipeWriter != nil {
+		pipeWriter.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
+		pipeWriter.Close()                   // <-- THIS IS CRUCIAL!
 		err = <-ryDoneChan                   // wait for decoder to finish
 		if err != nil {
 			log.Printf("ERROR readDotLines: rapidyenc.Read: err='%v'", err)
