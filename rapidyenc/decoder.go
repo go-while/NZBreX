@@ -353,8 +353,13 @@ func (d *Decoder) Reset() {
 
 	d.debug1 = false
 	d.debug2 = false
-	d.segId = &SomeType{}
-
+	if d.segId != nil {
+		// Reset the segment ID to an empty string
+		// to prevent nil pointer dereference.
+		// If a new segment ID is needed, it should be set via SetSegmentId.
+		segId := ""
+		d.segId = &segId
+	}
 }
 
 func (d *Decoder) processYenc(line []byte) {
