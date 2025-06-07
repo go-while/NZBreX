@@ -5,13 +5,13 @@ on:
     branches:
       - 'devtesting'
     tags:
-      - "test*"
+      - "test_goreleaser"
   workflow_dispatch:
   repository_dispatch:
   pull_request:
     branches:
       #- main
-      - "test*"
+      - "test_goreleaser"
 
 permissions:
   contents: write
@@ -41,6 +41,7 @@ jobs:
 
       #- name: "Restore go cache"
       #  run: runner/go-cache-restore.sh
+
       - name: "clone rapidyenc"
         run: cd rapidyenc && ./clone_rapidyenc.sh
 
