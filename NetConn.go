@@ -799,7 +799,7 @@ readlines:
 				getAsyncCoreLimiter()
 				returnAsyncCoreLimiter()
 			*/
-			dlog(always, "readDotLines: rapidyenc.Read seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Id, connitem.c.provider.Name, len(decodedData))
+			dlog(always, "readDotLines: rapidyenc.Read Num=%d seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Number, item.segment.Id, connitem.c.provider.Name, len(decodedData))
 			// decodedData now contains the decoded yEnc body
 			// TODO check crc again vs old yenc.crc ?
 			meta := rydecoder.Meta()
