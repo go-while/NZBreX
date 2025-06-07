@@ -369,7 +369,7 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 		rydecoder = rapidyenc.AcquireDecoderWithReader(pipeReader)
 		if rydecoder == nil {
 			connitem.c.CloseConn(connitem, nil)
-			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder")
+			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 		}
 		rydecoder.SetSegmentId(&item.segment.Id)  // set the segment ID for the decoder
 		defer rapidyenc.ReleaseDecoder(rydecoder) // release the decoder after processing
