@@ -413,7 +413,7 @@ func (d *Decoder) Reset() {
 }
 
 func (d *Decoder) processYenc(line []byte) {
-	dlog(d.debug2, "rapidyenc.processYenc(%s)", line)
+	dlog(d.debug2, "rapidyenc.processYenc(%q)", line)
 	if bytes.HasPrefix(line, []byte("=ybegin ")) {
 		d.begin = true
 		d.m.Size, _ = extractInt(line, []byte(" size="))
