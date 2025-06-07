@@ -820,9 +820,6 @@ readlines:
 			cache.WriteYenc(item, part)
 		} // end switch yencTest
 		dlog(cfg.opt.DebugWorker, "readArticleDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(yencstart).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
-		if rydecoder != nil {
-			rapidyenc.ReleaseDecoder(rydecoder)
-		}
 		if isBadCrc {
 			item.mux.Lock()
 			item.badcrc++
