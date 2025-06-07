@@ -130,8 +130,10 @@ Run with the following arguments:
 - `-yencout` [true|false] write yenc parts to cache (needs -cd)
 - `-yencmerge` [true|false] merge yenc parts into target files
 - `-yencdelparts` [true|false] delete .part.N.yenc files after merge (only with -yencmerge)
-- `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapideyenc) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
-- `-yencasync` limits async parallel decoding with -crc32=true and -yenctest=3. 0 defaults to runtime.NumCPU().
+- `-rapidyencbufsize` "set only if you know what you do! (default: 4K) (experimental/testing)"
+- `-doublecheckrapidyenccrc` "[true|false] (experimental/testing)"
+- `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapidyenc) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
+- `-yencasync` limits async parallel decoding with -crc32=true and -yenctest=3 or 4. 0 defaults to runtime.NumCPU().
 - `-debugsharedcc` debug sharedConn Chan (default: false)
 - `-debugflags` debug item flags (default: false)
 - `-debugcr` debug check routine (default: false)
@@ -143,6 +145,7 @@ Run with the following arguments:
 - `-debugpost` debug POST (default: false)
 - `-debugmemlim` debug MEMLIMIT (default: false)
 - `-debugconnpool` debug ConnPool (default: false)
+- `-debugrapidyenc` debug rapidyenc (default: false)
 - `-logappend` append to logfile instead of rotating/overwriting (default: false)
 - `-logdir` set log directory (default: logs)
 - `-logold` rotate log files to .N, 0 disables rotation (default: 0)
