@@ -5,7 +5,7 @@ on:
     branches:
       - 'rapidyenc'
     tags:
-      - "test*"
+      - "test_rapidyenc"
   release:
     types: [published]
   workflow_dispatch:
