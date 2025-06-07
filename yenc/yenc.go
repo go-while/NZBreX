@@ -273,7 +273,11 @@ func (p *Part) Validate(segId *string) error {
 		return fmt.Errorf("error in yenc.Part.Validate Number=%d: Body size %d did not match expected size %d bodyLarge=%t bodySmall=%t diff=%d", p.Number, len(p.Body), p.Size, bodyLarge, bodySmall, diff)
 	}
 	// crc check
-	if p.Crc32 > 0 || p.crcHash == nil {
+	if p.Crc32 > 0 {
+		if p.crcHash == nil {
+			p.crcHash = crc32.NewIEEE()
+			p.crcHash.Write(p.Body)
+		}
 		if sum := p.crcHash.Sum32(); sum != p.Crc32 {
 			p.BadCRC = true
 			log.Printf("CRC32 segId='%s' part=%d expected %x got %x len(p.Body)=%d", *segId, p.Number, p.Crc32, sum, len(p.Body))

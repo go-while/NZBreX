@@ -41,6 +41,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (default: false) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (default: false) (experimental/testing)")
 	flag.IntVar(&cfg.opt.RapidYencBufSize, "rapidyencbufsize", rapidyenc.DefaultBufSize, "set only if you know what you do! (default: 4K) (experimental/testing)")
+	flag.BoolVar(&cfg.opt.DoubleCheckRapidYencCRC, "doublecheckrapidyenccrc", false, "(experimental/testing)")
 	// debug output flags
 	flag.BoolVar(&runProf, "prof", false, "starts profiler (for debugging)\n       @mem: waits 20sec and runs 120 sec\n       @cpu: waits 20 sec and captures to end")
 	flag.StringVar(&webProf, "profweb", "", "start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' (default: empty = dont start websrv)")

@@ -790,29 +790,60 @@ readlines:
 			}
 
 		case 4:
+			// rapidyenc test 4
 			if rydecoder == nil {
 				dlog(always, "error readDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 				break
 			}
-			// rapidyenc test 4
-			/*
-				getAsyncCoreLimiter()
-				returnAsyncCoreLimiter()
-			*/
-			dlog(always, "readDotLines: rapidyenc.Read Num=%d seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Number, item.segment.Id, connitem.c.provider.Name, len(decodedData))
 			// decodedData now contains the decoded yEnc body
-			// TODO check crc again vs old yenc.crc ?
+			dlog(len(decodedData) == 0, "ERROR readDotLines: rapidyenc.Read Num=%d seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Number, item.segment.Id, connitem.c.provider.Name, len(decodedData))
+
 			meta := rydecoder.Meta()
 			part := &yenc.Part{
-				Number:     item.segment.Number, // or use correct part number if available
-				HeaderSize: 0,                   // set if you have this info
-				Size:       meta.Size,
-				Begin:      meta.Begin,
-				End:        meta.End,
-				Name:       meta.Name,
-				Crc32:      meta.Hash,
-				Body:       decodedData,
-				BadCRC:     false, // set to true if you detected a CRC error
+				Number: item.segment.Number, // or use correct part number if available
+				//HeaderSize: 0, // header size is not used in rapidyenc
+				Size: int64(len(decodedData)), // size of the decoded data
+				//Begin: meta.Begin,
+				//End:   meta.End,
+				Name:  meta.Name,
+				Crc32: meta.Hash,
+				Body:  decodedData,
+			}
+
+			if cfg.opt.DoubleCheckRapidYencCRC {
+				// double check the crc32 of the decoded data
+				// this is only needed if we want to double check the crc32 of the decoded data
+				// this is not needed for rapidyenc, but we do it for consistency
+				// and to ensure the decoded data is valid
+				// we use the yenc decoder to validate the crc32 of the decoded data
+				getAsyncCoreLimiter()
+				defer returnAsyncCoreLimiter()
+
+				decoder = yenc.NewDecoder(nil, nil, nil, 1)
+				decoder.Part = part // assign the part to the old yenc decoder
+				decoder.SegId = &item.segment.Id
+				// TODO check crc again vs old yenc.crc ?
+				if err := decoder.Part.Validate(&item.segment.Id); err != nil || decoder.Part.BadCRC {
+					isBadCrc = decoder.Part.BadCRC
+					/*
+					* d.Part='&yenc.Part{
+					* 		Number:18,
+					* 		HeaderSize:209715695,
+					* 		Size:640000,
+					* 		Begin:10880001,
+					* 		End:11520000,
+					* 		Name:"debian-11.1.0-i386-DVD-1.part01.rev",
+					* 		cols:128,
+					* 		Crc32:0xfd8ec0f3,
+					* 		crcHash:(*crc32.digest)(0xc00092d230), Body: :[]uint8{0x93, 0x9, 0x2d, 0xeb, 0x7d, 0x1d, 0x55, 0xbf, 0xfe, 0xde, 0x89, 0x68, 0x56, 0x84, 0x82, 0xf9, 0xed, ....
+					 */
+					if decoder.Part != nil {
+						log.Printf("Error readDotLines: rapidyenc yenc.Part.Validate: error validate decoder.seg.Id='%s' @Number=%d err='%v' isBadCrc=%t", *decoder.SegId, decoder.Part.Number, err, isBadCrc)
+					} else {
+						log.Printf("Error readDotLines: rapidyenc yenc.Part.Validate: decoder.seg.Id='%s' err='%v' decoder.Part is nil", *decoder.SegId, err)
+					}
+					break // the case 3
+				}
 			}
 			// Now write to cache
 			cache.WriteYenc(item, part)

@@ -51,54 +51,55 @@ type Config struct {
 
 type CFG struct {
 	//NZBfilepath      string  // only supplied from cmd line
-	NzbDir           string `json:"NzbDir"`           // directory where nzb files are stored
-	DirRefresh       int64  `json:"DirRefresh"`       // seconds to wait for directory refresh
-	ProvFile         string `json:"Provider"`         // file with provider list
-	Cachedir         string `json:"Cachedir"`         // directory where cache files are stored
-	CheckCacheOnBoot bool   `json:"CheckCacheOnBoot"` // if true, check cache for existing articles on startup
-	ByPassSTAT       bool   `json:"ByPassSTAT"`       // if true, no STAT will be sent to server
-	CRW              int    `json:"CRW"`              // cache reader/writer, number of goroutines
-	MemMax           int    `json:"MemMax"`           // max number of objects in ram, 0 = unlimited
-	ChanSize         int    `json:"ChanSize"`         // size of channels for reading/writing cache and yenc
-	CheckOnly        bool   `json:"CheckOnly"`        // if true, no download or upload will be done
-	CheckFirst       bool   `json:"CheckFirst"`       // if true, check for article existence before download
-	UploadLater      bool   `json:"UploadLater"`      // if true, upload will be done after all articles are downloaded
-	Verify           bool   `json:"Verify"`           // if true, verify articles after upload
-	YencCRC          bool   `json:"YencCRC"`          // if true, crc32 will be checked while downloading yenc articles
-	YencCpu          int    `json:"YencCpu"`          // number of cpu cores to use for yenc decoding, 0 = runtime.NumCPU()
-	YencAsyncCpu     int    `json:"YencAsyncCpu"`     // number of cpu cores to use for async yenc decoding, 0 = runtime.NumCPU()
-	YencTest         int    `json:"YencTest"`         // 1 = bytes, 2 = lines, used with YencCRC
-	YencWrite        bool   `json:"YencWrite"`        // if true, yenc parts will be written to cache
-	YencMerge        bool   `json:"YencMerge"`        // if true, yenc parts will be merged into target files
-	YencDelParts     bool   `json:"YencDelParts"`     // if true, yenc parts will be deleted after merge
-	RapidYencBufSize int    `json:"RapidYencBufSize"` // buffer size for rapidyenc, default 4k in rapidyenc.DefaultBufSize
-	Csv              bool   `json:"Csv"`              // if true, write a csv file for every nzb file
-	Log              bool   `json:"Log"`              // if true, log to file
-	LogAppend        bool   `json:"LogAppend"`        // if true, append to log file instead of overwriting
-	LogDir           string `json:"LogDir"`           // directory where log files are stored
-	LogOld           int    `json:"LogOld"`           // if true, rotate old log files up to .N
-	Prof             bool   `json:"Prof"`             // if true, start profiler
-	PrintStats       int64  `json:"PrintStats"`       // seconds to print stats, 0 = spammy, -1 = no output, >0 = print every N seconds
-	Print430         bool   `json:"Print430"`         // if true, print notice about code 430 article not found
-	Discard          bool   `json:"Discard"`          // if true, reduce console output to zero
-	CleanHeaders     bool   `json:"CleanHeaders"`     // if true, clean headers from articles
-	CleanHeadersFile string `json:"CleanHeadersFile"` // load strings of headers to cleanup from this file (1 header per line! checks only via prefix!)
-	BUG              bool   `json:"BUG"`              // if true, enable bug reporting
-	Debug            bool   `json:"Debug"`            // if true, enable debug output
-	DebugCache       bool   `json:"DebugCache"`       // if true, enable cache debug output
-	DebugConnPool    bool   `json:"DebugConnPool"`    // if true, enable connpool debug output
-	DebugSharedCC    bool   `json:"DebugSharedCC"`    // if true, enable sharedConn debug output
-	DebugWorker      bool   `json:"DebugWorker"`      // if true, enable workers debug output
-	DebugMemlim      bool   `json:"DebugMemlim"`      // if true, enable memlim debug output
-	DebugCR          bool   `json:"DebugCR"`          // if true, enable check routine debug output
-	DebugDR          bool   `json:"DebugDR"`          // if true, enable downs routine debug output
-	DebugUR          bool   `json:"DebugUR"`          // if true, enable reups routine debug output
-	DebugSTAT        bool   `json:"DebugSTAT"`        // if true, enable STAT debug output
-	DebugARTICLE     bool   `json:"DebugARTICLE"`     // if true, enable ARTICLE debug output
-	DebugIHAVE       bool   `json:"DebugIHAVE"`       // if true, enable IHAVE debug output
-	DebugPOST        bool   `json:"DebugPOST"`        // if true, enable POST debug output
-	DebugFlags       bool   `json:"DebugFlags"`       // if true, enable printing item flags
-	DebugRapidYenc   bool   `json:"DebugRapidYenc"`   // if true, enable rapidyenc debug output
+	NzbDir                  string `json:"NzbDir"`                  // directory where nzb files are stored
+	DirRefresh              int64  `json:"DirRefresh"`              // seconds to wait for directory refresh
+	ProvFile                string `json:"Provider"`                // file with provider list
+	Cachedir                string `json:"Cachedir"`                // directory where cache files are stored
+	CheckCacheOnBoot        bool   `json:"CheckCacheOnBoot"`        // if true, check cache for existing articles on startup
+	ByPassSTAT              bool   `json:"ByPassSTAT"`              // if true, no STAT will be sent to server
+	CRW                     int    `json:"CRW"`                     // cache reader/writer, number of goroutines
+	MemMax                  int    `json:"MemMax"`                  // max number of objects in ram, 0 = unlimited
+	ChanSize                int    `json:"ChanSize"`                // size of channels for reading/writing cache and yenc
+	CheckOnly               bool   `json:"CheckOnly"`               // if true, no download or upload will be done
+	CheckFirst              bool   `json:"CheckFirst"`              // if true, check for article existence before download
+	UploadLater             bool   `json:"UploadLater"`             // if true, upload will be done after all articles are downloaded
+	Verify                  bool   `json:"Verify"`                  // if true, verify articles after upload
+	YencCRC                 bool   `json:"YencCRC"`                 // if true, crc32 will be checked while downloading yenc articles
+	YencCpu                 int    `json:"YencCpu"`                 // number of cpu cores to use for yenc decoding, 0 = runtime.NumCPU()
+	YencAsyncCpu            int    `json:"YencAsyncCpu"`            // number of cpu cores to use for async yenc decoding, 0 = runtime.NumCPU()
+	YencTest                int    `json:"YencTest"`                // 1 = bytes, 2 = lines, used with YencCRC
+	YencWrite               bool   `json:"YencWrite"`               // if true, yenc parts will be written to cache
+	YencMerge               bool   `json:"YencMerge"`               // if true, yenc parts will be merged into target files
+	YencDelParts            bool   `json:"YencDelParts"`            // if true, yenc parts will be deleted after merge
+	RapidYencBufSize        int    `json:"RapidYencBufSize"`        // buffer size for rapidyenc, default 4k in rapidyenc.DefaultBufSize
+	DoubleCheckRapidYencCRC bool   `json:"DoubleCheckRapidYencCRC"` // if true, double check crc32 with rapidyenc
+	Csv                     bool   `json:"Csv"`                     // if true, write a csv file for every nzb file
+	Log                     bool   `json:"Log"`                     // if true, log to file
+	LogAppend               bool   `json:"LogAppend"`               // if true, append to log file instead of overwriting
+	LogDir                  string `json:"LogDir"`                  // directory where log files are stored
+	LogOld                  int    `json:"LogOld"`                  // if true, rotate old log files up to .N
+	Prof                    bool   `json:"Prof"`                    // if true, start profiler
+	PrintStats              int64  `json:"PrintStats"`              // seconds to print stats, 0 = spammy, -1 = no output, >0 = print every N seconds
+	Print430                bool   `json:"Print430"`                // if true, print notice about code 430 article not found
+	Discard                 bool   `json:"Discard"`                 // if true, reduce console output to zero
+	CleanHeaders            bool   `json:"CleanHeaders"`            // if true, clean headers from articles
+	CleanHeadersFile        string `json:"CleanHeadersFile"`        // load strings of headers to cleanup from this file (1 header per line! checks only via prefix!)
+	BUG                     bool   `json:"BUG"`                     // if true, enable bug reporting
+	Debug                   bool   `json:"Debug"`                   // if true, enable debug output
+	DebugCache              bool   `json:"DebugCache"`              // if true, enable cache debug output
+	DebugConnPool           bool   `json:"DebugConnPool"`           // if true, enable connpool debug output
+	DebugSharedCC           bool   `json:"DebugSharedCC"`           // if true, enable sharedConn debug output
+	DebugWorker             bool   `json:"DebugWorker"`             // if true, enable workers debug output
+	DebugMemlim             bool   `json:"DebugMemlim"`             // if true, enable memlim debug output
+	DebugCR                 bool   `json:"DebugCR"`                 // if true, enable check routine debug output
+	DebugDR                 bool   `json:"DebugDR"`                 // if true, enable downs routine debug output
+	DebugUR                 bool   `json:"DebugUR"`                 // if true, enable reups routine debug output
+	DebugSTAT               bool   `json:"DebugSTAT"`               // if true, enable STAT debug output
+	DebugARTICLE            bool   `json:"DebugARTICLE"`            // if true, enable ARTICLE debug output
+	DebugIHAVE              bool   `json:"DebugIHAVE"`              // if true, enable IHAVE debug output
+	DebugPOST               bool   `json:"DebugPOST"`               // if true, enable POST debug output
+	DebugFlags              bool   `json:"DebugFlags"`              // if true, enable printing item flags
+	DebugRapidYenc          bool   `json:"DebugRapidYenc"`          // if true, enable rapidyenc debug output
 	//DebugSTREAM       bool   `json:"DebugSTREAM"`      // if true, enable STREAM debug output
 	Verbose       bool `json:"Verbose"`       // if true, enable verbose output
 	Bar           bool `json:"Bar"`           // if true, show progress bar
