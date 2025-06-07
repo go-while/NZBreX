@@ -356,23 +356,23 @@ jobs:
 
       - name: "compile rapidyenc linux-amd64"
         if: matrix.os == 'linux' && matrix.arch == 'amd64'
-        run: cd rapidyenc && ./build_rapidyenc_linux.sh
+        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
 
       #- name: "compile rapidyenc linux-386"
       #  if: matrix.os == 'linux' && matrix.arch == '386'
-      #  run: cd rapidyenc && ./build_rapidyenc_linux_386.sh
+      #  run: cd rapidyenc && ./build_rapidyenc_linux-386.sh
 
       - name: "compile rapidyenc windows-amd64"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
         run: |
-          cd rapidyenc && ./crossbuild_rapidyenc_win.sh
+          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
           echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
       - name: "compile rapidyenc linux-arm64"
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
-          cd rapidyenc && ./build_rapidyenc_linux_arm64.sh
+          cd rapidyenc && ./build_rapidyenc_linux-arm64.sh
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
