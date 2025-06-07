@@ -3,7 +3,7 @@ name: "TEST Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'rapidyenc'
+      - 'testing'
     tags:
       - "test_rapidyenc"
   release:
@@ -569,17 +569,17 @@ jobs:
 #          retention-days: 1
 #          if-no-files-found: warn
 
-#      - name: "Upload Release Assets to github"
-#        if: github.event_name == 'release'
-#        uses: softprops/action-gh-release@v2
-#        with:
-#          files: |
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
+      - name: "Upload Release Assets to github"
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
 
 #      - name: "Backup go cache"
 #        run: runner/go-cache-backup.sh
