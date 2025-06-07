@@ -410,8 +410,7 @@ func (d *Decoder) Reset() {
 		// Reset the segment ID to an empty string
 		// to prevent nil pointer dereference.
 		// If a new segment ID is needed, it should be set via SetSegmentId.
-		segId := ""
-		d.segId = &segId
+		d.segId = new(string)
 	}
 }
 
