@@ -47,7 +47,7 @@ if testrapidyenc {
 }
 ```
 
-This snippet demonstrates how to use the rapidyenc decoder's self-test and file-test facilities. The `TestRapidyencDecoderFiles` function will run through sample `.yenc` files and validate decoding, CRCs, and error handling.  
+This snippet demonstrates how to use the rapidyenc decoder's self-test and file-test facilities. The `TestRapidyencDecoderFiles` function will run through sample `.yenc` files and validate decoding, CRCs, and error handling.
 - **AcquireDecoder / ReleaseDecoder** shows the typical lifecycle of a decoder instance.
 - **SetDebug** enables detailed debug output.
 - **SetSegmentId** sets an identifier for easier debugging when handling multiple segments.
@@ -168,24 +168,136 @@ func TestRapidyencDecoderFiles() (errs []error) {
 }
 ```
 
+---
+
+```
+// setup rapidyenc decoder before start reading lines from remote
+case 4:
+		// use rapidyenc to decode the body lines
+		pipeReader, pipeWriter = io.Pipe()
+		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc AcquireDecoderWithReader for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+		rydecoder = rapidyenc.AcquireDecoderWithReader(pipeReader)
+		if rydecoder == nil {
+			connitem.c.CloseConn(connitem, nil)
+			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder")
+		}
+		rydecoder.SetSegmentId(&item.segment.Id)  // set the segment ID for the decoder
+		defer rapidyenc.ReleaseDecoder(rydecoder) // release the decoder after processing
+		dlog(cfg.opt.DebugRapidYenc, "readDotLines: using rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+		ryDoneChan = make(chan error, 1)
+		// we will read the decoded data from the decoder in a separate goroutine
+		// this allows us to decode the data asynchronously while we are reading lines from the textproto.Conn
+		go func(segId *string, decoded *[]byte, done chan error) {
+			start := time.Now()
+			decodedBuf := make([]byte, cfg.opt.RapidYencBufSize)
+			total := 0
+			for {
+				n, err := rydecoder.Read(decodedBuf)
+				if n > 0 {
+					*decoded = append(*decoded, decodedBuf[:n]...)
+					total += n
+				}
+				if err == io.EOF {
+					done <- nil
+					break
+				}
+				if err != nil {
+					done <- err
+					break
+				}
+			}
+			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc decoder done for seg.Id='%s' @ '%s' decoded=%d bufsize=%d total=%d took=(%d µs)", *segId, connitem.c.provider.Name, len(*decoded), len(decodedBuf), total, time.Since(start).Microseconds())
+		}(&item.segment.Id, &decodedData, ryDoneChan)
+```
+
+---
+
+```
+// whereever you read lines from remote, use something like this:
+				case 4:
+					// rapidyenc test 4
+					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
+					if _, err := pipeWriter.Write([]byte(line + CRLF)); err != nil {
+						pipeWriter.CloseWithError(err)
+						connitem.c.CloseConn(connitem, nil)
+						dlog(always, "ERROR readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
+						return 0, rxb, nil, fmt.Errorf("error readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
+					}
+					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write done line=%d seg.Id='%s' @ '%s'", i, item.segment.Id, connitem.c.provider.Name)
+```
+
+---
+
+```
+	// case 4: we are done reading lines, close the pipe writer
+	if pipeWriter != nil {
+		pipeWriter.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
+		pipeWriter.Close()                   // <-- THIS IS CRUCIAL!
+		err = <-ryDoneChan                   // wait for decoder to finish
+		if err != nil {
+			log.Printf("ERROR readDotLines: rapidyenc.Read: err='%v'", err)
+			brokenYenc = true
+		}
+	}
+```
+
+---
+
+``` // finally we can merge the body parts together, which in this example had been written to a cache dir
+
+		case 4:
+			if rydecoder == nil {
+				dlog(always, "error readDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+				break
+			}
+
+			// rapidyenc test 4
+			/*
+				getAsyncCoreLimiter()
+
+				returnAsyncCoreLimiter()
+			*/
+			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc.Read seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Id, connitem.c.provider.Name, len(decodedData))
+			// decodedData now contains the decoded yEnc body
+			// TODO check crc again vs old yenc.crc ?
+			meta := rydecoder.Meta()
+			part := &yenc.Part{
+				Number:     item.segment.Number, // or use correct part number if available
+				HeaderSize: 0,                   // set if you have this info
+				Size:       meta.Size,
+				Begin:      meta.Begin,
+				End:        meta.End,
+				Name:       meta.Name,
+				Crc32:      meta.Hash,
+				Body:       decodedData,
+				BadCRC:     false, // set to true if you detected a CRC error
+			}
+			// Now write to cache
+			cache.WriteYenc(item, part)
+		} // end switch yencTest
+
+```
+- a working implementation with a modfied readDotLines function you can find here, search for "case 4:" which is all parts needed for rapidyenc
+- https://github.com/go-while/NZBreX/blob/da45067eaf6c8afae1f417368a5e120e0679a432/NetConn.go
+
 ## API Highlights
 
-- `rapidyenc.AcquireDecoder()`  
+- `rapidyenc.AcquireDecoder()`
   Get a new decoder from the pool (set the reader with `SetReader`).
 
-- `rapidyenc.AcquireDecoderWithReader(io.Reader)`  
+- `rapidyenc.AcquireDecoderWithReader(io.Reader)`
   Get a decoder with the reader set.
 
-- `Decoder.Read([]byte)`  
+- `Decoder.Read([]byte)`
   Stream decoded output, just like an `io.Reader`.
 
-- `Decoder.Meta()`  
+- `Decoder.Meta()`
   Retrieve decoded file metadata.
 
-- `Decoder.SetDebug(debug1, debug2)`  
+- `Decoder.SetDebug(debug1, debug2)`
   Enable debug logging.
 
-- `rapidyenc.ReleaseDecoder(dec *Decoder)`  
+- `rapidyenc.ReleaseDecoder(dec *Decoder)`
   Return the decoder to the pool for reuse.
 
 ## Building from Source
