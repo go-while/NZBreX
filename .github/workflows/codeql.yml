@@ -38,9 +38,9 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
+        queries: +security-extended,security-and-quality
 
     - name: Build (manual, for C/C++)
-      if: matrix.language == 'c-cpp'
       run: |
         cd rapidyenc
         ./clone_rapidyenc.sh
