@@ -27,7 +27,7 @@ jobs:
         - language: c-cpp
           build-mode: manual   # Use manual for C/C++
         - language: go
-          build-mode: autobuild # Use autobuild for Go
+          build-mode: manual # Use autobuild for Go
 
     steps:
     - name: Checkout repository
