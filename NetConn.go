@@ -349,13 +349,13 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	if what == cmdARTICLE || what == cmdHEAD {
 		parseHeader = true
 	}
-	async, sentLinesToDecoder := false, 0
-	var ydec []byte                  // contains yenc encoded body lines as []byte, to pass to the decoder in case 1
-	var ydat []*string               // contains yenc encoded body lines as []*string, to pass to the decoder in case 2
-	var decodeBodyChan chan *string  // channel for yenc lines to decode asynchronously in case 3
-	var counter *Counter_uint64      // counter for async yenc decoding, if enabled in case 3
-	var releaseDecoder chan struct{} // channel to release the decoder after processing in case 3
-	var rydecoder *rapidyenc.Decoder // pointer to RapidYenc decoder, if enabled in case 4
+	async, sentLinesToDecoder := false, 0 // initialize async and sentLinesToDecoder, will be set depending on -yenctest=1,2,3,4
+	var ydec []byte                       // contains yenc encoded body lines as []byte, to pass to the decoder in case 1
+	var ydat []*string                    // contains yenc encoded body lines as []*string, to pass to the decoder in case 2
+	var decodeBodyChan chan *string       // channel for yenc lines to decode asynchronously in case 3
+	var counter *Counter_uint64           // counter for async yenc decoding, if enabled in case 3
+	var releaseDecoder chan struct{}      // channel to release the decoder after processing in case 3
+	var rydecoder *rapidyenc.Decoder      // pointer to RapidYenc decoder, if enabled in case 4
 	var pipeReader *io.PipeReader
 	var pipeWriter *io.PipeWriter
 	var decodedData []byte
