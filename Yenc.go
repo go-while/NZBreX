@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-while/NZBreX/rapidyenc"
 	"github.com/go-while/NZBreX/yenc" // fork of chrisfarms with little mods
 )
 
@@ -161,3 +165,87 @@ func (s *SESSION) YencMerge(result *string) {
 	*result = *result + fmt.Sprintf("\n\n> MergeTook: %d sec", mergeTook)
 
 } // end func YencMerge
+
+func testRapidyencDecoderFiles() {
+	files := []string{
+		"yenc/multipart_test.yenc",
+		"yenc/multipart_test_badcrc.yenc",
+		"yenc/singlepart_test.yenc",
+		"yenc/singlepart_test_badcrc.yenc",
+	}
+	for _, fname := range files {
+		fmt.Printf("\n=== Testing rapidyenc with file: %s ===\n", fname)
+		f, err := os.Open(filepath.Clean(fname))
+		if err != nil {
+			fmt.Printf("Failed to open %s: %v\n", fname, err)
+			continue
+		}
+		defer f.Close()
+
+		pipeReader, pipeWriter := io.Pipe()
+		decoder := rapidyenc.AcquireDecoderWithReader(pipeReader)
+		defer rapidyenc.ReleaseDecoder(decoder)
+		segId := fname
+		decoder.SetSegmentId(&segId)
+
+		// Start goroutine to read decoded data
+		var decodedData bytes.Buffer
+		done := make(chan error, 1)
+		go func() {
+			buf := make([]byte, rapidyenc.DefaultBufSize)
+			for {
+				n, err := decoder.Read(buf)
+				if n > 0 {
+					decodedData.Write(buf[:n])
+				}
+				if err == io.EOF {
+					done <- nil
+					return
+				}
+				if err != nil {
+					done <- err
+					return
+				}
+			}
+		}()
+
+		// Write file lines to the pipeWriter
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			pipeWriter.Write([]byte(line + "\r\n"))
+		}
+		pipeWriter.Write([]byte(".\r\n")) // NNTP end marker
+		pipeWriter.Close()
+
+		if err := <-done; err != nil {
+			var aBadCrc uint32
+			meta := decoder.Meta()
+			//fmt.Printf("Decoder error: %v\n", err)
+			expectedCrc := decoder.ExpectedCrc()
+			if expectedCrc != 0 && expectedCrc != meta.Hash {
+				// Set aBadCrc based on the file name
+				switch fname {
+				case "yenc/singlepart_test_badcrc.yenc":
+					aBadCrc = 0x6d04a475
+				case "yenc/multipart_test_badcrc.yenc":
+					aBadCrc = 0xf6acc027
+				}
+				if aBadCrc > 0 && aBadCrc != meta.Hash {
+					fmt.Printf("WARNING1 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+				} else if aBadCrc > 0 && aBadCrc == meta.Hash {
+					fmt.Printf("rapidyenc OK expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+				} else if expectedCrc != meta.Hash {
+					fmt.Printf("WARNING2 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+				} else {
+					fmt.Printf("GOOD CRC matches! aBadCrc=%#08x Name: '%s' fname: '%s'\n", aBadCrc, meta.Name, fname)
+				}
+			} else if expectedCrc == 0 {
+				fmt.Printf("WARNING rapidyenc: No expected CRC set, cannot verify integrity. fname: '%s'\n", fname)
+			}
+		} else {
+			meta := decoder.Meta()
+			fmt.Printf("OK Decoded %d bytes, CRC32: %#08x, Name: '%s' fname: '%s'\n", decodedData.Len(), meta.Hash, meta.Name, fname)
+		}
+	}
+}

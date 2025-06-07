@@ -379,7 +379,7 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 		// this allows us to decode the data asynchronously while we are reading lines from the textproto.Conn
 		go func(segId *string, decoded *[]byte, done chan error) {
 			start := time.Now()
-			decodedBuf := make([]byte, 64*1024)
+			decodedBuf := make([]byte, cfg.opt.RapidYencBufSize)
 			total := 0
 			for {
 				n, err := rydecoder.Read(decodedBuf)

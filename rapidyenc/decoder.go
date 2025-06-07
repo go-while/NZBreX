@@ -30,50 +30,18 @@ import (
 	"golang.org/x/text/transform"
 )
 
+const constBufSize = 4096 // const buffer size for Decoder instances
+
 var (
 	decoderPool sync.Pool
+
+	// Default buffer size for decoding can be set before calling any AcquireDecoder
+	//  via: rapidyenc.DefaultBufSize = 64*1024 // 64 KiB
+	DefaultBufSize = int(constBufSize) // Default buffer size for Decoder instances
+
+	// private variables for the package
+	defaultBufSize = DefaultBufSize
 )
-
-// AcquireDecoder returns an empty Decoder instance from Decoder pool.
-//
-// The returned Decoder instance may be passed to ReleaseDecoder when it is
-// no longer needed. This allows Decoder recycling, reduces GC pressure
-// and usually improves performance.
-func AcquireDecoder() *Decoder {
-	v := decoderPool.Get()
-	if v == nil {
-		return NewDecoder(defaultBufSize)
-	}
-	return v.(*Decoder)
-}
-
-// AcquireDecoderWithReader returns an empty Decoder instance from Decoder pool
-// with the specified reader set.
-//
-// The returned Decoder instance may be passed to ReleaseDecoder when it is
-// no longer needed. This allows Decoder recycling, reduces GC pressure
-// and usually improves performance.
-// The reader must be set before the first call to Read, otherwise it will panic.
-func AcquireDecoderWithReader(reader io.Reader) *Decoder {
-	v := decoderPool.Get()
-	var dec *Decoder
-	if v == nil {
-		dec = NewDecoder(defaultBufSize)
-	} else {
-		dec = v.(*Decoder)
-	}
-	dec.SetReader(reader)
-	return dec
-}
-
-// ReleaseDecoder returns dec acquired via AcquireDecoder to Decoder pool.
-//
-// It is forbidden accessing dec and/or its members after returning
-// it to Decoder pool.
-func ReleaseDecoder(dec *Decoder) {
-	dec.Reset()
-	decoderPool.Put(dec)
-}
 
 // Meta is the result of parsing the yEnc headers (ybegin, ypart, yend)
 type Meta struct {
@@ -123,7 +91,57 @@ type Decoder struct {
 	segId  *string // segment ID, if supplied, used for debugging
 }
 
+// AcquireDecoder returns an empty Decoder instance from Decoder pool.
+//
+// The returned Decoder instance may be passed to ReleaseDecoder when it is
+// no longer needed. This allows Decoder recycling, reduces GC pressure
+// and usually improves performance.
+func AcquireDecoder() *Decoder {
+	v := decoderPool.Get()
+	if v == nil {
+		return NewDecoder(defaultBufSize)
+	}
+	return v.(*Decoder)
+}
+
+// AcquireDecoderWithReader returns an empty Decoder instance from Decoder pool
+// with the specified reader set.
+//
+// The returned Decoder instance may be passed to ReleaseDecoder when it is
+// no longer needed. This allows Decoder recycling, reduces GC pressure
+// and usually improves performance.
+// The reader must be set before the first call to Read, otherwise it will panic.
+func AcquireDecoderWithReader(reader io.Reader) *Decoder {
+	v := decoderPool.Get()
+	var dec *Decoder
+	if v == nil {
+		dec = NewDecoder(defaultBufSize)
+	} else {
+		dec = v.(*Decoder)
+	}
+	dec.SetReader(reader)
+	return dec
+}
+
+// ReleaseDecoder returns dec acquired via AcquireDecoder to Decoder pool.
+//
+// It is forbidden accessing dec and/or its members after returning
+// it to Decoder pool.
+func ReleaseDecoder(dec *Decoder) {
+	dec.Reset()
+	decoderPool.Put(dec)
+}
+
 func NewDecoder(bufSize int) *Decoder {
+	if bufSize <= 0 {
+		dlog(always, "rapidyenc.NewDecoder: bufSize must be greater than 0, using constBufSize %d", constBufSize)
+		bufSize = constBufSize
+	}
+	/*
+		if bufSize != constBufSize {
+			dlog(always, "rapidyenc.NewDecoder: bufSize is not constBufSize %d, using %d", constBufSize, bufSize)
+		}
+	*/
 	segId := "" // empty segment ID pointer by default to prevent nil pointer dereference
 	return &Decoder{
 		dst:   make([]byte, bufSize),
@@ -147,15 +165,47 @@ func (d *Decoder) SetDebug(debug1 bool, debug2 bool) {
 	d.debug2 = debug2
 }
 
+// SetSegmentId sets the segment ID for the Decoder instance.
+// This is used for debugging purposes, to identify the segment being processed.
+// If the segment ID is not set, it will default to an empty string.
+// This is useful for debugging the yEnc decoding process, especially when
+// multiple segments are being processed concurrently.
 func (d *Decoder) SetSegmentId(segId *string) {
 	d.segId = segId
 }
 
+// Meta returns the Meta information parsed from the yEnc headers.
+/*
+	// This includes the size of the file, the begin and end offsets, the CRC32 hash,
+	// and the name of the file.
+	// This is set when the ybegin, ypart, and yend headers are processed.
+	// If the headers are not present, the Meta will contain default values.
+	// The Meta can be used to verify the integrity of the decoded data and to
+	// extract information about the file being decoded.
+	// It is recommended to call this after the decoder has processed the yEnc data,
+	// typically after the Read method has returned io.EOF.
+	// If the yEnc headers are not present, the Meta will contain default values.
+	// For example, Size will be 0, Begin and End will be 0, Hash will be 0,
+	// and Name will be an empty string.
+	// If the yEnc headers are present, the Meta will contain the parsed values.
+	// For example, Size will be the total size of the file, Begin will be the
+	// part begin offset (0-indexed), End will be the part end offset (0-indexed, exclusive),
+	// Hash will be the CRC32 hash of the decoded data, and Name will be the name of the file.
+	// This is useful for verifying the integrity of the decoded data and for extracting
+	// information about the file being decoded.
+*/
 func (d *Decoder) Meta() Meta {
 	return d.m
 }
 
-const defaultBufSize = 4096
+// ExpectedCrc returns the expected CRC32 hash of the decoded data.
+// This is set when the yend header is processed and contains the CRC32 hash
+// that the decoder expects to see at the end of the yEnc data.
+// If the yend header does not contain a CRC32 hash, this will return 0.
+// This is useful for verifying the integrity of the decoded data.
+func (d *Decoder) ExpectedCrc() uint32 {
+	return d.expectedCrc
+}
 
 var (
 	ErrDataMissing    = errors.New("no binary data")

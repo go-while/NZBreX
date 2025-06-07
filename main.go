@@ -69,8 +69,12 @@ func init() {
 
 	// test rapidyenc decoder
 	decoder := rapidyenc.AcquireDecoder()
-	rapidyenc.ReleaseDecoder(decoder)
-	decoder = nil // release the decoder
+	decoder.SetDebug(true, true)
+	segId := "any@thing.net"
+	decoder.SetSegmentId(&segId)
+	rapidyenc.ReleaseDecoder(decoder) // release the decoder
+	decoder = nil                     // clear memory
+	testRapidyencDecoderFiles()       // test rapidyenc decoder with files
 	dlog(always, "rapidyenc decoder initialized")
 } // end func init
 
