@@ -123,10 +123,12 @@ type Decoder struct {
 }
 
 func NewDecoder(bufSize int) *Decoder {
+	segId := "" // empty segment ID pointer by default to prevent nil pointer dereference
 	return &Decoder{
-		dst:  make([]byte, bufSize),
-		src:  make([]byte, bufSize),
-		hash: crc32.NewIEEE(),
+		dst:   make([]byte, bufSize),
+		src:   make([]byte, bufSize),
+		hash:  crc32.NewIEEE(),
+		segId: &segId,
 	}
 }
 
@@ -257,6 +259,8 @@ transform:
 			} else if (!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
 			} else if d.crc && d.expectedCrc != d.m.Hash {
+				// If we have a segment ID, use it for debugging
+				// otherwise use an empty string.
 				errStr := fmt.Sprintf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s'", d.expectedCrc, d.m.Hash, *d.segId)
 				dlog(always, "%s", errStr)
 				err = fmt.Errorf("%s: %w", errStr, ErrCrcMismatch)
