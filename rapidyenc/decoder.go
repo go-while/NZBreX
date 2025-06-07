@@ -353,7 +353,7 @@ func (d *Decoder) Reset() {
 
 	d.debug1 = false
 	d.debug2 = false
-	d.segId = nil
+	d.segId = &SomeType{}
 
 }
 
