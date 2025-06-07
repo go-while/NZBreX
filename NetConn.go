@@ -663,6 +663,7 @@ readlines:
 		if err != nil {
 			dlog(always, "ERROR readDotLines: rapidyenc.Read: err='%v'", err)
 			brokenYenc = true
+			content = nil // reset content to nil if we got an error
 		}
 	} else if async && decodeBodyChan != nil { // case 3:
 		close(decodeBodyChan) // close the channel to signal we are done with reading lines
@@ -674,12 +675,11 @@ readlines:
 		var startReadSignals time.Time
 		var isBadCrc bool
 
-		getCoreLimiter()
-		defer returnCoreLimiter()
-
 		switch cfg.opt.YencTest {
 
 		case 1:
+
+			getCoreLimiter()
 			decoder := yenc.NewDecoder(nil, ydec, nil, 1)
 			decoder.SegId = &item.segment.Id
 			if yPart, badcrc, err := decoder.Decode(); err != nil { // chrisfarms/yenc
@@ -689,12 +689,18 @@ readlines:
 				dlog(always, "YencCRC OK mode=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
 				isBadCrc = badcrc
 			}
+			returnCoreLimiter()
+
 		case 2:
+
+			getCoreLimiter()
 			decoder := yenc.NewDecoder(nil, nil, ydat, 1)
 			decoder.SegId = &item.segment.Id
 			if yPart, badcrc, err := decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
+				returnCoreLimiter()
 				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydat=(%d lines) err='%v' badcrc=%t", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, len(ydat), err, badcrc)
 			} else {
+				returnCoreLimiter()
 				if yPart != nil {
 					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, yenc.SimdMode, item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
 				} else {
@@ -710,13 +716,16 @@ readlines:
 					decoder = nil
 				}
 			}
+
 		case 3:
 			if decoder == nil {
 				dlog(always, "error readArticleDotLines: decoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 				break
 			}
 			startReadSignals = time.Now()
+
 			if async {
+
 				var countOK uint64
 				// wait for all lines to be processed by the decoder
 				// we will wait for the yencReturnsOK channel to be closed or nil sent
@@ -762,6 +771,7 @@ readlines:
 					dlog(cfg.opt.BUG, "readArticleDotLines: async yencReturnsOK countOK=%d sentLinesToDecoder=%d", countOK, sentLinesToDecoder)
 				}
 			}
+
 			if brokenYenc || decoder.Part == nil {
 				break // the case 3
 			}
@@ -814,9 +824,6 @@ readlines:
 			}
 
 			if cfg.opt.DoubleCheckRapidYencCRC {
-
-			}
-			if cfg.opt.DoubleCheckRapidYencCRC {
 				// double check the crc32 of the decoded data
 				// this is only needed if we want to double check the crc32 of the decoded data
 				// this is not needed for rapidyenc, but we do it for consistency
@@ -826,8 +833,9 @@ readlines:
 				decoder = yenc.NewDecoder(nil, nil, nil, 1)
 				decoder.Part = part // assign the part to the old yenc decoder
 				decoder.SegId = &item.segment.Id
-				// TODO check crc again vs old yenc.crc ?
+				// doublechecks crc again vs old yenc.crc !
 				if err := decoder.Part.Validate(&item.segment.Id); err != nil || decoder.Part.BadCRC {
+					returnAsyncCoreLimiter()
 					isBadCrc = decoder.Part.BadCRC
 					/*
 					* d.Part='&yenc.Part{
@@ -846,8 +854,9 @@ readlines:
 					} else {
 						log.Printf("Error readDotLines: rapidyenc yenc.Part.Validate: decoder.seg.Id='%s' err='%v' decoder.Part is nil", *decoder.SegId, err)
 					}
-					returnAsyncCoreLimiter()
-					break // the case 4
+					// we got a broken yenc part
+					content = nil // clear content, we do not write it to the cache
+					break         // the case 4
 				}
 				returnAsyncCoreLimiter()
 				dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc yenc.Part.Validate OK seg.Id='%s' @ '%s' part.Body=%d Number=%d crc32=%x", item.segment.Id, connitem.c.provider.Name, len(part.Body), part.Number, part.Crc32)
@@ -860,54 +869,51 @@ readlines:
 		if isBadCrc || brokenYenc {
 			item.mux.Lock()
 			item.badcrc++
-			/*
-				for pid, prov := range providerList {
-					if prov.Group != provider.Group {
-						continue
-					}
-					item.missingOn[pid] = true
-					item.errorOn[pid] = true
-					delete(item.availableOn, pid)
-				}
-			*/
 			item.mux.Unlock()
-			// DecreaseDLQueueCnt() // FIXME NEEDS REVIEW // DISABLED
 			dlog(always, "ERROR readDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 			return 99932, rxb, nil, nil // 99932 is a custom code for bad crc32
 		}
 	} // end if cfg.opt.YencCRC
 
-	item.mux.Lock()
-	defer item.mux.Unlock()
+	if content != nil {
+		// we have read the article or body or head or any other command that is not stored in the item
+		// so we can return the content
+		dlog(cfg.opt.DebugARTICLE, "readDotLines: seg.Id='%s' @ '%s' rxb=%d content=(%d lines)", item.segment.Id, connitem.c.provider.Name, rxb, len(content))
 
-	switch what {
-	case cmdARTICLE:
-		item.article = content
-		item.size = rxb
-		item.dlcnt++
-	case cmdBODY:
-		item.body = content
-		item.bodysize = rxb
-	case cmdHEAD:
-		item.head = content
-		item.headsize = rxb
-	default:
-		// handle multi-line dot-terminated command
-		if !IsOtherCommand(what) {
-			// error unknown command
-			return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", what, connitem.c.provider.Name)
+		item.mux.Lock()
+		defer item.mux.Unlock()
+
+		switch what {
+		case cmdARTICLE:
+			item.article = content
+			item.size = rxb
+			item.dlcnt++
+		case cmdBODY:
+			item.body = content
+			item.bodysize = rxb
+		case cmdHEAD:
+			item.head = content
+			item.headsize = rxb
+		default:
+			// handle multi-line dot-terminated command
+			if !IsOtherCommand(what) {
+				// error unknown command
+				return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", what, connitem.c.provider.Name)
+			}
+			// these commands are not stored in item, but will be returned as content
+			// pass
 		}
-		// these commands are not stored in item, but will be returned as content
-		// pass
+
+		// reaching here means we have read the article or body or head
+		// or any other command that is not stored in the item
+		if !IsOtherCommand(what) {
+			// clears content on head, body or article
+			content = nil // clear content if not an other command
+		} // else pass
+
+	} else {
+		dlog(cfg.opt.DebugARTICLE, "readDotLines: seg.Id='%s' @ '%s' rxb=%d content is nil", item.segment.Id, connitem.c.provider.Name, rxb)
 	}
-
-	// reaching here means we have read the article or body or head
-	// or any other command that is not stored in the item
-	if !IsOtherCommand(what) {
-		// clears content on head, body or article
-		content = nil // clear content if not an other command
-	} // else pass
-
 	return 1, rxb, content, nil
 } // end func readArticleDotLines
 
