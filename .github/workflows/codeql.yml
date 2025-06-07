@@ -1,0 +1,26 @@
+name: mainCodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: cpp
+
+      - name: clone rapidyenc
+        run: cd rapidyenc && ./clone_rapidyenc.sh
+
+      - name: Build rapidyenc
+        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
