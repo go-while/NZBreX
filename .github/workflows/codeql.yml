@@ -33,25 +33,22 @@ jobs:
       with:
         fetch-depth: 0
 
-    # Only run rapidyenc steps for c-cpp
-    - name: clone rapidyenc
-      if: matrix.language == 'c-cpp'
-      run: cd rapidyenc && ./clone_rapidyenc.sh
-
-    - name: Build rapidyenc
-      if: matrix.language == 'c-cpp'
-      run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
 
-    # Only needed for manual build mode (c-cpp)
-    - if: matrix.build-mode == 'manual'
-      name: Build code (manual)
-      run: echo "Custom build steps already handled above."
+    - name: Build (manual, for C/C++)
+      if: matrix.language == 'c-cpp'
+      run: |
+        cd rapidyenc
+        ./clone_rapidyenc.sh
+        ./build_rapidyenc_linux-amd64.sh
+
+    - name: List build artifacts (debug)
+      if: matrix.language == 'c-cpp'
+      run: find . -type f
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
