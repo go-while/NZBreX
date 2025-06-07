@@ -167,6 +167,7 @@ func ParseFlags() {
 		}
 
 		if cfg.opt.RapidYencBufSize != rapidyenc.DefaultBufSize {
+			// yenc line+CRLF = 128+2 = 130 bytes minimum
 			if cfg.opt.RapidYencBufSize < 130 {
 				dlog(always, "ERROR: you can not use -rapidyencbufsize=%d because it must be at least 130 (default: %d)", cfg.opt.RapidYencBufSize, rapidyenc.DefaultBufSize)
 				os.Exit(1)
