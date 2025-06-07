@@ -453,7 +453,7 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 					continue readChan
 				} // end for range decodeBodyChan
 				// we are done with the decodeBodyChan, now we can release the decoder (via defer)
-				dlog(always, "END async decoder cOK=%d cERR=%d took=(%d µs) seg.Id='%s' @ '%s'", cOK, cERR, time.Since(start).Microseconds(), segId, provName)
+				dlog(cfg.opt.Debug, "END async decoder cOK=%d cERR=%d took=(%d µs) seg.Id='%s' @ '%s'", cOK, cERR, time.Since(start).Microseconds(), segId, provName)
 			}(item.segment.Id, connitem.c.provider.Name, decodeBodyChan, counter, releaseDecoder)
 		} // end if async
 	} // end case 3
