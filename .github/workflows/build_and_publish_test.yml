@@ -291,6 +291,23 @@ jobs:
           #  libc: glibc
 
     steps:
+      - name: Show actor
+        run: echo "Triggered by ${{ github.actor }}"
+
+      # Block unallowed push users
+      - name: Block unallowed push user
+        if: github.event_name == 'push' && github.actor != 'go-while'
+        run: |
+          echo "Push not allowed for user ${{ github.actor }}"
+          exit 1
+
+      # Block unallowed PR users
+      - name: Block unallowed PR user
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
+        run: |
+          echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
+          exit 1
+
       - name: "@Start Clean directory"
         run: |
           echo "deleting workspace"
