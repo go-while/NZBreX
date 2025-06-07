@@ -19,6 +19,10 @@
 
 # Go workspace file
 go.work
+vendor/
+rapidyenc/rapidyenc
+rapidyenc/librapidyenc.a
+rapidyenc/librapidyenc.dll
 
 # test files
 test*.*
@@ -40,6 +44,7 @@ test/
 nzbs/tmp*
 nzbs/test*
 provider.json
+NZBreX
 
 # github codespace
 oryxBuildBinary

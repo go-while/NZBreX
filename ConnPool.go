@@ -873,13 +873,13 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 		txSpeed, txMbps := ConvertSpeed(int64(tmpTX), PrintStats)
 		dlPerc := int(float64(totalRX) / float64(byteSize) * 100)
 		upPerc := int(float64(totalTX) / float64(byteSize) * 100)
-		printSpeedTable(dlPerc, upPerc, totalRX, totalTX, byteSize, rxSpeed, txSpeed, rxMbps, txMbps, name, group)
+		printSpeedTable(dlPerc, upPerc, totalRX, totalTX, rxSpeed, txSpeed, rxMbps, txMbps, name, group)
 
 	}
 	return nil
 }
 
-func printSpeedTable(dlPerc, upPerc int, totalRX uint64, totalTX uint64, byteSize int64, rxSpeed int64, txSpeed int64, rxMbps float64, txMbps float64, provider string, group string) {
+func printSpeedTable(dlPerc, upPerc int, totalRX uint64, totalTX uint64, rxSpeed int64, txSpeed int64, rxMbps float64, txMbps float64, provider string, group string) {
 	// Clear, modern, minimalistic CLI style
 	roooow := " │ %s │ %3d%% │  %5d MiB  │  %s%6d KiB/s  │  %6.1f Mbps  │  %-9s #%-6s \n"
 	if txSpeed > 0 {

@@ -7,7 +7,9 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"time"
 
+	"github.com/go-while/NZBreX/rapidyenc"
 	prof "github.com/go-while/go-cpu-mem-profiler"
 )
 
@@ -30,14 +32,16 @@ func ParseFlags() {
 	flag.IntVar(&cfg.opt.CRW, "crw", DefaultCacheRW, "sets number of Cache Reader and Writer routines to equal amount")
 	// header and yenc
 	flag.BoolVar(&cfg.opt.CleanHeaders, "cleanhdr", true, "[true|false] removes unwanted headers. only change this if you know why! (default: true) ")
-	flag.StringVar(&cfg.opt.CleanHeadersFile, "cleanhdrfile", "", "loads unwanted headers to cleanup from /path/to/cleanHeaders.txt")
-	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false)")
-	flag.IntVar(&cfg.opt.YencTest, "yenctest", 2, "select mode 1 (bytes) or 2 (lines) or 3 (direct) to use in -crc32. (experimental/testing) mode 2 should use less mem and 3 is experimental. (default: 2)")
-	flag.IntVar(&cfg.opt.YencCpu, "yenccpu", 0, fmt.Sprintf("limits parallel decoding with -crc32=true. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
-	flag.IntVar(&cfg.opt.YencAsyncCpu, "yencasync", 64, fmt.Sprintf("limits async parallel decoding with -crc32=true and -yenctest=3. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
-	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (experimental/testing) (default: false)")
-	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (experimental/testing) (default: false)")
-	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (experimental/testing) (default: false)")
+	flag.StringVar(&cfg.opt.CleanHeadersFile, "cleanhdrfile", "", "loads unwanted headers to cleanup from /path/to/cleanHeaders.txt (default: empty = use default headers) !! only use this header file option if you know what you do and why !!")
+	flag.BoolVar(&cfg.opt.YencCRC, "crc32", false, "[true|false] checks crc32 of articles on the fly while downloading (default: false) (experimental/testing)")
+	flag.IntVar(&cfg.opt.YencTest, "yenctest", 4, "select mode 1 (bytes) or 2 (lines) or 3 (lines async) or 4 (rapidyenc async) to use in -crc32. mode 1 is oldschool and mode 2 should use less mem than mode 1. new mode 3+4 need testing (default: 4) (experimental/testing)")
+	flag.IntVar(&cfg.opt.YencCpu, "yenccpu", 0, fmt.Sprintf("limits parallel decoding and final merging with -crc32=true. 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
+	flag.IntVar(&cfg.opt.YencAsyncCpu, "yencasync", 64, fmt.Sprintf("limits async parallel decoding with -crc32=true and -yenctest=(3 or 4). 0 defaults to runtime.NumCPU() here=%d (experimental/testing)", runtime.NumCPU()))
+	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (default: false) (experimental/testing) ")
+	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (default: false) (experimental/testing)")
+	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (default: false) (experimental/testing)")
+	flag.IntVar(&cfg.opt.RapidYencBufSize, "rapidyencbufsize", rapidyenc.DefaultBufSize, "set only if you know what you do! (default: 4K) (experimental/testing)")
+	flag.BoolVar(&cfg.opt.DoubleCheckRapidYencCRC, "doublecheckrapidyenccrc", false, "(experimental/testing)")
 	// debug output flags
 	flag.BoolVar(&runProf, "prof", false, "starts profiler (for debugging)\n       @mem: waits 20sec and runs 120 sec\n       @cpu: waits 20 sec and captures to end")
 	flag.StringVar(&webProf, "profweb", "", "start profiling webserver at: '[::]:61234' or '127.0.0.1:61234' (default: empty = dont start websrv)")
@@ -64,6 +68,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.DebugCR, "debugcr", false, "[true|false] debug check routine (default: false)")
 	flag.BoolVar(&cfg.opt.DebugDR, "debugdr", false, "[true|false] debug downs routine (default: false)")
 	flag.BoolVar(&cfg.opt.DebugUR, "debugur", false, "[true|false] debug reups routine (default: false)")
+	flag.BoolVar(&cfg.opt.DebugRapidYenc, "debugrapidyenc", false, "[true|false] debug rapidyenc (default: false)")
 	// rate limiter
 	flag.IntVar(&cfg.opt.SloMoC, "slomoc", 0, "SloMo'C' limiter sleeps N milliseconds before checking")
 	flag.IntVar(&cfg.opt.SloMoD, "slomod", 0, "SloMo'D' limiter sleeps N milliseconds before downloading")
@@ -71,6 +76,7 @@ func ParseFlags() {
 	// no need to change this
 	flag.IntVar(&cfg.opt.MaxArtSize, "maxartsize", DefaultMaxArticleSize, "limits article size to 1M (mostly articles have ~700K only)")
 	flag.BoolVar(&testmode, "zzz-shr-testmode", false, "[true|false] only used to test compilation on self-hosted runners (default: false)")
+	flag.BoolVar(&testrapidyenc, "testrapidyenc", false, "[true|false] will test rapidyenc testfiles on boot and exit (default: false)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
 	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
@@ -85,28 +91,99 @@ func ParseFlags() {
 		Prof = prof.NewProf()
 		RunProf()
 	}
+	// test rapidyenc decoder
+	if testrapidyenc {
+		// this is only for testing rapidyenc decoder
+		dlog(always, "Testing rapidyenc decoder...")
+		decoder := rapidyenc.AcquireDecoder()
+		decoder.SetDebug(true, true)
+		segId := "any@thing.net"
+		decoder.SetSegmentId(&segId)
+		rapidyenc.ReleaseDecoder(decoder)             // release the decoder
+		decoder = nil                                 // clear memory
+		errs := rapidyenc.TestRapidyencDecoderFiles() // test rapidyenc decoder with files
+		if len(errs) != 0 {
+			dlog(always, "ERROR testing rapidyenc decoder: %v", errs)
+			os.Exit(1)
+		}
+		dlog(always, "rapidyenc decoder successfully initialized! quitting now...")
+		if runProf {
+			Prof.StopCPUProfile() // stop cpu profiling
+			time.Sleep(time.Second)
+		}
+		os.Exit(0) // exit after testing rapidyenc decoder
+	}
+
+	cacheON = (cfg.opt.Cachedir != "" && cfg.opt.CRW > 0)
+	if cacheON {
+		cache = NewCache(
+			cfg.opt.Cachedir,
+			cfg.opt.CRW,
+			cfg.opt.CheckOnly,
+			cfg.opt.MaxArtSize,
+			cfg.opt.YencWrite,
+			cfg.opt.DebugCache)
+
+		if cache == nil {
+			dlog(always, "ERROR Cache failed... is nil!")
+			os.Exit(1)
+		}
+		if !cache.MkSubDir("test") {
+			os.Exit(1)
+		}
+	}
 
 	if cfg.opt.UploadLater && cfg.opt.Cachedir == "" {
-		dlog(always, "ERROR : you can not use -uploadlater without -cd=/path/to/cache/dir because it needs a cache dir!")
+		dlog(always, "ERROR: you can not use -uploadlater without -cd=/path/to/cache/dir because it needs a cache dir!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.LogAppend && cfg.opt.LogOld > 0 {
-		dlog(always, "ERROR : you can not use -logappend with -logold > 0 because it will not rotate logs!")
+		dlog(always, "ERROR: you can not use -logappend with -logold > 0 because it will not rotate logs!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.ByPassSTAT && (cfg.opt.CheckFirst || cfg.opt.CheckOnly) {
-		dlog(always, "ERROR : you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
+		dlog(always, "ERROR: you can not use -bypassstat with -checkfirst and/or -checkonly because both check options use STAT cmd!")
 		os.Exit(1)
 	}
 
 	if cfg.opt.YencCRC {
-		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 3 {
-			dlog(always, "ERROR : you can not use -crc32 with -yenctest=%d because it must be 1 or 2 or 3 (default: 2)", cfg.opt.YencTest)
+
+		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 4 {
+			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1-4 (default: 2)", cfg.opt.YencTest)
 			os.Exit(1)
 		}
-	}
+
+		if cfg.opt.YencTest == 4 {
+			dlog(always, "Using rapidyenc for yenc decoding!")
+		}
+
+		if cfg.opt.YencCpu < 0 {
+			dlog(always, "ERROR: you can not use -yenccpu=%d because it must be >= 0 (default: 0)", cfg.opt.YencCpu)
+			os.Exit(1)
+		}
+
+		if (cfg.opt.YencWrite || cfg.opt.YencMerge) && !cacheON {
+			dlog(always, "ERROR: you can not use -yencout=true or -yencmerge=true without -cd=/path/to/cache/dir because it needs a cache dir!")
+			os.Exit(1)
+		}
+
+		if cfg.opt.RapidYencBufSize != rapidyenc.DefaultBufSize {
+			// yenc line+CRLF = 128+2 = 130 bytes minimum
+			if cfg.opt.RapidYencBufSize < 130 {
+				dlog(always, "ERROR: you can not use -rapidyencbufsize=%d because it must be at least 130 (default: %d)", cfg.opt.RapidYencBufSize, rapidyenc.DefaultBufSize)
+				os.Exit(1)
+			}
+			rapidyenc.DefaultBufSize = cfg.opt.RapidYencBufSize
+			dlog(always, "Using rapidyenc with bufsize=%d", rapidyenc.DefaultBufSize)
+		}
+
+	} else {
+		cfg.opt.YencTest = 0      // reset to 0 if not using YencCRC
+		cfg.opt.YencWrite = false // reset to false if not using YencCRC
+		cfg.opt.YencMerge = false // reset to false if not using YencCRC
+	} // end if YencCRC
 
 	if cfg.opt.MaxArtSize < 1 {
 		cfg.opt.MaxArtSize = 1 // set minimum article size to 1 byte who ever wants this!
@@ -129,25 +206,6 @@ func ParseFlags() {
 			log.SetOutput(io.Discard) // DEBUG
 		}
 	} // end debugs
-
-	cacheON = (cfg.opt.Cachedir != "" && cfg.opt.CRW > 0)
-	if cacheON {
-		cache = NewCache(
-			cfg.opt.Cachedir,
-			cfg.opt.CRW,
-			cfg.opt.CheckOnly,
-			cfg.opt.MaxArtSize,
-			cfg.opt.YencWrite,
-			cfg.opt.DebugCache)
-
-		if cache == nil {
-			dlog(always, "ERROR Cache failed... is nil!")
-			os.Exit(1)
-		}
-		if !cache.MkSubDir("test") {
-			os.Exit(1)
-		}
-	}
 
 	if headers, err := LoadHeadersFromFile(cfg.opt.CleanHeadersFile); headers != nil {
 		cleanHeader = headers

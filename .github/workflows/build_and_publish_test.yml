@@ -1,19 +1,19 @@
-name: "Self-Hosted Runners"
+name: "TEST Self-Hosted Runners"
 
 on:
   push:
     branches:
-      - 'v0.0.3-testing'
+      - 'testing'
     tags:
-      - "test*"
+      - "test_rapidyenc"
   release:
     types: [published]
   workflow_dispatch:
   repository_dispatch:
   pull_request:
     branches:
-      #- main
-      - "test*"
+      - main
+      #- "test*"
 
 permissions:
   contents: write
@@ -26,7 +26,8 @@ jobs:
       - self-hosted
       - ${{ matrix.runner_label }}
     strategy:
-      fail-fast: true
+      fail-fast: false
+      max-parallel: 8
       matrix:
         include:
           # Alpine Linux cross-builds (musl)
@@ -43,90 +44,90 @@ jobs:
             name: alpine-arm64
             libc: musl
           # i386
-          - runner_label: ubu2204
-            os: linux
-            arch: 386
-            name: alpine-i386
-            libc: musl
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: 386
+          #  name: alpine-i386
+          #  libc: musl
           # armv7
-          - runner_label: ubu2204
-            os: linux
-            arch: arm
-            name: alpine-armv7
-            libc: musl
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: arm
+          #  name: alpine-armv7
+          #  libc: musl
 
           # FreeBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: freebsd
-            arch: amd64
-            name: freebsd-amd64
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: amd64
+          #  name: freebsd-amd64
           # arm64
-          - runner_label: ubu2204
-            os: freebsd
-            arch: arm64
-            name: freebsd-arm64
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: arm64
+          #  name: freebsd-arm64
           # i386
-          - runner_label: ubu2204
-            os: freebsd
-            arch: 386
-            name: freebsd-i386
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: 386
+          #  name: freebsd-i386
           # armv7
-          - runner_label: ubu2204
-            os: freebsd
-            arch: arm
-            name: freebsd-armv7
+          #- runner_label: ubu2204
+          #  os: freebsd
+          #  arch: arm
+          #  name: freebsd-armv7
 
           # OpenBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: openbsd
-            arch: amd64
-            name: openbsd-amd64
-          # arm64
-          - runner_label: ubu2204
-            os: openbsd
-            arch: arm64
-            name: openbsd-arm64
-          # i386
-          - runner_label: ubu2204
-            os: openbsd
-            arch: 386
-            name: openbsd-i386
+          #- runner_label: ubu2204
+          #  os: openbsd
+          #  arch: amd64
+          #  name: openbsd-amd64
+          ## arm64
+          #- runner_label: ubu2204
+          #  os: openbsd
+          #  arch: arm64
+          #  name: openbsd-arm64
+          ## i386
+          #- runner_label: ubu2204
+          #  os: openbsd
+          #  arch: 386
+          #  name: openbsd-i386
 
           # NetBSD cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: netbsd
-            arch: amd64
-            name: netbsd-amd64
-          # arm64
-          - runner_label: ubu2204
-            os: netbsd
-            arch: arm64
-            name: netbsd-arm64
-          # i386
-          - runner_label: ubu2204
-            os: netbsd
-            arch: 386
-            name: netbsd-i386
-          # armv7
-          - runner_label: ubu2204
-            os: netbsd
-            arch: arm
-            name: netbsd-armv7
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: amd64
+          #  name: netbsd-amd64
+          ## arm64
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: arm64
+          #  name: netbsd-arm64
+          ## i386
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: 386
+          #  name: netbsd-i386
+          ## armv7
+          #- runner_label: ubu2204
+          #  os: netbsd
+          #  arch: arm
+          #  name: netbsd-armv7
 
           # macOS cross-builds
           # amd64
-          - runner_label: ubu2204
-            os: darwin
-            arch: amd64
-            name: macos-amd64
-          # arm64
-          - runner_label: ubu2204
-            os: darwin
-            arch: arm64
-            name: macos-arm64
+          #- runner_label: ubu2204
+          #  os: darwin
+          #  arch: amd64
+          #  name: macos-amd64
+          ## arm64
+          #- runner_label: ubu2204
+          #  os: darwin
+          #  arch: arm64
+          #  name: macos-arm64
 
           # Windows cross-builds
           # amd64
@@ -135,15 +136,15 @@ jobs:
             arch: amd64
             name: windows-amd64
           # arm64
-          - runner_label: ubu2204
-            os: windows
-            arch: arm64
-            name: windows-arm64
+          #- runner_label: ubu2204
+          #  os: windows
+          #  arch: arm64
+          #  name: windows-arm64
           # i386
-          - runner_label: ubu2204
-            os: windows
-            arch: 386
-            name: windows-i386
+          #- runner_label: ubu2204
+          #  os: windows
+          #  arch: 386
+          #  name: windows-i386
 
           # Debian 10-12 self-hosted builds amd64
           # amd64
@@ -183,39 +184,39 @@ jobs:
 
           # Debian 10-12 self-hosted builds 32-bit ARM
           # armv7
-          - runner_label: deb10
-            os: linux
-            arch: arm
-            name: debian-10-armv7
-            libc: glibc
-          - runner_label: deb11
-            os: linux
-            arch: arm
-            name: debian-11-armv7
-            libc: glibc
-          - runner_label: deb12
-            os: linux
-            arch: arm
-            name: debian-12-armv7
-            libc: glibc
+          #- runner_label: deb10
+          #  os: linux
+          #  arch: arm
+          #  name: debian-10-armv7
+          #  libc: glibc
+          #- runner_label: deb11
+          #  os: linux
+          #  arch: arm
+          #  name: debian-11-armv7
+          #  libc: glibc
+          #- runner_label: deb12
+          #  os: linux
+          #  arch: arm
+          #  name: debian-12-armv7
+          #  libc: glibc
 
           # Debian 10-12 self-hosted builds i386
           # i386
-          - runner_label: deb10
-            os: linux
-            arch: 386
-            name: debian-10-i386
-            libc: glibc
-          - runner_label: deb11
-            os: linux
-            arch: 386
-            name: debian-11-i386
-            libc: glibc
-          - runner_label: deb12
-            os: linux
-            arch: 386
-            name: debian-12-i386
-            libc: glibc
+          #- runner_label: deb10
+          #  os: linux
+          #  arch: 386
+          #  name: debian-10-i386
+          #  libc: glibc
+          #- runner_label: deb11
+          #  os: linux
+          #  arch: 386
+          #  name: debian-11-i386
+          #  libc: glibc
+          #- runner_label: deb12
+          #  os: linux
+          #  arch: 386
+          #  name: debian-12-i386
+          #  libc: glibc
 
           # Ubuntu 20.04 - 24.04 self-hosted builds amd64
           # amd64
@@ -255,41 +256,58 @@ jobs:
 
           # Ubuntu 20.04 - 24.04 self-hosted builds 32-bit ARM
           # armv7
-          - runner_label: ubu2004
-            os: linux
-            arch: arm
-            name: ubuntu-20.04-armv7
-            libc: glibc
-          - runner_label: ubu2204
-            os: linux
-            arch: arm
-            name: ubuntu-22.04-armv7
-            libc: glibc
-          - runner_label: ubu2404
-            os: linux
-            arch: arm
-            name: ubuntu-24.04-armv7
-            libc: glibc
+          #- runner_label: ubu2004
+          #  os: linux
+          #  arch: arm
+          #  name: ubuntu-20.04-armv7
+          #  libc: glibc
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: arm
+          #  name: ubuntu-22.04-armv7
+          #  libc: glibc
+          #- runner_label: ubu2404
+          #  os: linux
+          #  arch: arm
+          #  name: ubuntu-24.04-armv7
+          #  libc: glibc
 
           # Ubuntu 20.04 - 24.04 self-hosted builds i386
           # i386
-          - runner_label: ubu2004
-            os: linux
-            arch: 386
-            name: ubuntu-20.04-i386
-            libc: glibc
-          - runner_label: ubu2204
-            os: linux
-            arch: 386
-            name: ubuntu-22.04-i386
-            libc: glibc
-          - runner_label: ubu2404
-            os: linux
-            arch: 386
-            name: ubuntu-24.04-i386
-            libc: glibc
+          #- runner_label: ubu2004
+          #  os: linux
+          #  arch: 386
+          #  name: ubuntu-20.04-i386
+          #  libc: glibc
+          #- runner_label: ubu2204
+          #  os: linux
+          #  arch: 386
+          #  name: ubuntu-22.04-i386
+          #  libc: glibc
+          #- runner_label: ubu2404
+          #  os: linux
+          #  arch: 386
+          #  name: ubuntu-24.04-i386
+          #  libc: glibc
 
     steps:
+      - name: Show actor
+        run: echo "Triggered by ${{ github.actor }}"
+
+      # Block unallowed push users
+      - name: Block unallowed push user
+        if: github.event_name == 'push' && github.actor != 'go-while'
+        run: |
+          echo "Push not allowed for user ${{ github.actor }}"
+          exit 1
+
+      # Block unallowed PR users
+      - name: Block unallowed PR user
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
+        run: |
+          echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
+          exit 1
+
       - name: "@Start Clean directory"
         run: |
           echo "deleting workspace"
@@ -333,14 +351,48 @@ jobs:
 #      - name: "Restore go cache"
 #        run: runner/go-cache-restore.sh
 
-      # Run tests with race detector for supported platforms
-      - name: "Run race detector tests (amd64/linux only)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64'
-        run: go test -race ./...
+      - name: "clone rapidyenc"
+        run: cd rapidyenc && ./clone_rapidyenc.sh
 
-      - name: "Run normal tests (other platforms)"
-        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
-        run: go test ./...
+      - name: "compile rapidyenc linux-amd64"
+        if: matrix.os == 'linux' && matrix.arch == 'amd64'
+        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
+
+      #- name: "compile rapidyenc linux-386"
+      #  if: matrix.os == 'linux' && matrix.arch == '386'
+      #  run: cd rapidyenc && ./build_rapidyenc_linux-386.sh
+
+      - name: "compile rapidyenc windows-amd64"
+        if: matrix.os == 'windows' && matrix.arch == 'amd64'
+        run: |
+          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
+          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
+      - name: "compile rapidyenc linux-arm64"
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          cd rapidyenc && ./build_rapidyenc_linux-arm64.sh
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
+      #- name: "Set up Win386 cross-compiler"
+      #  if: matrix.goarch == '386' && matrix.os == 'windows'
+      #  run: |
+      #    cd rapidyenc && ./build_rapidyenc_win_386.sh
+      #    echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+      #    echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
+      #    echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
+      # Run tests with race detector for supported platforms
+      #- name: "Run race detector tests (amd64/linux only)"
+      #  if: matrix.os == 'linux' && matrix.arch == 'amd64'
+      #  run: go test -race ./...
+
+      #- name: "Run normal tests (other platforms)"
+      #  if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
+      #  run: go test ./...
 
       - name: "Set GaRuS Variables"
         id: vars
@@ -353,10 +405,11 @@ jobs:
         run: |
           echo "COMPILER=SHR" >> "$GITHUB_ENV"
           # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
+          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
           if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
+            VERSION="${SAFE_VERSION}"
           else
-            VERSION="${GITHUB_REF_NAME}-SNAPSHOT"
+            VERSION="${SAFE_VERSION}-SNAPSHOT"
           fi
           # Strip leading 'v' if present
           VERSION="${VERSION#v}"
@@ -380,7 +433,7 @@ jobs:
             binary_name=NZBreX
           fi
           echo "BINARY=$binary_name" >> $GITHUB_ENV
-          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.REF_NAME }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
+          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
             exit 1
@@ -404,14 +457,14 @@ jobs:
           zip -j "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* cleanHeaders.txt provider.sample.json provider.ygg.json
           #
           # .tgz (tar + gzip)
-          #tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
-          #  -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
-          #  -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
+          tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
+            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
+            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
           #
           # .xz (tar + xz)
-          #tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
-          #  -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
-          #  -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
+          tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
+            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
+            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json
           #
           # done packing
           #
@@ -420,7 +473,7 @@ jobs:
           matrix_distro="${{ matrix.distro }}"
           if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" -o -z "${{ matrix.libc }}" ]; then
             mkdir -p builds/${{ matrix.name }}/DEBIAN
-            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+            VERSION=$(echo "${{ env.VERSION }}" | sed 's/^v//')
             if [[ ! $VERSION =~ ^[0-9] ]]; then
               VERSION="0.0.$(date +%s)-$VERSION"
             fi
@@ -452,7 +505,7 @@ jobs:
               test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
               if curl --silent -f -F "file=@$file$FNstr" \
                    -H "X-Git-Repo: ${{ github.repository }}" \
-                   -H "X-Git-Ref: ${{ github.ref_name }}" \
+                   -H "X-Git-Ref: ${{ env.VERSION }}" \
                    -H "X-Git-SHA7: ${{ env.SHA7 }}" \
                    -H "X-Git-Comp: ${{ env.COMPILER }}" \
                    -H "X-Git-MATRIX: ${{ matrix.name }}" \
@@ -491,6 +544,21 @@ jobs:
           cp -v "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
+          #
+          DIST="dist.${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.$(hostname).tgz"
+          if [ -e "$DIST" ]; then
+            echo "$DIST already exists. Skipping tar."
+          else
+            ls -lha
+            tar -czvf "$DIST" builds/
+            echo "Created $DIST from builds/"
+            du -b "$DIST"; du -hs "$DIST";
+            sha256sum "$DIST" > "${DIST}.sha256sum"
+            sha512sum "$DIST" > "${DIST}.sha512sum"
+            upload_with_retry "${DIST}.sha512sum"
+            upload_with_retry "${DIST}.sha256sum"
+            upload_with_retry "${DIST}"
+          fi
 
 
 #      - name: "Upload Binary to github blob storage"
@@ -501,17 +569,17 @@ jobs:
 #          retention-days: 1
 #          if-no-files-found: warn
 
-#      - name: "Upload Release Assets to github"
-#        if: github.event_name == 'release'
-#        uses: softprops/action-gh-release@v2
-#        with:
-#          files: |
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
-#            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
+      - name: "Upload Release Assets to github"
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
 
 #      - name: "Backup go cache"
 #        run: runner/go-cache-backup.sh

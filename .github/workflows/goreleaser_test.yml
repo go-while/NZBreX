@@ -3,15 +3,15 @@ name: "TEST Self-Hosted GoReleaser"
 on:
   push:
     branches:
-      - 'v0.0.3-testing'
+      - 'devtesting'
     tags:
-      - "test*"
+      - "test_goreleaser"
   workflow_dispatch:
   repository_dispatch:
   pull_request:
     branches:
       #- main
-      - "test*"
+      - "test_goreleaser"
 
 permissions:
   contents: write
@@ -24,6 +24,23 @@ jobs:
 #    env:
 #      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Show actor
+        run: echo "Triggered by ${{ github.actor }}"
+
+      # Block unallowed push users
+      - name: Block unallowed push user
+        if: github.event_name == 'push' && github.actor != 'go-while'
+        run: |
+          echo "Push not allowed for user ${{ github.actor }}"
+          exit 1
+
+      # Block unallowed PR users
+      - name: Block unallowed PR user
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
+        run: |
+          echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
+          exit 1
+
       - name: "@Start Clean directory"
         run: |
           echo "deleting workspace"
@@ -42,6 +59,12 @@ jobs:
       #- name: "Restore go cache"
       #  run: runner/go-cache-restore.sh
 
+      - name: "clone rapidyenc"
+        run: cd rapidyenc && ./clone_rapidyenc.sh
+
+      - name: "compile rapidyenc"
+        run: cd rapidyenc && ./build_rapidyenc.sh
+
       - name: "Run GoReleaser (Test Build)"
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -50,14 +73,17 @@ jobs:
           args: release --clean --snapshot
 
       - name: "Set GaRuS Variables"
-        run: echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        run: |
+          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
+          echo "GITHUB_SHA7=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          echo "VERSION=${SAFE_VERSION}" >> $GITHUB_ENV
 
       - name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
         run: .goreleaser/post_upload_GaRuS.sh
         env:
           BUILD_TEST_UPLOAD_TOKEN: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REF_NAME: ${{ env.VERSION }}
           GITHUB_SHA7: ${{ env.GITHUB_SHA7 }}
           COMPILER: "GOR"
 

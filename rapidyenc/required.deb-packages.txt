@@ -1,0 +1,5 @@
+# linux-amd64, linux-arm64, darwin-amd64, windows-amd64
+apt-get install clang gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu mingw-w64 gcc-mingw-w64-x86-64 build-essential cmake ca-certificates curl g++-mingw-w64-x86-64 g++-mingw-w64-i686 g++-aarch64-linux-gnu gcc-arm-linux-gnueabi git dpkg-dev musl-tools wget
+
+# i386 libs (untested)
+# gcc-multilib g++-multilib

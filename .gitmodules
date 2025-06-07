@@ -1,0 +1,3 @@
+[submodule "rapidyenc"]
+	path = rapidyenc
+	url = https://github.com/mnightingale/rapidyenc.git

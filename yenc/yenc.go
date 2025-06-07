@@ -11,7 +11,6 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
-	"math"
 	"strconv"
 	"strings"
 )
@@ -274,7 +273,11 @@ func (p *Part) Validate(segId *string) error {
 		return fmt.Errorf("error in yenc.Part.Validate Number=%d: Body size %d did not match expected size %d bodyLarge=%t bodySmall=%t diff=%d", p.Number, len(p.Body), p.Size, bodyLarge, bodySmall, diff)
 	}
 	// crc check
-	if p.Crc32 > 0 || p.crcHash == nil {
+	if p.Crc32 > 0 {
+		if p.crcHash == nil {
+			p.crcHash = crc32.NewIEEE()
+			p.crcHash.Write(p.Body)
+		}
 		if sum := p.crcHash.Sum32(); sum != p.Crc32 {
 			p.BadCRC = true
 			log.Printf("CRC32 segId='%s' part=%d expected %x got %x len(p.Body)=%d", *segId, p.Number, p.Crc32, sum, len(p.Body))
@@ -468,7 +471,7 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 				if Debug1 {
 					log.Printf("yenc.Decoder d.Buf =yend d.Part.Body=%d", len(d.Part.Body))
 				}
-				return d.ParseTrailer(string(line))
+				return d.ParseTrailerNew(string(line))
 			}
 			// decode
 			b := d.DecodeLine(line)
@@ -507,7 +510,7 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 			if Debug3 {
 				log.Printf("yenc.Decoder yenctest=3 found =yend seg.Id='%s' d.Part.Body=%d", *d.SegId, len(d.Part.Body))
 			}
-			return d.ParseTrailer(line)
+			return d.ParseTrailerNew(line)
 		}
 		switch SimdMode {
 		case 0:
@@ -523,8 +526,8 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 			}
 		case 1:
 			// Decode the line using SIMD
-			if decoded, ok := DecodeLineSIMD([]byte(line)); !ok {
-				return fmt.Errorf("error yenc.Decoder yenctest=3 SimdMode=1 DecodeLineSIMD")
+			if decoded, ok := DecodeLineSIMD1([]byte(line)); !ok {
+				return fmt.Errorf("error yenc.Decoder yenctest=3 SimdMode=1 DecodeLineSIMD1")
 			} else {
 				// Update the part body with the decoded data
 				d.Part.Body = append(d.Part.Body, decoded...)
@@ -534,9 +537,8 @@ func (d *Decoder) ReadBody(line string, byline bool) error {
 			}
 		case 2:
 			// Decode the line using SIMD2
-			decoded := []byte(line)
 			// DecodeLineSIMD2 returns true if successful
-			if ok := DecodeLineSIMD2(decoded); !ok {
+			if decoded, ok := DecodeLineSIMD2([]byte(line)); !ok {
 				return fmt.Errorf("error yenc.Decoder mode=3 SimdMode=2 DecodeLineSIMD2")
 			} else {
 				// Update the part body with the decoded data
@@ -599,8 +601,16 @@ func (d *Decoder) DecodeLineNew(line string) []byte {
 	return decoded
 }
 
-func (d *Decoder) ParseTrailer(line string) error {
-	// split on space for headers
+// parseUint32 parses an unsigned integer string in the given base, ensuring it fits in a uint32.
+func parseUint32(s string, base int) (uint32, error) {
+	v, err := strconv.ParseUint(s, base, 32)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(v), nil
+}
+
+func (d *Decoder) ParseTrailerNew(line string) error {
 	parts := strings.Split(line, " ")
 	for i := range parts {
 		kv := strings.Split(strings.TrimSpace(parts[i]), "=")
@@ -609,40 +619,43 @@ func (d *Decoder) ParseTrailer(line string) error {
 		}
 		switch kv[0] {
 		case "size":
+			// parse size as int64
 			if size, err := strconv.ParseInt(kv[1], 10, 64); err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: size parse error '%s' err='%v'", kv[1], err)
 			} else {
 				d.Part.Size = size
 			}
 		case "pcrc32":
-			if crc64, err := strconv.ParseUint(kv[1], 16, 64); err != nil {
+			// parse pcrc32 as uint32 in base 16
+			// this is the part crc32
+			crc, err := parseUint32(kv[1], 16)
+			if err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: pcrc32 parse error '%s' err='%v'", kv[1], err)
-			} else if crc64 > math.MaxUint32 {
-				return fmt.Errorf("error in yenc.ParseTrailer: pcrc32 value '%s' exceeds uint32 range", kv[1])
-			} else {
-				d.Part.Crc32 = uint32(crc64)
 			}
+			d.Part.Crc32 = crc
 		case "crc32":
-			if crc64, err := strconv.ParseUint(kv[1], 16, 64); err != nil {
+			// parse crc32 as uint32 in base 16
+			// this is the full crc32 of the part body
+			crc, err := parseUint32(kv[1], 16)
+			if err != nil {
 				return fmt.Errorf("error in yenc.ParseTrailer: crc32 parse error '%s' err='%v'", kv[1], err)
-			} else if crc64 > math.MaxUint32 {
-				return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
-			} else {
-				if crc64 > math.MaxUint32 {
-					return fmt.Errorf("error in yenc.ParseTrailer: crc32 value '%s' exceeds uint32 range", kv[1])
-				}
-				d.Fullcrc32 = uint32(crc64)
-				d.Part.Crc32 = uint32(crc64) // why it has not been set by default... i dont know
 			}
+			d.Fullcrc32 = crc
 		case "part":
-			partNum, _ := strconv.Atoi(kv[1])
+			// parse part number as int
+			// this is the part number of the part trailer
+			// it is used to check the part order
+			partNum, err := strconv.Atoi(kv[1])
+			if err != nil {
+				return fmt.Errorf("error in yenc.ParseTrailer: part parse error '%s' err='%v'", kv[1], err)
+			}
 			if partNum != d.Part.Number {
 				return fmt.Errorf("yenc: =yend header out of order expected part %d got %d", d.Part.Number, partNum)
 			}
 		}
 	}
 	return nil
-}
+} // end func ParseTrailer
 
 func (d *Decoder) Validate() error {
 	if Debug1 {
@@ -666,7 +679,7 @@ func Sub42Bulk(dst, src []byte) {
 	}
 }
 
-func DecodeLineSIMD2(line []byte) bool {
+func DecodeLineSIMD2(line []byte) ([]byte, bool) {
 	read := 0
 	write := 0
 
@@ -686,7 +699,7 @@ func DecodeLineSIMD2(line []byte) bool {
 		if read < len(line) && line[read] == '=' {
 			if read+1 >= len(line) {
 				// Incomplete escape
-				return false
+				return nil, false
 			}
 			// Escaped byte: subtract 42 and 64
 			line[write] = (line[read+1] - 42 - 64) & 0xFF
@@ -694,12 +707,11 @@ func DecodeLineSIMD2(line []byte) bool {
 			read += 2
 		}
 	}
-	// Truncate to decoded length
-	line = line[:write]
-	return true
-} // end func DecodeLineSIMD2 (written by AI! GPT-4.1)
+	// Truncate to decoded length and return
+	return line[:write], true
+}
 
-func DecodeLineSIMD(line []byte) ([]byte, bool) {
+func DecodeLineSIMD1(line []byte) ([]byte, bool) {
 	decoded := make([]byte, 0, len(line))
 	i := 0
 	for i < len(line) {
@@ -728,7 +740,7 @@ func DecodeLineSIMD(line []byte) ([]byte, bool) {
 		}
 	}
 	return decoded, true
-} // end func DecodeLineSIMD (written by AI! GPT-4.1)
+} // end func DecodeLineSIMD1 (written by AI! GPT-4.1)
 
 func (d *Decoder) DecodeYencLinesSIMD() error {
 	// Iterate over each line of the article
@@ -738,7 +750,7 @@ func (d *Decoder) DecodeYencLinesSIMD() error {
 		}
 		if strings.HasPrefix(*line, "=yend") {
 			//log.Printf("... parseTrailer")
-			if err := d.ParseTrailer(*line); err != nil {
+			if err := d.ParseTrailerNew(*line); err != nil {
 				return fmt.Errorf("error parsing trailer at line %d: %w", i, err)
 			}
 			continue
@@ -746,7 +758,8 @@ func (d *Decoder) DecodeYencLinesSIMD() error {
 
 		switch SimdMode {
 		case 1:
-			if decoded, ok := DecodeLineSIMD([]byte(*line)); !ok {
+			// Decode the line using SIMD1
+			if decoded, ok := DecodeLineSIMD1([]byte(*line)); !ok {
 				return fmt.Errorf("error decoding line %d", i)
 			} else {
 				// Update the part body with the decoded data
@@ -758,18 +771,16 @@ func (d *Decoder) DecodeYencLinesSIMD() error {
 
 		case 2:
 			if SimdMode == 2 {
-				// Decode the line using SIMD
-				decoded := []byte(*line)
 				// Decode the line using SIMD2
-				if !DecodeLineSIMD2(decoded) {
+				if decoded, ok := DecodeLineSIMD2([]byte(*line)); !ok {
 					return fmt.Errorf("error decoding line %d: incomplete escape sequence", i)
+				} else {
+					// Update the part body with the decoded data
+					d.Part.Body = append(d.Part.Body, decoded...)
+					// Update the crc hash
+					d.Part.crcHash.Write(decoded)
+					d.crcHash.Write(decoded)
 				}
-
-				// Update the part body with the decoded data
-				d.Part.Body = append(d.Part.Body, decoded...)
-				// Update the crc hash
-				d.Part.crcHash.Write(decoded)
-				d.crcHash.Write(decoded)
 			}
 		}
 	}
@@ -787,7 +798,7 @@ func (d *Decoder) DecodeYenc() ([]byte, error) {
 		}
 		if strings.HasPrefix(*line, "=yend") {
 			//log.Printf("... parseTrailer")
-			if err := d.ParseTrailer(*line); err != nil {
+			if err := d.ParseTrailerNew(*line); err != nil {
 				return nil, err
 			}
 			continue

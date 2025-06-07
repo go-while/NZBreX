@@ -294,19 +294,26 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	}
 
 	// limits crc32 and yenc processing
-	if cfg.opt.YencCpu <= 0 {
-		cfg.opt.YencCpu = runtime.NumCPU()
-	}
-	if core_chan == nil || cap(core_chan) != cfg.opt.YencCpu {
-		core_chan = make(chan struct{}, cfg.opt.YencCpu)
-		for i := 1; i <= cfg.opt.YencCpu; i++ {
-			core_chan <- struct{}{} // fill chan with empty structs to suck out and return
+	if cfg.opt.YencCRC {
+		if cfg.opt.YencCpu <= 0 {
+			cfg.opt.YencCpu = runtime.NumCPU()
 		}
-	}
-	if async_core_chan == nil || cap(async_core_chan) != cfg.opt.YencAsyncCpu {
-		async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
-		for i := 1; i <= cfg.opt.YencAsyncCpu; i++ {
-			async_core_chan <- struct{}{} // fill chan with empty structs to suck out and return
+		if cfg.opt.YencAsyncCpu <= 0 {
+			cfg.opt.YencAsyncCpu = runtime.NumCPU()
+		}
+		if core_chan == nil || cap(core_chan) != cfg.opt.YencCpu {
+			core_chan = make(chan struct{}, cfg.opt.YencCpu)
+			for i := 1; i <= cfg.opt.YencCpu; i++ {
+				core_chan <- struct{}{} // fill chan with empty structs to suck out and return
+			}
+			dlog(always, "LaunchSession: core_chan=%d", cfg.opt.YencCpu)
+		}
+		if async_core_chan == nil || cap(async_core_chan) != cfg.opt.YencAsyncCpu {
+			async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
+			for i := 1; i <= cfg.opt.YencAsyncCpu; i++ {
+				async_core_chan <- struct{}{} // fill chan with empty structs to suck out and return
+			}
+			dlog(always, "LaunchSession: async_core_chan=%d", cfg.opt.YencAsyncCpu)
 		}
 	}
 	globalmux.Unlock()

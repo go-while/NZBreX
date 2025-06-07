@@ -48,12 +48,13 @@ var (
 	GCounter        *Counter_uint64                  // a global counter
 
 	// flags
-	booted   time.Time // not a flag
-	version  bool      // flag
-	runProf  bool      // flag
-	webProf  string    // flag
-	nzbfile  string    // flag
-	testmode bool      // flag: used to test compilation
+	booted        time.Time // not a flag
+	version       bool      // flag
+	runProf       bool      // flag
+	webProf       string    // flag
+	nzbfile       string    // flag
+	testmode      bool      // flag: used to test compilation
+	testrapidyenc bool      // flag: used to test rapidyenc decoder
 )
 
 func init() {
@@ -65,7 +66,6 @@ func init() {
 	GCounter = NewCounter(10)
 	cfg = &Config{opt: &CFG{}}
 	booted = time.Now()
-
 } // end func init
 
 func main() {
