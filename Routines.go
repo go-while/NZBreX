@@ -266,8 +266,10 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 				item.missingOn[pid] = true
 			case 99932:
 				// got bad_crc
-				item.errorOn[pid] = true
 				item.ignoreDlOn[pid] = true
+				item.missingOn[pid] = true
+				item.errorOn[pid] = true
+				delete(item.availableOn, pid)
 				dlog(always, "CRC32 failed seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
 			default:
 				item.ignoreDlOn[pid] = true
