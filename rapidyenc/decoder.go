@@ -144,6 +144,10 @@ func (d *Decoder) SetDebug(debug1 bool, debug2 bool) {
 	d.debug2 = debug2
 }
 
+func (d *Decoder) SetSegmentId(segId *string) {
+	d.segId = segId
+}
+
 func (d *Decoder) Meta() Meta {
 	return d.m
 }
