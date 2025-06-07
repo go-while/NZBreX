@@ -651,17 +651,19 @@ readlines:
 
 	} // end for readlines
 
-	// case 4: we are done reading lines, close the pipe writer
+	// case 4: we are done reading lines, close the pipe writer from rapidyenc decoder
 	if pipeWriter != nil {
-		pipeWriter.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
-		pipeWriter.Close()                   // <-- THIS IS CRUCIAL!
-		err = <-ryDoneChan                   // wait for decoder to finish
+		if _, err := pipeWriter.Write([]byte(DOT + CRLF)); err != nil { // write the final dot to the pipe
+			dlog(always, "ERROR readDotLines: pipeWriter.Write failed: err='%v'", err)
+			brokenYenc = true
+		}
+		pipeWriter.Close() // <-- THIS IS CRUCIAL!
+		err = <-ryDoneChan // wait for decoder to finish
 		if err != nil {
 			log.Printf("ERROR readDotLines: rapidyenc.Read: err='%v'", err)
 			brokenYenc = true
 		}
-	}
-	if async && decodeBodyChan != nil {
+	} else if async && decodeBodyChan != nil { // case 3:
 		close(decodeBodyChan) // close the channel to signal we are done with reading lines
 	}
 	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), what)
@@ -811,14 +813,15 @@ readlines:
 			}
 
 			if cfg.opt.DoubleCheckRapidYencCRC {
+
+			}
+			if cfg.opt.DoubleCheckRapidYencCRC {
 				// double check the crc32 of the decoded data
 				// this is only needed if we want to double check the crc32 of the decoded data
 				// this is not needed for rapidyenc, but we do it for consistency
 				// and to ensure the decoded data is valid
 				// we use the yenc decoder to validate the crc32 of the decoded data
 				getAsyncCoreLimiter()
-				defer returnAsyncCoreLimiter()
-
 				decoder = yenc.NewDecoder(nil, nil, nil, 1)
 				decoder.Part = part // assign the part to the old yenc decoder
 				decoder.SegId = &item.segment.Id
@@ -842,9 +845,13 @@ readlines:
 					} else {
 						log.Printf("Error readDotLines: rapidyenc yenc.Part.Validate: decoder.seg.Id='%s' err='%v' decoder.Part is nil", *decoder.SegId, err)
 					}
-					break // the case 3
+					returnAsyncCoreLimiter()
+					break // the case 4
 				}
-			}
+				returnAsyncCoreLimiter()
+				dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc yenc.Part.Validate OK seg.Id='%s' @ '%s' part.Body=%d Number=%d crc32=%x", item.segment.Id, connitem.c.provider.Name, len(part.Body), part.Number, part.Crc32)
+			} // end if cfg.opt.DoubleCheckRapidYencCRC
+
 			// Now write to cache
 			cache.WriteYenc(item, part)
 		} // end switch yencTest
