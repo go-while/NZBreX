@@ -14,5 +14,5 @@ rm -rf /cache/nzbrex/*
 	-log=false -verbose=true -print430=false \
         -yenctest=4 -yencasync=0 -crc32=true -yencout=true -yencmerge=true -yencdelparts=true \
         -cleanhdrfile=cleanHeaders.txt -prof=false \
-	-testrapidyenc=true
+	-testrapidyenc=false
 
