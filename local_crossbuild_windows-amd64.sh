@@ -1,6 +1,6 @@
 rm -rf rapidyenc/rapidyenc/build
 mkdir -p rapidyenc/rapidyenc/build
-cd rapidyenc && ./crossbuild_rapidyenc_win.sh && cd ../
+cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh && cd ../
 
 export GOOS=windows
 export GOARCH=amd64

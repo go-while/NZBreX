@@ -1,6 +1,6 @@
 rm -rf rapidyenc/rapidyenc/build
 mkdir -p rapidyenc/rapidyenc/build
-cd rapidyenc && ./crossbuild_rapidyenc_darwin.sh && cd ../
+cd rapidyenc && ./crossbuild_rapidyenc_darwin-amd64.sh && cd ../
 
 export GOOS=darwin
 export GOARCH=amd64
