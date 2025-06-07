@@ -5,8 +5,8 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  #schedule:
-  #  - cron: '16 0 * * 1'
+  schedule:
+    - cron: '16 0 * * 1'
 
 jobs:
   analyze:
@@ -23,7 +23,9 @@ jobs:
       matrix:
         include:
         - language: c-cpp
-          build-mode: manual   # Set to manual since you have custom build steps
+          build-mode: manual   # Use manual for C/C++
+        - language: go
+          build-mode: autobuild # Use autobuild for Go
 
     steps:
     - name: Checkout repository
@@ -31,21 +33,26 @@ jobs:
       with:
         fetch-depth: 0
 
-    # ---- Custom setup steps ----
+    # Only run rapidyenc steps for c-cpp
     - name: clone rapidyenc
+      if: matrix.language == 'c-cpp'
       run: cd rapidyenc && ./clone_rapidyenc.sh
 
     - name: Build rapidyenc
+      if: matrix.language == 'c-cpp'
       run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
 
-    # ---- CodeQL Init ----
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ matrix.language }}
-        build-mode: manual
+        build-mode: ${{ matrix.build-mode }}
 
-    # ---- Perform CodeQL Analysis ----
+    # Only needed for manual build mode (c-cpp)
+    - if: matrix.build-mode == 'manual'
+      name: Build code (manual)
+      run: echo "Custom build steps already handled above."
+
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:
