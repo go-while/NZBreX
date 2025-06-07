@@ -356,17 +356,17 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	var counter *Counter_uint64      // counter for async yenc decoding, if enabled in case 3
 	var releaseDecoder chan struct{} // channel to release the decoder after processing in case 3
 	var rydecoder *rapidyenc.Decoder // pointer to RapidYenc decoder, if enabled in case 4
-	var pr *io.PipeReader
-	var pw *io.PipeWriter
+	var pipeReader *io.PipeReader
+	var PipeWriter *io.PipeWriter
 	var decodedData []byte
 	var ryDoneChan chan error // channel to signal when RapidYenc decoding is done
 
 	switch cfg.opt.YencTest {
 	case 4:
 		// use rapidyenc to decode the body lines
-		pr, pw = io.Pipe()
+		pipeReader, PipeWriter = io.Pipe()
 		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc AcquireDecoderWithReader for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
-		rydecoder = rapidyenc.AcquireDecoderWithReader(pr)
+		rydecoder = rapidyenc.AcquireDecoderWithReader(pipeReader)
 		if rydecoder == nil {
 			connitem.c.CloseConn(connitem, nil)
 			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder")
@@ -476,7 +476,7 @@ readlines:
 		if IsItemCommand(what) && rxb > cfg.opt.MaxArtSize {
 			// max article size reached, stop reading
 			// this is a DoS protection, so we do not read more than maxartsize
-			err = fmt.Errorf("error readArticleDotLines: maxartsize=%d > rxb=%d seg.Id='%s' what='%s'", cfg.opt.MaxArtSize, rxb, item.segment.Id, what)
+			err = fmt.Errorf("error readDotLines: maxartsize=%d > rxb=%d seg.Id='%s' what='%s'", cfg.opt.MaxArtSize, rxb, item.segment.Id, what)
 			log.Print(err)
 			connitem.c.CloseConn(connitem, nil)
 			return 0, rxb, nil, err
@@ -556,14 +556,14 @@ readlines:
 				case 4:
 					// rapidyenc test 4
 					//ydec = append(ydec, line+CRLF...) // append the line to the byte buffer
-					dlog(cfg.opt.BUG, "readArticleDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
-					if _, err := pw.Write([]byte(line + CRLF)); err != nil {
-						pw.CloseWithError(err)
+					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
+					if _, err := PipeWriter.Write([]byte(line + CRLF)); err != nil {
+						PipeWriter.CloseWithError(err)
 						connitem.c.CloseConn(connitem, nil)
-						dlog(always, "ERROR readArticleDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
-						return 0, rxb, nil, fmt.Errorf("error readArticleDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
+						dlog(always, "ERROR readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
+						return 0, rxb, nil, fmt.Errorf("error readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
 					}
-					dlog(cfg.opt.BUG, "readArticleDotLines: rapidyenc pw.Write done line=%d seg.Id='%s' @ '%s'", i, item.segment.Id, connitem.c.provider.Name)
+					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write done line=%d seg.Id='%s' @ '%s'", i, item.segment.Id, connitem.c.provider.Name)
 				case 3:
 					// case 3
 					// parse yenc lines directly and asynchronously
@@ -647,24 +647,24 @@ readlines:
 		// spammy! following dlog is for debugging purposes only and prints
 		//  the line number, length of the line, rxb
 		//   and accumulated content length while still reading lines!
-		dlog((cfg.opt.BUG && cfg.opt.DebugARTICLE), "readArticleDotLines: seg.Id='%s' lineNum=%d len(line)=%d rxb=%d content=(%d lines)", item.segment.Id, i, len(line), rxb, len(content))
+		dlog((cfg.opt.BUG && cfg.opt.DebugARTICLE), "readDotLines: seg.Id='%s' lineNum=%d len(line)=%d rxb=%d content=(%d lines)", item.segment.Id, i, len(line), rxb, len(content))
 
 	} // end for readlines
 
 	// case 4: we are done reading lines, close the pipe writer
-	if pw != nil {
-		pw.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
-		pw.Close()                   // <-- THIS IS CRUCIAL!
-		err = <-ryDoneChan           // wait for decoder to finish
+	if PipeWriter != nil {
+		PipeWriter.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
+		PipeWriter.Close()                   // <-- THIS IS CRUCIAL!
+		err = <-ryDoneChan                   // wait for decoder to finish
 		if err != nil {
-			log.Printf("ERROR rapidyenc.Read: err='%v'", err)
+			log.Printf("ERROR readDotLines: rapidyenc.Read: err='%v'", err)
 			brokenYenc = true
 		}
 	}
 	if async && decodeBodyChan != nil {
 		close(decodeBodyChan) // close the channel to signal we are done with reading lines
 	}
-	dlog(cfg.opt.Debug, "readArticleDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), what)
+	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), what)
 
 	if cfg.opt.YencCRC && !brokenYenc && (what == cmdARTICLE || what == cmdBODY) {
 		yencstart := time.Now()
@@ -791,7 +791,7 @@ readlines:
 
 		case 4:
 			if rydecoder == nil {
-				dlog(always, "error readArticleDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+				dlog(always, "error readDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 				break
 			}
 
@@ -801,7 +801,7 @@ readlines:
 
 				returnAsyncCoreLimiter()
 			*/
-			dlog(cfg.opt.DebugRapidYenc, "readArticleDotLines: rapidyenc.Read seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Id, connitem.c.provider.Name, len(decodedData))
+			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc.Read seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Id, connitem.c.provider.Name, len(decodedData))
 			// decodedData now contains the decoded yEnc body
 			// TODO check crc again vs old yenc.crc ?
 			meta := rydecoder.Meta()
@@ -819,7 +819,7 @@ readlines:
 			// Now write to cache
 			cache.WriteYenc(item, part)
 		} // end switch yencTest
-		dlog(cfg.opt.DebugWorker, "readArticleDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(yencstart).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
+		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(yencstart).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
 		if isBadCrc {
 			item.mux.Lock()
 			item.badcrc++
@@ -835,7 +835,7 @@ readlines:
 			*/
 			item.mux.Unlock()
 			// DecreaseDLQueueCnt() // FIXME NEEDS REVIEW // DISABLED
-			dlog(always, "ERROR readArticleDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+			dlog(always, "ERROR readDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 			return 99932, rxb, nil, nil // 99932 is a custom code for bad crc32
 		}
 	} // end if cfg.opt.YencCRC
@@ -857,7 +857,7 @@ readlines:
 		// handle multi-line dot-terminated command
 		if !IsOtherCommand(what) {
 			// error unknown command
-			return 0, rxb, nil, fmt.Errorf("error readArticleDotLines parsed unknown command '%s' @ '%s'", what, connitem.c.provider.Name)
+			return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", what, connitem.c.provider.Name)
 		}
 		// these commands are not stored in item, but will be returned as content
 		// pass
