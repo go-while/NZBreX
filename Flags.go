@@ -93,6 +93,8 @@ func ParseFlags() {
 	}
 	// test rapidyenc decoder
 	if testrapidyenc {
+		// this is only for testing rapidyenc decoder
+		dlog(always, "Testing rapidyenc decoder...")
 		decoder := rapidyenc.AcquireDecoder()
 		decoder.SetDebug(true, true)
 		segId := "any@thing.net"
