@@ -1,0 +1,57 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '16 0 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - language: actions
+          build-mode: none
+        - language: c-cpp
+          build-mode: manual   # Use manual for C/C++
+        - language: go
+          build-mode: autobuild # Use autobuild for Go
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        queries: security-extended,security-and-quality # Removed '+' as it is unnecessary and unconventional
+
+    - name: Build (manual, for C/C++)
+      if: matrix.language == 'c-cpp'
+      # Run the build step only for C/C++ jobs
+      run: |
+        cd rapidyenc
+        ./clone_rapidyenc.sh
+        ./build_rapidyenc_linux-amd64.sh
+
+    - name: Perform CodeQL Analysis
+      if: matrix.language != 'actions'
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
