@@ -14,6 +14,7 @@ package rapidyenc
 */
 import "C"
 import (
+	"log"
 	"sync"
 	"unsafe"
 )
@@ -49,3 +50,17 @@ func (e *Encoder) Encode(src []byte) []byte {
 
 	return dst[:length]
 }
+
+// debugging functions
+const always = true // always log
+
+// dlog is a debug log function that logs messages based on the logthis flag.
+// If logthis is true, it logs the formatted message with the provided arguments.
+// If logthis is false, it does nothing.
+// It is used to control logging behavior in the code, allowing for easy toggling of debug output.
+func dlog(logthis bool, format string, a ...any) {
+	if !logthis {
+		return
+	}
+	log.Printf(format, a...)
+} // end dlog

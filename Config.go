@@ -71,7 +71,6 @@ type CFG struct {
 	YencWrite        bool   `json:"YencWrite"`        // if true, yenc parts will be written to cache
 	YencMerge        bool   `json:"YencMerge"`        // if true, yenc parts will be merged into target files
 	YencDelParts     bool   `json:"YencDelParts"`     // if true, yenc parts will be deleted after merge
-	RapidYenc        bool   `json:"RapidYenc"`        // if true, rapidyenc will be used for yenc parts
 	Csv              bool   `json:"Csv"`              // if true, write a csv file for every nzb file
 	Log              bool   `json:"Log"`              // if true, log to file
 	LogAppend        bool   `json:"LogAppend"`        // if true, append to log file instead of overwriting
@@ -98,6 +97,7 @@ type CFG struct {
 	DebugIHAVE       bool   `json:"DebugIHAVE"`       // if true, enable IHAVE debug output
 	DebugPOST        bool   `json:"DebugPOST"`        // if true, enable POST debug output
 	DebugFlags       bool   `json:"DebugFlags"`       // if true, enable printing item flags
+	DebugRapidYenc   bool   `json:"DebugRapidYenc"`   // if true, enable rapidyenc debug output
 	//DebugSTREAM       bool   `json:"DebugSTREAM"`      // if true, enable STREAM debug output
 	Verbose       bool `json:"Verbose"`       // if true, enable verbose output
 	Bar           bool `json:"Bar"`           // if true, show progress bar
