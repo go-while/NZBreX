@@ -676,12 +676,14 @@ func TestRapidyencDecoderFiles() (errs []error) {
 			if _, err := pipeWriter.Write([]byte(line + "\r\n")); err != nil {
 				fmt.Printf("Error writing to pipe: %v\n", err)
 				pipeWriter.Close()
+				ReleaseDecoder(decoder)
 				return
 			}
 		}
 		if _, err := pipeWriter.Write([]byte(".\r\n")); err != nil { // NNTP end marker
 			fmt.Printf("Error writing end marker to pipe: %v\n", err)
 			pipeWriter.Close()
+			ReleaseDecoder(decoder)
 			return
 		}
 		pipeWriter.Close()
@@ -721,6 +723,7 @@ func TestRapidyencDecoderFiles() (errs []error) {
 			meta := decoder.Meta()
 			fmt.Printf("OK Decoded %d bytes, CRC32: %#08x, Name: '%s' fname: '%s'\n", decodedData.Len(), meta.Hash, meta.Name, fname)
 		}
-	}
+		ReleaseDecoder(decoder)
+	} // end for range files
 	return errs
 }
