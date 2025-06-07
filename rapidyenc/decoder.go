@@ -117,7 +117,9 @@ type Decoder struct {
 	// regardless of whether it was successful.
 	transformComplete bool
 
-	debug bool // debug mode, prints debug messages
+	debug1 bool    // debug mode, prints debug messages
+	debug2 bool    // debug mode, prints more floody debug messages
+	segId  *string // segment ID, if supplied, used for debugging
 }
 
 func NewDecoder(bufSize int) *Decoder {
@@ -137,8 +139,9 @@ func (d *Decoder) SetReader(reader io.Reader) {
 // SetDebugON enables debug mode, which prints debug messages to the console.
 // This is useful for debugging the yEnc decoding process.
 // has to be set before the first call to Read, otherwise it will data race.
-func (d *Decoder) SetDebug(debug bool) {
-	d.debug = debug
+func (d *Decoder) SetDebug(debug1 bool, debug2 bool) {
+	d.debug1 = debug1
+	d.debug2 = debug2
 }
 
 func (d *Decoder) Meta() Meta {
@@ -250,7 +253,9 @@ transform:
 			} else if (!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
 			} else if d.crc && d.expectedCrc != d.m.Hash {
-				err = fmt.Errorf("[rapidyenc] expected decoded data to have CRC32 hash %#08x but got %#08x: %w", d.expectedCrc, d.m.Hash, ErrCrcMismatch)
+				errStr := fmt.Sprintf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s'", d.expectedCrc, d.m.Hash, *d.segId)
+				dlog(always, "%s", errStr)
+				err = fmt.Errorf("%s: %w", errStr, ErrCrcMismatch)
 			} else {
 				err = io.EOF
 			}
@@ -285,8 +290,8 @@ transform:
 				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
 					bodyLine = bodyLine[:len(bodyLine)-2]
 				}
-				dlog(d.debug, "DecodeIncremental input: %q\n", bodyLine)
-				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
+				dlog(d.debug2, "DecodeIncremental input: %q\n", bodyLine)
+				nd, ns, end, derr := d.DecodeIncremental(dst[nDst:], bodyLine, &d.State)
 				if derr != nil && derr != io.EOF {
 					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
 				}
@@ -334,10 +339,15 @@ func (d *Decoder) Reset() {
 
 	d.err = nil
 	d.transformComplete = false
+
+	d.debug1 = false
+	d.debug2 = false
+	d.segId = nil
+
 }
 
 func (d *Decoder) processYenc(line []byte) {
-	//dlog(d.debug, "rapidyenc.processYenc(%s)\n", line)
+	dlog(d.debug2, "rapidyenc.processYenc(%s)", line)
 	if bytes.HasPrefix(line, []byte("=ybegin ")) {
 		d.begin = true
 		d.m.Size, _ = extractInt(line, []byte(" size="))
@@ -345,9 +355,9 @@ func (d *Decoder) processYenc(line []byte) {
 		if _, err := extractInt(line, []byte(" part=")); err != nil {
 			d.body = true
 			d.m.End = d.m.Size
-			dlog(d.debug, "DEBUG: yEnc single-part, body starts")
+			dlog(d.debug1, "DEBUG: yEnc single-part, body starts")
 		} else {
-			dlog(d.debug, "DEBUG: yEnc multi-part, waiting for =ypart")
+			dlog(d.debug1, "DEBUG: yEnc multi-part, waiting for =ypart")
 		}
 	} else if bytes.HasPrefix(line, []byte("=ypart ")) {
 		d.part = true
@@ -358,7 +368,7 @@ func (d *Decoder) processYenc(line []byte) {
 		if endPos, err := extractInt(line, []byte(" end=")); err == nil {
 			d.m.End = endPos - 1
 		}
-		dlog(d.debug, "DEBUG: =ypart found, body starts")
+		dlog(d.debug1, "DEBUG: =ypart found, body starts")
 	} else if bytes.HasPrefix(line, []byte("=yend ")) {
 		d.end = true
 		if d.part {
@@ -371,7 +381,7 @@ func (d *Decoder) processYenc(line []byte) {
 			d.crc = true
 		}
 		d.endSize, _ = extractInt(line, []byte(" size="))
-		dlog(d.debug, "DEBUG: =yend found")
+		dlog(d.debug1, "DEBUG: =yend found")
 	}
 }
 
@@ -445,8 +455,8 @@ var (
 var decodeInitOnce sync.Once
 
 // DecodeIncremental stops decoding when a yEnc/NNTP end sequence is found
-func DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, err error) {
-	//dlog(d.debug, "DecodeIncremental called with src length:", len(src))
+func (d *Decoder) DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, err error) {
+	dlog(d.debug2, "DecodeIncremental called with src length:", len(src))
 	decodeInitOnce.Do(func() {
 		C.rapidyenc_decode_init()
 	})
