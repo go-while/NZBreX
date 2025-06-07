@@ -22,6 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+        - language: actions
+          build-mode: none
         - language: c-cpp
           build-mode: manual   # Use manual for C/C++
         - language: go
@@ -41,16 +43,15 @@ jobs:
         queries: +security-extended,security-and-quality
 
     - name: Build (manual, for C/C++)
+      if: matrix.language != 'actions'
+      # dont check for language! go needs to compile this too!
       run: |
         cd rapidyenc
         ./clone_rapidyenc.sh
         ./build_rapidyenc_linux-amd64.sh
 
-    - name: List build artifacts (debug)
-      if: matrix.language == 'c-cpp'
-      run: find . -type f
-
     - name: Perform CodeQL Analysis
+      if: matrix.language != 'actions'
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
