@@ -22,6 +22,7 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"log"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -553,3 +554,17 @@ func extractCRC(data, substr []byte) (uint32, error) {
 	_, err := hex.Decode(parsed, parsed)
 	return binary.BigEndian.Uint32(parsed), err
 }
+
+// debugging functions
+const always = true // always log
+
+// dlog is a debug log function that logs messages based on the logthis flag.
+// If logthis is true, it logs the formatted message with the provided arguments.
+// If logthis is false, it does nothing.
+// It is used to control logging behavior in the code, allowing for easy toggling of debug output.
+func dlog(logthis bool, format string, a ...any) {
+	if !logthis {
+		return
+	}
+	log.Printf(format, a...)
+} // end dlog
