@@ -1,0 +1,50 @@
+name: "CodeQL Advanced"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  #schedule:
+  #  - cron: '16 0 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - language: c-cpp
+          build-mode: manual   # Set to manual since you have custom build steps
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # ---- Custom setup steps ----
+    - name: clone rapidyenc
+      run: cd rapidyenc && ./clone_rapidyenc.sh
+
+    - name: Build rapidyenc
+      run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
+
+    # ---- CodeQL Init ----
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: manual
+
+    # ---- Perform CodeQL Analysis ----
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
