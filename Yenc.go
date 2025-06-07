@@ -180,7 +180,6 @@ func testRapidyencDecoderFiles() (errs []error) {
 			fmt.Printf("Failed to open %s: %v\n", fname, err)
 			continue
 		}
-		defer f.Close()
 
 		pipeReader, pipeWriter := io.Pipe()
 		decoder := rapidyenc.AcquireDecoderWithReader(pipeReader)
@@ -214,11 +213,19 @@ func testRapidyencDecoderFiles() (errs []error) {
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := scanner.Text()
-			pipeWriter.Write([]byte(line + "\r\n"))
+			if _, err := pipeWriter.Write([]byte(line + "\r\n")); err != nil {
+				fmt.Printf("Error writing to pipe: %v\n", err)
+				pipeWriter.Close()
+				return
+			}
 		}
-		pipeWriter.Write([]byte(".\r\n")) // NNTP end marker
+		if _, err := pipeWriter.Write([]byte(".\r\n")); err != nil { // NNTP end marker
+			fmt.Printf("Error writing end marker to pipe: %v\n", err)
+			pipeWriter.Close()
+			return
+		}
 		pipeWriter.Close()
-
+		f.Close()
 		if aerr := <-done; aerr != nil {
 			err = aerr
 			var aBadCrc uint32
