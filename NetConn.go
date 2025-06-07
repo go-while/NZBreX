@@ -653,7 +653,10 @@ readlines:
 
 	// case 4: we are done reading lines, close the pipe writer
 	if pipeWriter != nil {
-		pipeWriter.Write([]byte(DOT + CRLF)) // write the final dot to the pipe
+		if err := pipeWriter.Write([]byte(DOT + CRLF)); err != nil { // write the final dot to the pipe
+			log.Printf("ERROR readDotLines: pipeWriter.Write failed: err='%v'", err)
+			brokenYenc = true
+		}
 		pipeWriter.Close()                   // <-- THIS IS CRUCIAL!
 		err = <-ryDoneChan                   // wait for decoder to finish
 		if err != nil {
