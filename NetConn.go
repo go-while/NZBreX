@@ -794,14 +794,12 @@ readlines:
 				dlog(always, "error readDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 				break
 			}
-
 			// rapidyenc test 4
 			/*
 				getAsyncCoreLimiter()
-
 				returnAsyncCoreLimiter()
 			*/
-			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc.Read seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Id, connitem.c.provider.Name, len(decodedData))
+			dlog(always, "readDotLines: rapidyenc.Read seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Id, connitem.c.provider.Name, len(decodedData))
 			// decodedData now contains the decoded yEnc body
 			// TODO check crc again vs old yenc.crc ?
 			meta := rydecoder.Meta()
@@ -819,8 +817,8 @@ readlines:
 			// Now write to cache
 			cache.WriteYenc(item, part)
 		} // end switch yencTest
-		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
-		if isBadCrc {
+		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d brokenYenc=%t seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, brokenYenc, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
+		if isBadCrc || brokenYenc {
 			item.mux.Lock()
 			item.badcrc++
 			/*
@@ -841,6 +839,7 @@ readlines:
 	} // end if cfg.opt.YencCRC
 
 	item.mux.Lock()
+	defer item.mux.Unlock()
 
 	switch what {
 	case cmdARTICLE:
@@ -869,7 +868,7 @@ readlines:
 		// clears content on head, body or article
 		content = nil // clear content if not an other command
 	} // else pass
-	item.mux.Unlock()
+
 	return 1, rxb, content, nil
 } // end func readArticleDotLines
 
