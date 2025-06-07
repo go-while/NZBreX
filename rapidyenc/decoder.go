@@ -137,7 +137,7 @@ func NewDecoder(bufSize int) *Decoder {
 // It must be called before the first call to Read, otherwise it will panic.
 func (d *Decoder) SetReader(reader io.Reader) {
 	d.r = reader
-} // SetReader sets the io.Reader for the Decoder instance.
+}
 
 // SetDebugON enables debug mode, which prints debug messages to the console.
 // This is useful for debugging the yEnc decoding process.
