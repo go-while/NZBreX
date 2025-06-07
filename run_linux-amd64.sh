@@ -1,5 +1,5 @@
 #!/bin/bash
-./local_build_linux.sh || exit 1
+./local_build_linux-amd64.sh || exit 1
 nzbfile=nzbs/debian-11.6.0-amd64-netinst.iso.nzb.gz
 test "$1" != "" && nzbfile="$1"
 rm -rf /cache/nzbrex/*
