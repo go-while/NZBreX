@@ -659,8 +659,9 @@ readlines:
 		}
 		pipeWriter.Close() // <-- THIS IS CRUCIAL!
 		err = <-ryDoneChan // wait for decoder to finish
+
 		if err != nil {
-			log.Printf("ERROR readDotLines: rapidyenc.Read: err='%v'", err)
+			dlog(always, "ERROR readDotLines: rapidyenc.Read: err='%v'", err)
 			brokenYenc = true
 		}
 	} else if async && decodeBodyChan != nil { // case 3:
