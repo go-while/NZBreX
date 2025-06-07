@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-while/NZBreX/rapidyenc"
 	prof "github.com/go-while/go-cpu-mem-profiler"
 	"github.com/go-while/go-loggedrwmutex"
 
@@ -49,12 +48,13 @@ var (
 	GCounter        *Counter_uint64                  // a global counter
 
 	// flags
-	booted   time.Time // not a flag
-	version  bool      // flag
-	runProf  bool      // flag
-	webProf  string    // flag
-	nzbfile  string    // flag
-	testmode bool      // flag: used to test compilation
+	booted        time.Time // not a flag
+	version       bool      // flag
+	runProf       bool      // flag
+	webProf       string    // flag
+	nzbfile       string    // flag
+	testmode      bool      // flag: used to test compilation
+	testrapidyenc bool      // flag: used to test rapidyenc decoder
 )
 
 func init() {
@@ -66,21 +66,12 @@ func init() {
 	GCounter = NewCounter(10)
 	cfg = &Config{opt: &CFG{}}
 	booted = time.Now()
-
-	// test rapidyenc decoder
-	decoder := rapidyenc.AcquireDecoder()
-	decoder.SetDebug(true, true)
-	segId := "any@thing.net"
-	decoder.SetSegmentId(&segId)
-	rapidyenc.ReleaseDecoder(decoder) // release the decoder
-	decoder = nil                     // clear memory
-	testRapidyencDecoderFiles()       // test rapidyenc decoder with files
-	dlog(always, "rapidyenc decoder initialized")
 } // end func init
 
 func main() {
 	//colors := new(cmpb.BarColors)
 	ParseFlags()
+
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
 	go GoMutexStatus()

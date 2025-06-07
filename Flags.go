@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/go-while/NZBreX/rapidyenc"
 	prof "github.com/go-while/go-cpu-mem-profiler"
@@ -74,6 +75,7 @@ func ParseFlags() {
 	// no need to change this
 	flag.IntVar(&cfg.opt.MaxArtSize, "maxartsize", DefaultMaxArticleSize, "limits article size to 1M (mostly articles have ~700K only)")
 	flag.BoolVar(&testmode, "zzz-shr-testmode", false, "[true|false] only used to test compilation on self-hosted runners (default: false)")
+	flag.BoolVar(&testrapidyenc, "testrapidyenc", false, "[true|false] will test rapidyenc testfiles on boot and exit (default: false)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
 	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
@@ -87,6 +89,26 @@ func ParseFlags() {
 	if runProf {
 		Prof = prof.NewProf()
 		RunProf()
+	}
+	// test rapidyenc decoder
+	if testrapidyenc {
+		decoder := rapidyenc.AcquireDecoder()
+		decoder.SetDebug(true, true)
+		segId := "any@thing.net"
+		decoder.SetSegmentId(&segId)
+		rapidyenc.ReleaseDecoder(decoder)   // release the decoder
+		decoder = nil                       // clear memory
+		errs := testRapidyencDecoderFiles() // test rapidyenc decoder with files
+		if len(errs) != 0 {
+			dlog(always, "ERROR testing rapidyenc decoder: %v", errs)
+			os.Exit(1)
+		}
+		dlog(always, "rapidyenc decoder successfully initialized! quitting now...")
+		if runProf {
+			Prof.StopCPUProfile() // stop cpu profiling
+			time.Sleep(time.Second)
+		}
+		os.Exit(0) // exit after testing rapidyenc decoder
 	}
 
 	cacheON = (cfg.opt.Cachedir != "" && cfg.opt.CRW > 0)

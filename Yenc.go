@@ -166,7 +166,7 @@ func (s *SESSION) YencMerge(result *string) {
 
 } // end func YencMerge
 
-func testRapidyencDecoderFiles() {
+func testRapidyencDecoderFiles() (errs []error) {
 	files := []string{
 		"yenc/multipart_test.yenc",
 		"yenc/multipart_test_badcrc.yenc",
@@ -184,6 +184,7 @@ func testRapidyencDecoderFiles() {
 
 		pipeReader, pipeWriter := io.Pipe()
 		decoder := rapidyenc.AcquireDecoderWithReader(pipeReader)
+		decoder.SetDebug(true, true)
 		defer rapidyenc.ReleaseDecoder(decoder)
 		segId := fname
 		decoder.SetSegmentId(&segId)
@@ -194,16 +195,16 @@ func testRapidyencDecoderFiles() {
 		go func() {
 			buf := make([]byte, rapidyenc.DefaultBufSize)
 			for {
-				n, err := decoder.Read(buf)
+				n, aerr := decoder.Read(buf)
 				if n > 0 {
 					decodedData.Write(buf[:n])
 				}
-				if err == io.EOF {
+				if aerr == io.EOF {
 					done <- nil
 					return
 				}
-				if err != nil {
-					done <- err
+				if aerr != nil {
+					done <- aerr
 					return
 				}
 			}
@@ -218,12 +219,14 @@ func testRapidyencDecoderFiles() {
 		pipeWriter.Write([]byte(".\r\n")) // NNTP end marker
 		pipeWriter.Close()
 
-		if err := <-done; err != nil {
+		if aerr := <-done; aerr != nil {
+			err = aerr
 			var aBadCrc uint32
 			meta := decoder.Meta()
-			//fmt.Printf("Decoder error: %v\n", err)
+			dlog(always, "DEBUG Decoder error: '%v' (maybe an expected error, check below)\n", err)
 			expectedCrc := decoder.ExpectedCrc()
 			if expectedCrc != 0 && expectedCrc != meta.Hash {
+
 				// Set aBadCrc based on the file name
 				switch fname {
 				case "yenc/singlepart_test_badcrc.yenc":
@@ -233,19 +236,24 @@ func testRapidyencDecoderFiles() {
 				}
 				if aBadCrc > 0 && aBadCrc != meta.Hash {
 					fmt.Printf("WARNING1 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+					errs = append(errs, aerr)
 				} else if aBadCrc > 0 && aBadCrc == meta.Hash {
 					fmt.Printf("rapidyenc OK expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
 				} else if expectedCrc != meta.Hash {
 					fmt.Printf("WARNING2 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+					errs = append(errs, aerr)
 				} else {
 					fmt.Printf("GOOD CRC matches! aBadCrc=%#08x Name: '%s' fname: '%s'\n", aBadCrc, meta.Name, fname)
 				}
+
 			} else if expectedCrc == 0 {
 				fmt.Printf("WARNING rapidyenc: No expected CRC set, cannot verify integrity. fname: '%s'\n", fname)
+				errs = append(errs, aerr)
 			}
 		} else {
 			meta := decoder.Meta()
 			fmt.Printf("OK Decoded %d bytes, CRC32: %#08x, Name: '%s' fname: '%s'\n", decodedData.Len(), meta.Hash, meta.Name, fname)
 		}
 	}
+	return errs
 }
