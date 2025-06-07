@@ -819,7 +819,7 @@ readlines:
 			// Now write to cache
 			cache.WriteYenc(item, part)
 		} // end switch yencTest
-		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(yencstart).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
+		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
 		if isBadCrc {
 			item.mux.Lock()
 			item.badcrc++
