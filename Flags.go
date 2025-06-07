@@ -96,9 +96,9 @@ func ParseFlags() {
 		decoder.SetDebug(true, true)
 		segId := "any@thing.net"
 		decoder.SetSegmentId(&segId)
-		rapidyenc.ReleaseDecoder(decoder)   // release the decoder
-		decoder = nil                       // clear memory
-		errs := testRapidyencDecoderFiles() // test rapidyenc decoder with files
+		rapidyenc.ReleaseDecoder(decoder)             // release the decoder
+		decoder = nil                                 // clear memory
+		errs := rapidyenc.TestRapidyencDecoderFiles() // test rapidyenc decoder with files
 		if len(errs) != 0 {
 			dlog(always, "ERROR testing rapidyenc decoder: %v", errs)
 			os.Exit(1)
