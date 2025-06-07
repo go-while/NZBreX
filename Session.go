@@ -297,6 +297,9 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	if cfg.opt.YencCpu <= 0 {
 		cfg.opt.YencCpu = runtime.NumCPU()
 	}
+	if cfg.opt.YencAsyncCpu <= 0 {
+		cfg.opt.YencAsyncCpu = runtime.NumCPU()
+	}
 	if core_chan == nil || cap(core_chan) != cfg.opt.YencCpu {
 		core_chan = make(chan struct{}, cfg.opt.YencCpu)
 		for i := 1; i <= cfg.opt.YencCpu; i++ {
@@ -308,6 +311,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		for i := 1; i <= cfg.opt.YencAsyncCpu; i++ {
 			async_core_chan <- struct{}{} // fill chan with empty structs to suck out and return
 		}
+		dlog(always, "LaunchSession: async_core_chan=%d", cfg.opt.YencAsyncCpu)
 	}
 	globalmux.Unlock()
 
