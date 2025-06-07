@@ -17,6 +17,15 @@
 ```go
 // Example: Running built-in rapidyenc decoder self-test and file tests
 
+func dlog(logthis bool, format string, a ...any) {
+	if !logthis {
+		return
+	}
+	log.Printf(format, a...)
+} // end dlog
+
+const always bool = true
+
 if testrapidyenc {
 	decoder := rapidyenc.AcquireDecoder()
 	decoder.SetDebug(true, true)
