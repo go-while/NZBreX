@@ -97,9 +97,9 @@ type Decoder struct {
 	transformComplete bool
 
 	debug1 bool // debug mode, prints debug messages
-	debug2 bool // debug mode, prints more floody debug messages
-	//debugDecodeIncremental bool // debug mode, prints debug messages for DecodeIncremental
-	segId *string // segment ID, if supplied, used for debugging
+	// debugSpam enables verbose debug output, printing additional detailed debug messages for troubleshooting purposes.
+	debugSpam bool    // debug mode, prints more floody debug messages
+	segId     *string // segment ID, if supplied, used for debugging
 }
 
 // AcquireDecoder returns an empty Decoder instance from Decoder pool.
@@ -171,9 +171,9 @@ func (d *Decoder) SetReader(reader io.Reader) {
 // SetDebug enables debug mode, which prints debug messages to the console.
 // This is useful for debugging the yEnc decoding process.
 // has to be set before the first call to Read, otherwise it will data race.
-func (d *Decoder) SetDebug(debug1 bool, debug2 bool) {
+func (d *Decoder) SetDebug(debug1 bool, debugSpam bool) {
 	d.debug1 = debug1
-	d.debug2 = debug2
+	d.debugSpam = debugSpam
 }
 
 // SetSegmentId sets the segment ID for the Decoder instance.
@@ -329,7 +329,7 @@ transform:
 					bodyLine = bodyLine[:len(bodyLine)-2]
 				}
 
-				//dlog(d.debugDecodeIncremental, "DecodeIncremental input: %q\n", bodyLine)
+				dlog(d.debugSpam, "DecodeIncremental input: %q\n", bodyLine)
 				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
 				if derr != nil && derr != io.EOF {
 					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
@@ -412,7 +412,7 @@ func (d *Decoder) Reset() {
 	d.transformComplete = false
 
 	d.debug1 = false
-	d.debug2 = false
+	d.debugSpam = false
 	if d.segId != nil {
 		// Reset the segment ID to an empty string
 		// to prevent nil pointer dereference.
@@ -422,7 +422,7 @@ func (d *Decoder) Reset() {
 } // end func Reset
 
 func (d *Decoder) processYenc(line []byte) {
-	dlog(d.debug2, "rapidyenc.processYenc(%q)", line)
+	dlog(d.debugSpam, "rapidyenc.processYenc(%q)", line)
 	switch d.format {
 	case FormatYenc:
 		if bytes.HasPrefix(line, []byte("=ybegin ")) {
