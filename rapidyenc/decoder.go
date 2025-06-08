@@ -96,9 +96,10 @@ type Decoder struct {
 	// regardless of whether it was successful.
 	transformComplete bool
 
-	debug1 bool    // debug mode, prints debug messages
-	debug2 bool    // debug mode, prints more floody debug messages
-	segId  *string // segment ID, if supplied, used for debugging
+	debug1 bool // debug mode, prints debug messages
+	debug2 bool // debug mode, prints more floody debug messages
+	//debugDecodeIncremental bool // debug mode, prints debug messages for DecodeIncremental
+	segId *string // segment ID, if supplied, used for debugging
 }
 
 // AcquireDecoder returns an empty Decoder instance from Decoder pool.
@@ -291,11 +292,8 @@ transform:
 			} else if d.format != FormatUU && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
 			} else if d.crc && d.expectedCrc != d.m.Hash {
-				// If we have a segment ID, use it for debugging
-				// otherwise use an empty string.
-				errStr := fmt.Sprintf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s'", d.expectedCrc, d.m.Hash, *d.segId)
-				dlog(always, "%s", errStr)
-				err = fmt.Errorf("%s: %w", errStr, ErrCrcMismatch)
+				// If we have a segment ID, use it for debugging otherwise use an empty string.
+				err = fmt.Errorf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s' err: %w", d.expectedCrc, d.m.Hash, *d.segId, ErrCrcMismatch)
 			} else {
 				err = io.EOF
 			}
@@ -331,7 +329,7 @@ transform:
 					bodyLine = bodyLine[:len(bodyLine)-2]
 				}
 
-				dlog(d.debug2, "DecodeIncremental input: %q\n", bodyLine)
+				//dlog(d.debugDecodeIncremental, "DecodeIncremental input: %q\n", bodyLine)
 				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
 				if derr != nil && derr != io.EOF {
 					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
@@ -344,22 +342,8 @@ transform:
 				}
 				goto transform
 			}
+
 		case FormatUU:
-			//nDst += copy(dst[nDst:], line) // <-- this is not correct, we need to decode the line first
-			/*
-				if bytes.HasPrefix(line, []byte("begin ")) {
-					// Parse mode and filename here if needed
-					d.body = true
-					d.format = FormatUU
-					// Optionally store filename/mode in d.m
-					goto transform // Don't decode this line
-				}
-				if bytes.Equal(line, []byte("end\r\n")) {
-					d.body = false
-					// End of UUencoded data
-					goto transform // Don't decode this line
-				}
-			*/
 			if bytes.HasPrefix(line, []byte("begin ")) || bytes.Equal(line, []byte("end\r\n")) {
 				d.processYenc(line)
 				goto transform
