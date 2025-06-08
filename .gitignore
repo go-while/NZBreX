@@ -20,7 +20,7 @@
 # Go workspace file
 go.work
 vendor/
-rapidyenc/rapidyenc
+#rapidyenc/rapidyenc
 rapidyenc/librapidyenc.a
 rapidyenc/librapidyenc.dll
 
