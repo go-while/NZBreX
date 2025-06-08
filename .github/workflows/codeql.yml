@@ -79,6 +79,7 @@ jobs:
 
     steps:
     - name: Set up Go
+      if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
       uses: actions/setup-go@v5
       with:
         go-version: '1.24.3' # or whatever version you need
@@ -97,8 +98,13 @@ jobs:
         queries: security-extended,security-and-quality
         ram: 4 # Optional, specify in GB
 
+    - name: Autobuild
+      if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
+      # Run the autobuild step only for Go jobs
+      uses: github/codeql-action/autobuild@v3
+
     - name: Build (manual, for C/C++)
-      if: matrix.language == 'c-cpp'
+      if: matrix.language == 'c-cpp' && matrix.build-mode != 'autobuild'
       # Run the build step only for C/C++ jobs
       run: |
         cd rapidyenc
