@@ -1,3 +1,6 @@
+#ifndef RAPIDYENC_ENCODER_AVX_BASE_H
+#define RAPIDYENC_ENCODER_AVX_BASE_H
+
 // can't seem to make this worth it
 #include "common.h"
 #ifdef __AVX2__
@@ -161,6 +164,10 @@ HEDLEY_ALWAYS_INLINE void do_encode_avx2(int line_size, int* colOffset, const ui
 			dataB
 		);
 		
+#endif // __AVX2__
+
+#endif // RAPIDYENC_ENCODER_AVX_BASE_H
+
 #if defined(__AVX512VL__)
 		if(use_isa >= ISA_LEVEL_AVX3) {
 			dataA = _mm256_add_epi8(dataA, _mm256_set1_epi8(42));
