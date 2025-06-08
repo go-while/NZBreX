@@ -287,6 +287,37 @@ func TestUUEncodeNotImplemented(t *testing.T) {
 	}
 }
 
+// TestDetectFormat tests the detectFormat function for various input lines.
+func TestDetectFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		line []byte
+		want Format
+	}{
+		{"yEnc header", []byte("=ybegin part=1 line=128 size=128 name=foo.txt\r\n"), FormatYenc},
+		{"UUencode 63 bytes, \n", append([]byte{'M'}, make([]byte, 61)...), FormatUU},
+		{"UUencode 63 bytes, \r", append([]byte{'M'}, make([]byte, 61)...), FormatUU},
+		{"UUencode 62 bytes, \n", append([]byte{'M'}, make([]byte, 60)...), FormatUU},
+		{"UUencode 62 bytes, \r", append([]byte{'M'}, make([]byte, 60)...), FormatUU},
+		{"UUencode begin header", []byte("begin 644 file.txt"), FormatUU},
+		{"Unknown", []byte("random data"), FormatUnknown},
+	}
+
+	tests[1].line[62] = '\n'
+	tests[2].line[62] = '\r'
+	tests[3].line[61] = '\n'
+	tests[4].line[61] = '\r'
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := detectFormat(tc.line)
+			if got != tc.want {
+				t.Errorf("detectFormat(%q) = %v, want %v", tc.line, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRapidyencDecoderFiles runs rapidyenc decoder tests on sample files.
 func TestRapidyencDecoderFiles(t *testing.T) {
 	errList := RapidyencDecoderFilesTest(t)

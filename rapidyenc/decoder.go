@@ -422,7 +422,8 @@ func detectFormat(line []byte) Format {
 	}
 
 	length := len(line)
-	if (length == 62 || length == 63) && (line[62] == '\n' || line[62] == '\r') && line[0] == 'M' {
+	if length >= 1 && line[0] == 'M' && ((length == 63 && (line[62] == '\n' || line[62] == '\r')) ||
+		(length == 62 && (line[61] == '\n' || line[61] == '\r'))) {
 		return FormatUU
 	}
 
