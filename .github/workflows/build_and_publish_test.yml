@@ -2,11 +2,10 @@ name: "TEST Self-Hosted Runners"
 
 on:
   push:
-    branches:
-      - 'main'
-      - 'testing-*'
+  #  branches:
+  #    - 'testing'
     tags:
-      - "test_rapidyenc"
+      - "testing"
   release:
     types: [published]
   workflow_dispatch:
