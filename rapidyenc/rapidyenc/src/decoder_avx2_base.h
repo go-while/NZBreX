@@ -1,3 +1,5 @@
+#ifndef DECODER_AVX2_BASE_H
+#define DECODER_AVX2_BASE_H
 
 #ifdef __AVX2__
 
@@ -161,7 +163,7 @@ HEDLEY_ALWAYS_INLINE void do_decode_avx2(const uint8_t* src, long& len, unsigned
 				if(isRaw) {
 					// find patterns of \r_.
 					
-#if defined(__AVX512VL__) && defined(__AVX512BW__)
+#endif // DECODER_AVX2_BASE_H
 					if(useAVX3MaskCmp) {
 						match0CrMaskA = _mm256_cmpeq_epi8_mask(oDataA, _mm256_set1_epi8('\r'));
 						match0CrMaskB = _mm256_cmpeq_epi8_mask(oDataB, _mm256_set1_epi8('\r'));
