@@ -217,7 +217,7 @@ func TestDecodeMissingYbegin(t *testing.T) {
 	buf := make([]byte, 10)
 	_, err := dec.Read(buf)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "without finding \"=begin\" header")
+	require.Contains(t, err.Error(), "without finding any begin header")
 }
 
 // TestDecodeMissingYend tests decoding data missing the "=yend" trailer
