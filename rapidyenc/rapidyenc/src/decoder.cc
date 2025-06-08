@@ -121,8 +121,11 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 			*p++ = src[i] - (42 + (isEquals << 6));
 		}*/
 		while(i < -1) {
-			c = es[i];
-			switch(c) {
+			// The loop processes characters from the end of the source buffer (`es`) towards the beginning.
+			// It stops when `i` reaches -1, as this indicates that all characters have been processed.
+			// The condition `i < -1` ensures that the loop does not process out-of-bounds memory.
+			while(i < -1) {
+				c = es[i];
 				case '\n': case '\r': 
 					i++;
 					continue;
