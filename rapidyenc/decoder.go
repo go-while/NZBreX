@@ -45,7 +45,8 @@ var (
 
 // errors for yEnc decoding
 var errCrcNotfound = errors.New("crc not found")
-var ErrDataMissing = errors.New("no binary data")
+
+var ErrDataMissing = errors.New("no binary data")              // .\r\n reached before =ybegin or =ypart
 var ErrDataCorruption = errors.New("data corruption detected") // .\r\n reached before =yend
 var ErrCrcMismatch = errors.New("crc32 mismatch")
 
@@ -272,26 +273,27 @@ transform:
 		// Article EOF
 		if bytes.HasPrefix(src[nSrc:], []byte(".\r\n")) {
 			d.m.Hash = d.hash.Sum32()
-			/*
-				if d.format == FormatUU {
-					return nDst, nSrc + 3, fmt.Errorf("[rapidyenc] uuencode not implemented")
-				} else
-			*/
 			if !d.begin {
-				if d.format == FormatYenc {
-					err = fmt.Errorf("[rapidyenc] end of article without finding \"=ybegin\" header: %w", ErrDataCorruption)
-				} else if d.format == FormatUU {
-					err = fmt.Errorf("[rapidyenc] end of article without finding \"begin\" header: %w", ErrDataCorruption)
+				switch d.format {
+				case FormatUnknown:
+					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin header: %w", ErrDataMissing)
+				case FormatYenc:
+					err = fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=ybegin\" header: %w", ErrDataMissing)
+				case FormatUU:
+					err = fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"begin\" header: %w", ErrDataCorruption)
 				}
 			} else if !d.end {
-				if d.format == FormatYenc {
-					err = fmt.Errorf("[rapidyenc] end of article without finding \"=yend\" trailer: %w", ErrDataCorruption)
-				} else if d.format == FormatUU {
-					err = fmt.Errorf("[rapidyenc] end of article without finding \"end\" trailer: %w", ErrDataCorruption)
+				switch d.format {
+				case FormatUnknown:
+					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *end header: %w", ErrDataMissing)
+				case FormatYenc:
+					err = fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=yend\" trailer: %w", ErrDataMissing)
+				case FormatUU:
+					err = fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"end\" trailer: %w", ErrDataCorruption)
 				}
-			} else if d.format != FormatUU && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
+			} else if (d.format != FormatUU && d.format != FormatUnknown) && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
-			} else if d.crc && d.expectedCrc != d.m.Hash {
+			} else if d.format == FormatYenc && d.crc && d.expectedCrc != d.m.Hash {
 				// If we have a segment ID, use it for debugging otherwise use an empty string.
 				err = fmt.Errorf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s' err: %w", d.expectedCrc, d.m.Hash, *d.segId, ErrCrcMismatch)
 			} else {
@@ -349,8 +351,12 @@ transform:
 				goto transform
 			}
 			if d.body {
+				bodyLine := line
+				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
+					bodyLine = bodyLine[:len(bodyLine)-2]
+				}
 				// Decode the UUencoded line
-				decoded, err := UUdecode(line)
+				decoded, err := UUdecode(bodyLine)
 				if err != nil {
 					d.err = fmt.Errorf("[rapidyenc] error decoding UUencoded line: %w", err)
 					return nDst, nSrc, d.err
@@ -370,14 +376,16 @@ transform:
 
 	if atEOF {
 		// Check for missing yEnc header at EOF
-		if d.format == FormatUnknown && !d.begin {
-			return nDst, nSrc, fmt.Errorf("[rapidyenc] end of article without finding any begin header: %w", ErrDataCorruption)
-		}
-		if d.format == FormatYenc && !d.begin {
-			return nDst, nSrc, fmt.Errorf("[rapidyenc] end of article without finding \"=ybegin\" header: %w", ErrDataCorruption)
-		}
-		if d.format == FormatUU && !d.begin {
-			return nDst, nSrc, fmt.Errorf("[rapidyenc] end of article without finding \"begin\" header: %w", ErrDataCorruption)
+		// ! REVIEW ! not sure if we even get here since the formatUnknown is checked above
+		if !d.begin || !d.end {
+			switch d.format {
+			case FormatUnknown:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin or *end header: %w", ErrDataMissing)
+			case FormatYenc:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=ybegin\" or \"=yend\" header: %w", ErrDataMissing)
+			case FormatUU:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"begin\" or \"end\" header: %w", ErrDataMissing)
+			}
 		}
 		return nDst, nSrc, io.EOF
 	} else {
