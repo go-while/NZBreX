@@ -43,6 +43,16 @@ var (
 	defaultBufSize = DefaultBufSize
 )
 
+// errors for yEnc decoding
+var errCrcNotfound = errors.New("crc not found")
+var ErrDataMissing = errors.New("no binary data")
+var ErrDataCorruption = errors.New("data corruption detected") // .\r\n reached before =yend
+var ErrCrcMismatch = errors.New("crc32 mismatch")
+
+// errDestinationTooSmall is returned when the destination buffer is smaller than the source,
+// indicating that the destination must be at least as long as the source to proceed.
+var errDestinationTooSmall = errors.New("destination must be at least the length of source")
+
 // Meta is the result of parsing the yEnc headers (ybegin, ypart, yend)
 type Meta struct {
 	Size  int64  // Total size of the file
@@ -188,12 +198,6 @@ func (d *Decoder) ExpectedCrc() uint32 {
 	return d.expectedCrc
 }
 
-var (
-	ErrDataMissing    = errors.New("no binary data")
-	ErrDataCorruption = errors.New("data corruption detected") // .\r\n reached before =yend
-	ErrCrcMismatch    = errors.New("crc32 mismatch")
-)
-
 // Read reads transformed bytes from the Decoder instance.
 // It reads from the underlying io.Reader, transforms the data using the Transform method,
 // and returns the transformed bytes in the provided byte slice p.
@@ -252,7 +256,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 		n, d.err = d.r.Read(d.src[d.src1:])
 		d.src1 += n
 	}
-}
+} // end func Read
 
 // Transform starts by reading line-by-line to parse yEnc headers until it encounters yEnc data.
 // It then incrementally decodes chunks of yEnc encoded data before returning to line-by-line processing
@@ -267,13 +271,24 @@ transform:
 		// Article EOF
 		if bytes.HasPrefix(src[nSrc:], []byte(".\r\n")) {
 			d.m.Hash = d.hash.Sum32()
-			if d.format == FormatUU {
-				return nDst, nSrc + 3, fmt.Errorf("[rapidyenc] uuencode not implemented")
-			} else if !d.begin {
-				err = fmt.Errorf("[rapidyenc] end of article without finding \"=begin\" header: %w", ErrDataMissing)
+			/*
+				if d.format == FormatUU {
+					return nDst, nSrc + 3, fmt.Errorf("[rapidyenc] uuencode not implemented")
+				} else
+			*/
+			if !d.begin {
+				if d.format == FormatUU {
+					err = fmt.Errorf("[rapidyenc] end of article without finding \"begin\" trailer: %w", ErrDataCorruption)
+				} else {
+					err = fmt.Errorf("[rapidyenc] end of article without finding \"=ybegin\" trailer: %w", ErrDataCorruption)
+				}
 			} else if !d.end {
-				err = fmt.Errorf("[rapidyenc] end of article without finding \"=yend\" trailer: %w", ErrDataCorruption)
-			} else if (!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize) {
+				if d.format == FormatUU {
+					err = fmt.Errorf("[rapidyenc] end of article without finding \"end\" trailer: %w", ErrDataCorruption)
+				} else {
+					err = fmt.Errorf("[rapidyenc] end of article without finding \"=yend\" trailer: %w", ErrDataCorruption)
+				}
+			} else if d.format != FormatUU && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
 			} else if d.crc && d.expectedCrc != d.m.Hash {
 				// If we have a segment ID, use it for debugging
@@ -331,17 +346,23 @@ transform:
 			}
 		case FormatUU:
 			//nDst += copy(dst[nDst:], line) // <-- this is not correct, we need to decode the line first
-			if bytes.HasPrefix(line, []byte("begin ")) {
-				// Parse mode and filename here if needed
-				d.body = true
-				d.format = FormatUU
-				// Optionally store filename/mode in d.m
-				goto transform // Don't decode this line
-			}
-			if bytes.Equal(line, []byte("end\r\n")) {
-				d.body = false
-				// End of UUencoded data
-				goto transform // Don't decode this line
+			/*
+				if bytes.HasPrefix(line, []byte("begin ")) {
+					// Parse mode and filename here if needed
+					d.body = true
+					d.format = FormatUU
+					// Optionally store filename/mode in d.m
+					goto transform // Don't decode this line
+				}
+				if bytes.Equal(line, []byte("end\r\n")) {
+					d.body = false
+					// End of UUencoded data
+					goto transform // Don't decode this line
+				}
+			*/
+			if bytes.HasPrefix(line, []byte("begin ")) || bytes.Equal(line, []byte("end\r\n")) {
+				d.processYenc(line)
+				goto transform
 			}
 			if d.body {
 				// Decode the UUencoded line
@@ -369,7 +390,7 @@ transform:
 	} else {
 		return nDst, nSrc, transform.ErrShortSrc
 	}
-}
+} // end func Transform
 
 func (d *Decoder) Reset() {
 	d.r = nil
@@ -405,46 +426,67 @@ func (d *Decoder) Reset() {
 		// If a new segment ID is needed, it should be set via SetSegmentId.
 		d.segId = new(string)
 	}
-}
+} // end func Reset
 
 func (d *Decoder) processYenc(line []byte) {
 	dlog(d.debug2, "rapidyenc.processYenc(%q)", line)
-	if bytes.HasPrefix(line, []byte("=ybegin ")) {
-		d.begin = true
-		d.m.Size, _ = extractInt(line, []byte(" size="))
-		d.m.Name, _ = extractString(line, []byte(" name="))
-		if _, err := extractInt(line, []byte(" part=")); err != nil {
+	switch d.format {
+	case FormatYenc:
+		if bytes.HasPrefix(line, []byte("=ybegin ")) {
+			d.begin = true
+			d.m.Size, _ = extractInt(line, []byte(" size="))
+			d.m.Name, _ = extractString(line, []byte(" name="))
+			if _, err := extractInt(line, []byte(" part=")); err != nil {
+				d.body = true
+				d.m.End = d.m.Size
+				dlog(d.debug1, "DEBUG: yEnc single-part, body starts")
+			} else {
+				dlog(d.debug1, "DEBUG: yEnc multi-part, waiting for =ypart")
+			}
+		} else if bytes.HasPrefix(line, []byte("=ypart ")) {
+			d.part = true
 			d.body = true
-			d.m.End = d.m.Size
-			dlog(d.debug1, "DEBUG: yEnc single-part, body starts")
-		} else {
-			dlog(d.debug1, "DEBUG: yEnc multi-part, waiting for =ypart")
-		}
-	} else if bytes.HasPrefix(line, []byte("=ypart ")) {
-		d.part = true
-		d.body = true
-		if beginPos, err := extractInt(line, []byte(" begin=")); err == nil {
-			d.m.Begin = beginPos - 1
-		}
-		if endPos, err := extractInt(line, []byte(" end=")); err == nil {
-			d.m.End = endPos - 1
-		}
-		dlog(d.debug1, "DEBUG: =ypart found, body starts")
-	} else if bytes.HasPrefix(line, []byte("=yend ")) {
-		d.end = true
-		if d.part {
-			if crc, err := extractCRC(line, []byte(" pcrc32=")); err == nil {
+			if beginPos, err := extractInt(line, []byte(" begin=")); err == nil {
+				d.m.Begin = beginPos - 1
+			}
+			if endPos, err := extractInt(line, []byte(" end=")); err == nil {
+				d.m.End = endPos - 1
+			}
+			dlog(d.debug1, "DEBUG: =ypart found, body starts")
+		} else if bytes.HasPrefix(line, []byte("=yend ")) {
+			d.end = true
+			if d.part {
+				if crc, err := extractCRC(line, []byte(" pcrc32=")); err == nil {
+					d.expectedCrc = crc
+					d.crc = true
+				}
+			} else if crc, err := extractCRC(line, []byte(" crc32=")); err == nil {
 				d.expectedCrc = crc
 				d.crc = true
 			}
-		} else if crc, err := extractCRC(line, []byte(" crc32=")); err == nil {
-			d.expectedCrc = crc
-			d.crc = true
+			d.endSize, _ = extractInt(line, []byte(" size="))
+			dlog(d.debug1, "DEBUG: =yend found")
 		}
-		d.endSize, _ = extractInt(line, []byte(" size="))
-		dlog(d.debug1, "DEBUG: =yend found")
-	}
-}
+	case FormatUU:
+		if bytes.HasPrefix(line, []byte("begin ")) {
+			// UUencode header: begin <mode> <filename>
+			d.begin = true
+			d.body = true
+			d.format = FormatUU
+			// Optionally extract filename and mode
+			fields := bytes.Fields(line)
+			if len(fields) >= 3 {
+				d.m.Name = string(fields[2])
+			}
+			dlog(d.debug1, "DEBUG: UUencode begin found, body starts")
+		} else if bytes.Equal(line, []byte("end\r\n")) || bytes.Equal(line, []byte("end\n")) {
+			// UUencode trailer
+			d.end = true
+			d.body = false
+			dlog(d.debug1, "DEBUG: UUencode end found")
+		}
+	} // end switch d.format
+} //end func processYenc
 
 func detectFormat(line []byte) Format {
 	if bytes.HasPrefix(line, []byte("=ybegin ")) {
@@ -475,48 +517,7 @@ func detectFormat(line []byte) Format {
 	}
 
 	return FormatUnknown
-}
-
-// UUdecode decodes a single UUencoded line (e.g., "M<uu-bytes>\r\n").
-// It returns the decoded bytes or an error.
-func UUdecode(line []byte) ([]byte, error) {
-	if len(line) == 0 {
-		return nil, nil
-	}
-	// Remove trailing \r\n if present
-	if len(line) >= 2 && line[len(line)-2] == '\r' && line[len(line)-1] == '\n' {
-		line = line[:len(line)-2]
-	}
-	if len(line) == 0 {
-		return nil, nil
-	}
-	// The first byte is the encoded length
-	encLen := int(line[0]-0x20) & 0x3F
-	if encLen == 0 {
-		return []byte{}, nil
-	}
-	decoded := make([]byte, 0, encLen)
-	i := 1
-	for encLen > 0 && i+4 <= len(line) {
-		// Each group of 4 chars encodes 3 bytes
-		var c [4]byte
-		for j := 0; j < 4; j++ {
-			c[j] = (line[i+j] - 0x20) & 0x3F
-		}
-		decoded = append(decoded,
-			(c[0]<<2)|(c[1]>>4),
-			(c[1]<<4)|(c[2]>>2),
-			(c[2]<<6)|c[3],
-		)
-		i += 4
-		encLen -= 3
-	}
-	// Truncate to the actual length
-	if encLen < 0 {
-		decoded = decoded[:len(decoded)+encLen]
-	}
-	return decoded, nil
-}
+} //end func detectFormat
 
 type Format int
 
@@ -550,10 +551,6 @@ const (
 	EndNone    = End(C.RYDEC_END_NONE)    // end not reached
 	EndControl = End(C.RYDEC_END_CONTROL) // \r\n=y sequence found, src points to byte after 'y'
 	EndArticle = End(C.RYDEC_END_ARTICLE) // \r\n.\r\n sequence found, src points to byte after last '\n'
-)
-
-var (
-	errDestinationTooSmall = errors.New("destination must be at least the length of source")
 )
 
 var decodeInitOnce sync.Once
@@ -617,9 +614,46 @@ func extractInt(data, substr []byte) (int64, error) {
 	return strconv.ParseInt(string(data), 10, 64)
 }
 
-var (
-	errCrcNotfound = errors.New("crc not found")
-)
+// UUdecode decodes a single UUencoded line (e.g., "M<uu-bytes>\r\n").
+// It returns the decoded bytes or an error.
+func UUdecode(line []byte) ([]byte, error) {
+	if len(line) == 0 {
+		return nil, nil
+	}
+	// Remove trailing \r\n if present
+	if len(line) >= 2 && line[len(line)-2] == '\r' && line[len(line)-1] == '\n' {
+		line = line[:len(line)-2]
+	}
+	if len(line) == 0 {
+		return nil, nil
+	}
+	// The first byte is the encoded length
+	encLen := int(line[0]-0x20) & 0x3F
+	if encLen == 0 {
+		return []byte{}, nil
+	}
+	decoded := make([]byte, 0, encLen)
+	i := 1
+	for encLen > 0 && i+4 <= len(line) {
+		// Each group of 4 chars encodes 3 bytes
+		var c [4]byte
+		for j := 0; j < 4; j++ {
+			c[j] = (line[i+j] - 0x20) & 0x3F
+		}
+		decoded = append(decoded,
+			(c[0]<<2)|(c[1]>>4),
+			(c[1]<<4)|(c[2]>>2),
+			(c[2]<<6)|c[3],
+		)
+		i += 4
+		encLen -= 3
+	}
+	// Truncate to the actual length
+	if encLen < 0 {
+		decoded = decoded[:len(decoded)+encLen]
+	}
+	return decoded, nil
+} //end func UUdecode
 
 // extractCRC converts a hexadecimal representation of a crc32 hash
 // from the data starting after the given substring.

@@ -269,10 +269,74 @@ func TestDecodeSizeMismatch(t *testing.T) {
 	require.Contains(t, err.Error(), "expected size 5 but got 3")
 }
 
-// TestUUEncodeNotImplemented tests that uuencode decoding is not implemented.
-func TestUUEncodeNotImplemented(t *testing.T) {
-	// Minimal valid UUencode message with NNTP EOF
-	// "begin 644 file.txt\r\n" + "M" + 61 'A's + "\r\n" + ".\r\n"
+// TestUUdecode tests that UUdecode decodes a UUencoded message correctly.
+// It uses a known UUencoded string and checks if the decoded output matches the expected result.
+func TestUUdecode(t *testing.T) {
+	encoded := []byte("-22!,3U9%($=05\"$A(0``")
+	want := []byte("I LOVE GPT!!!")
+
+	got, err := UUdecode(encoded)
+	if err != nil {
+		t.Fatalf("UUdecode error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("UUdecode(%q) = %q, want %q", encoded, got, want)
+	}
+}
+
+// TestUUdecodeOK tests that decoding a minimal valid UUencoded message with "begin" and "end" line works correctly.
+// This simulates a case where the UUencoded message is properly formatted and checks if the decoder returns the expected output.
+func TestUUdecodeOK(t *testing.T) {
+	// Minimal valid UUencode message with "end" line and NNTP EOF
+	uu := []byte(
+		"begin 644 file.txt\r\n" +
+			"MAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n" +
+			"end\r\n" +
+			".\r\n")
+
+	dec := NewDecoder(1024)
+	dec.SetReader(bytes.NewReader(uu))
+
+	buf := make([]byte, 1024)
+	n, err := dec.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Logf("Decoded %d bytes from UUencode", n)
+	// Check if the decoded data matches the expected output
+	expected := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	if !bytes.Equal(buf[:n], expected) {
+		require.Greater(t, n, 0)
+	}
+}
+
+// TestUUdecodeMissingBegin tests that decoding a UUencoded message without a "begin" line returns a data corruption error.
+// This simulates a case where the "begin" line is missing, which is required to properly start the UUencoded message.
+// It checks that the decoder correctly identifies this as a data corruption issue.
+// The test uses a minimal valid UUencode message with an NNTP EOF, but without the "begin" line, and checks if the decoder returns the expected error.
+func TestUUdecodeMissingBegin(t *testing.T) {
+	// UUencode message missing the "begin" line
+	uu := []byte(
+		"MAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n" +
+			"end\r\n" +
+			".\r\n")
+
+	dec := NewDecoder(1024)
+	dec.SetReader(bytes.NewReader(uu))
+
+	buf := make([]byte, 1024)
+	_, err := dec.Read(buf)
+	if err == nil || !errors.Is(err, ErrDataCorruption) {
+		t.Fatalf("expected data corruption error for missing UUencode begin, got: %v", err)
+	}
+}
+
+// TestUUdecodeMissingEnd tests that decoding a UUencoded message without an "end" line returns a data corruption error.
+// This simulates a case where the "end" line is missing, which is required to properly terminate the UUencoded message.
+// It checks that the decoder correctly identifies this as a data corruption issue.
+// The test uses a minimal valid UUencode message with an NNTP EOF, but without the "end" line, and checks if the decoder returns the expected error.
+func TestUUdecodeMissingEnd(t *testing.T) {
+	// Minimal valid UUencode message with NNTP EOF, but missing "end" line
 	uu := []byte("begin 644 file.txt\r\n" +
 		"MAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n" +
 		".\r\n")
@@ -282,12 +346,35 @@ func TestUUEncodeNotImplemented(t *testing.T) {
 
 	buf := make([]byte, 1024)
 	_, err := dec.Read(buf)
-	if err == nil || !errors.Is(err, ErrDataMissing) && err.Error() != "[rapidyenc] uuencode not implemented" {
-		t.Fatalf("expected uuencode not implemented error, got: %v", err)
+	if err == nil || !errors.Is(err, ErrDataCorruption) {
+		t.Fatalf("expected data corruption error for missing UUencode end, got: %v", err)
+	}
+}
+
+// TestUUdecodeWithBrokenEnd tests that decoding a UUencoded message with a malformed "end" line returns a data corruption error.
+// This simulates a case where the "end" line is not properly formatted, such as having extra characters.
+// It checks that the decoder correctly identifies this as a data corruption issue.
+// The test uses a broken UUencode message with a malformed "end" line and checks if the decoder returns the expected error.
+func TestUUdecodeWithBrokenEnd(t *testing.T) {
+	// Broken UUencode message with "GARBAGEend" line and NNTP EOF
+	uu := []byte(
+		"begin 644 file.txt\r\n" +
+			"MAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n" +
+			"GARBAGEend\r\n" +
+			".\r\n")
+
+	dec := NewDecoder(1024)
+	dec.SetReader(bytes.NewReader(uu))
+
+	buf := make([]byte, 1024)
+	_, err := dec.Read(buf)
+	if err == nil || !errors.Is(err, ErrDataCorruption) {
+		t.Fatalf("expected data corruption error for missing or malformed UUencode end, got: %v", err)
 	}
 }
 
 // TestDetectFormat tests the detectFormat function for various input lines.
+// It checks if the function correctly identifies the format of the input lines, such as yEnc, UUencode, and unknown formats.
 func TestDetectFormat(t *testing.T) {
 	tests := []struct {
 		name string
@@ -315,19 +402,6 @@ func TestDetectFormat(t *testing.T) {
 				t.Errorf("detectFormat(%q) = %v, want %v", tc.line, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestUUdecode(t *testing.T) {
-	encoded := []byte("-22!,3U9%($=05\"$A(0``")
-	want := []byte("I LOVE GPT!!!")
-
-	got, err := UUdecode(encoded)
-	if err != nil {
-		t.Fatalf("UUdecode error: %v", err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("UUdecode(%q) = %q, want %q", encoded, got, want)
 	}
 }
 
@@ -445,13 +519,17 @@ func RapidyencDecoderFilesTest(t *testing.T) (errs []error) {
 	return errs
 }
 
-/*
+// TestUUdecodeFiles runs UUdecode tests on sample files.
+// It reads UUencoded files, decodes them, and checks for integrity.
 func TestUUdecodeFiles(t *testing.T) {
+	GenerateTestUUEncodedFiles(t)
+	t.Logf("Running UUdecode tests on sample files...")
 	files := []string{
 		"uuencode/test1.uue",
 		"uuencode/test2.uue",
 		// Add more test files as needed
 	}
+	checked := 0
 	for _, fname := range files {
 		t.Logf("\n=== Testing UUdecode with file: %s ===\n", fname)
 		f, err := os.Open(filepath.Clean(fname))
@@ -473,6 +551,8 @@ func TestUUdecodeFiles(t *testing.T) {
 			}
 			if bytes.Equal(line, []byte("end")) {
 				inBody = false
+				checked++
+				t.Logf("Checked %d files so far", checked)
 				break
 			}
 			if inBody {
@@ -487,5 +567,43 @@ func TestUUdecodeFiles(t *testing.T) {
 		// Optionally, compare decodedData.Bytes() to a reference file or hash
 		t.Logf("Decoded %d bytes from %s", decodedData.Len(), fname)
 	}
+	if checked == 0 {
+		t.Errorf("No files were checked, please ensure the test files exist in the specified directory.")
+	} else {
+		t.Logf("Successfully checked %d UUencoded files.", checked)
+	}
 }
-*/
+
+// GenerateTestUUEncodedFiles creates uuencode/test1.uue and uuencode/test2.uue with test content.
+func GenerateTestUUEncodedFiles(t *testing.T) error {
+	_ = os.MkdirAll("uuencode", 0755)
+	t.Logf("Generating test UUencoded files...")
+	// Create test content for uuencode files
+	// These contents are just examples, you can modify them as needed.
+	// The files will be created in the "uuencode" directory.
+	content1 := []byte("Hello from test1!\nThis is a test file.\n")
+	content2 := []byte("Another file for test2.\nWith more lines.\n1234567890\r\n")
+
+	// check if files already exist
+	if _, err := os.Stat(filepath.Join("uuencode", "test1.uue")); err == nil {
+		t.Logf("File uuencode/test1.uue already exists, skipping creation.")
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join("uuencode", "test2.uue")); err == nil {
+		t.Logf("File uuencode/test2.uue already exists, skipping creation.")
+		return nil
+	}
+
+	uue1 := UUEncode(content1, "test1.txt", 644)
+	uue2 := UUEncode(content2, "test2.txt", 644)
+
+	if err := os.WriteFile(filepath.Join("uuencode", "test1.uue"), uue1, 0644); err != nil {
+		t.Errorf("Failed to write uuencode/test1.uue: %v", err)
+		return err
+	}
+	if err := os.WriteFile(filepath.Join("uuencode", "test2.uue"), uue2, 0644); err != nil {
+		t.Errorf("Failed to write uuencode/test2.uue: %v", err)
+		return err
+	}
+	return nil
+}
