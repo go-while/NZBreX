@@ -54,7 +54,7 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 			switch(c) {
 				case '\r':
 					// skip past \r\n. sequences
-					//i += (es[i+1] == '\n' && es[i+2] == '.') << 1;
+					// The following logic checks for the specific sequence '\r\n.' and skips it
 					if(es[i+1] == '\n' && es[i+2] == '.') {
 						i += 2;
 						continue;
