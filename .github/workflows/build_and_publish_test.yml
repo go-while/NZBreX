@@ -3,17 +3,18 @@ name: "TEST Self-Hosted Runners"
 on:
   push:
     branches:
-      - 'testing'
+      - 'main'
+      - 'testing-*'
     tags:
       - "test_rapidyenc"
   release:
     types: [published]
   workflow_dispatch:
   repository_dispatch:
-  pull_request:
-    branches:
-      - main
-      #- "test*"
+  #pull_request:
+  #  branches:
+  #    - main
+  #    - "test*"
 
 permissions:
   contents: write
@@ -581,7 +582,7 @@ jobs:
 
       - name: "Upload Release Assets to github"
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
           files: |
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
