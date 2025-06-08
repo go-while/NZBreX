@@ -444,3 +444,46 @@ func RapidyencDecoderFilesTest(t *testing.T) (errs []error) {
 	} // end for range files
 	return errs
 }
+
+func TestUUdecodeFiles(t *testing.T) {
+	files := []string{
+		"uuencode/test1.uue",
+		"uuencode/test2.uue",
+		// Add more test files as needed
+	}
+	for _, fname := range files {
+		t.Logf("\n=== Testing UUdecode with file: %s ===\n", fname)
+		f, err := os.Open(filepath.Clean(fname))
+		if err != nil {
+			t.Errorf("Failed to open %s: %v\n", fname, err)
+			continue
+		}
+		defer f.Close()
+
+		var decodedData bytes.Buffer
+		scanner := bufio.NewScanner(f)
+		inBody := false
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			// Detect UUencode header
+			if bytes.HasPrefix(line, []byte("begin ")) {
+				inBody = true
+				continue
+			}
+			if bytes.Equal(line, []byte("end")) {
+				inBody = false
+				break
+			}
+			if inBody {
+				decoded, err := UUdecode(line)
+				if err != nil {
+					t.Errorf("UUdecode error in %s: %v", fname, err)
+					break
+				}
+				decodedData.Write(decoded)
+			}
+		}
+		// Optionally, compare decodedData.Bytes() to a reference file or hash
+		t.Logf("Decoded %d bytes from %s", decodedData.Len(), fname)
+	}
+}
