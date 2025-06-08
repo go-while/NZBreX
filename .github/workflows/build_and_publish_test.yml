@@ -2,18 +2,18 @@ name: "TEST Self-Hosted Runners"
 
 on:
   push:
-    branches:
-      - 'testing'
+  #  branches:
+  #    - 'testing'
     tags:
-      - "test_rapidyenc"
+      - "testing"
   release:
     types: [published]
   workflow_dispatch:
   repository_dispatch:
-  pull_request:
-    branches:
-      - main
-      #- "test*"
+  #pull_request:
+  #  branches:
+  #    - main
+  #    - "test*"
 
 permissions:
   contents: write
