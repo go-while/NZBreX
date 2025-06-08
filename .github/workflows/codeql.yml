@@ -27,6 +27,11 @@ jobs:
             build-mode: autobuild
             runner: [self-hosted, ubu2204-gor]
             runner_name: "SHR-ubu2204-gor"
+          # run codeQL on SHR: Go
+          - language: go
+            build-mode: autobuild
+            runner: [self-hosted, ubu2404-gor]
+            runner_name: "SHR-ubu2404-gor"
           # run codeQL on GH: Go
           - language: go
             build-mode: autobuild
@@ -37,6 +42,11 @@ jobs:
             build-mode: manual
             runner: [self-hosted, ubu2204-gor]
             runner_name: "SHR-ubu2204-gor"
+          # run codeQL on SHR: C/C++
+          - language: c-cpp
+            build-mode: manual
+            runner: [self-hosted, ubu2404-gor]
+            runner_name: "SHR-ubu2404-gor"
           # run codeQL on GH: C/C++
           - language: c-cpp
             build-mode: manual
@@ -47,6 +57,11 @@ jobs:
             build-mode: none
             runner: [self-hosted, ubu2204-gor]
             runner_name: "SHR-ubu2204-gor"
+          # run codeQL on SHR: Actions
+          - language: actions
+            build-mode: none
+            runner: [self-hosted, ubu2404-gor]
+            runner_name: "SHR-ubu2404-gor"
           # run codeQL on GH: Actions
           - language: actions
             build-mode: none
@@ -65,7 +80,7 @@ jobs:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended,security-and-quality
-        ram: 1 # Optional, specify in GB
+        ram: 4 # Optional, specify in GB
 
     - name: Build (manual, for C/C++)
       if: matrix.language == 'c-cpp'
