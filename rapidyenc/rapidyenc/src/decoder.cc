@@ -303,7 +303,7 @@ static RapidYenc::YencDecoderEnd do_decode_end_scalar(const unsigned char** src,
 			default:
 				*p++ = c - 42;
 		}
-		i++;
+		i++; // Increment i explicitly to move to the next character after processing the current one
 	}
 	if(state) *state = YDEC_STATE_NONE;
 	
