@@ -10,10 +10,7 @@ on:
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.runner }}-${{ matrix.language }})
-    #name: Analyze (${{ matrix.language }})
-    #runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
-    #runs-on: [self-hosted, ubu2204-gor]
+    name: Analyze (${{ matrix.runner_name }}-${{ matrix.language }})
     runs-on: ${{ matrix.runner }}
     permissions:
       security-events: write
@@ -24,17 +21,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [go, c-cpp, actions]
-        runner:
-          - [self-hosted, ubu2204-gor]
-          - ubuntu-latest
         include:
           - language: go
             build-mode: autobuild
+            runner: [self-hosted, ubu2204-gor]
+            runner_name: "SHR-ubu2204-gor"
+          - language: go
+            build-mode: autobuild
+            runner: ubuntu-latest
+            runner_name: "GH-ubuntu-latest"
           - language: c-cpp
             build-mode: manual
+            runner: [self-hosted, ubu2204-gor]
+            runner_name: "SHR-ubu2204-gor"
+          - language: c-cpp
+            build-mode: manual
+            runner: ubuntu-latest
+            runner_name: "GH-ubuntu-latest"
           - language: actions
             build-mode: none
+            runner: ubuntu-latest
+            runner_name: "GH-ubuntu-latest"
 
     steps:
     - name: Checkout repository
