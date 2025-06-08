@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [ "main" ]
   schedule:
-    - cron: '06 00 * * 1'
+    - cron: '16 06 * * 1'
 
 jobs:
   analyze:
@@ -23,6 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        language: [go, c-cpp, actions]
         runner:
           - [self-hosted, ubu2204-gor]
           - ubuntu-latest
