@@ -202,15 +202,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 	n, err := 0, error(nil)
 	for {
 		// Defensive: clamp d.dst0 and d.dst1 to valid range BEFORE using them
-		if d.dst0 < 0 {
-			d.dst0 = 0
-		}
-		if d.dst1 > len(d.dst) {
-			d.dst1 = len(d.dst)
-		}
-		if d.dst0 > d.dst1 {
-			d.dst0 = d.dst1
-		}
+		d.clampDst()
 
 		// Copy out any transformed bytes and return the final error if we are done.
 		if d.dst0 != d.dst1 {
@@ -233,12 +225,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 			d.dst1, n, err = d.Transform(d.dst, d.src[d.src0:d.src1], d.err == io.EOF)
 			d.src0 += n
 			// Clamp again after increment
-			if d.src0 < 0 {
-				d.src0 = 0
-			}
-			if d.src0 > d.src1 {
-				d.src0 = d.src1
-			}
+			d.clampSrc()
 
 			switch {
 			case err == nil:
@@ -259,13 +246,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 		// Move any untransformed source bytes to the start of the buffer
 		// and read more bytes.
 		if d.src0 != 0 {
-			// Clamp d.src0 BEFORE slicing!
-			if d.src0 < 0 {
-				d.src0 = 0
-			}
-			if d.src0 > d.src1 {
-				d.src0 = d.src1
-			}
+			d.clampSrc()
 			d.src0, d.src1 = 0, copy(d.src, d.src[d.src0:d.src1])
 		}
 		n, d.err = d.r.Read(d.src[d.src1:])
@@ -611,3 +592,26 @@ func dlog(logthis bool, format string, a ...any) {
 	}
 	log.Printf(format, a...)
 } // end dlog
+
+// clampDst clamps d.dst0 and d.dst1 to valid ranges
+func (d *Decoder) clampDst() {
+	if d.dst0 < 0 {
+		d.dst0 = 0
+	}
+	if d.dst1 > len(d.dst) {
+		d.dst1 = len(d.dst)
+	}
+	if d.dst0 > d.dst1 {
+		d.dst0 = d.dst1
+	}
+}
+
+// clampSrc clamps d.src0 to [0, d.src1]
+func (d *Decoder) clampSrc() {
+	if d.src0 < 0 {
+		d.src0 = 0
+	}
+	if d.src0 > d.src1 {
+		d.src0 = d.src1
+	}
+}
