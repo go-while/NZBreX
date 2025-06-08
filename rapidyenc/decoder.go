@@ -451,24 +451,25 @@ func detectFormat(line []byte) Format {
 	}
 
 	length := len(line)
-	if length >= 1 && line[0] == 'M' && ((length == 63 && (line[62] == '\n' || line[62] == '\r')) ||
-		(length == 62 && (line[61] == '\n' || line[61] == '\r'))) {
+	if length >= 1 && line[0] == 'M' &&
+		((length == 63 && (line[62] == '\n' || line[62] == '\r')) ||
+			(length == 62 && (line[61] == '\n' || line[61] == '\r'))) {
 		return FormatUU
 	}
 
 	if bytes.HasPrefix(line, []byte("begin ")) {
-		ok := true
 		pos := len("begin ")
-		for pos < len(line) && line[pos] != ' ' {
-			pos++
-
-			if line[pos] < '0' || line[pos] > '7' {
-				ok = false
-				break
+		// Parse mode: must be 3 octal digits
+		if pos+3 <= len(line) {
+			for i := range 3 {
+				if line[pos+i] < '0' || line[pos+i] > '7' {
+					return FormatUnknown
+				}
 			}
-		}
-		if ok {
-			return FormatUU
+			// Next must be a space
+			if pos+3 < len(line) && line[pos+3] == ' ' {
+				return FormatUU
+			}
 		}
 	}
 
