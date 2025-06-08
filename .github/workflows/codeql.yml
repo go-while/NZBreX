@@ -28,7 +28,7 @@ jobs:
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor-001"
             ram: 12
-            cache: true
+            cache: false
 
           # run codeQL on SHR: Go
           - language: go
@@ -36,7 +36,7 @@ jobs:
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor-001"
             ram: 12
-            cache: true
+            cache: false
 
           # run codeQL on SHR: C/C++
           - language: c-cpp
@@ -44,7 +44,7 @@ jobs:
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor-001"
             ram: 12
-            cache: true
+            cache: false
 
           # run codeQL on SHR: C/C++
           - language: c-cpp
@@ -52,7 +52,7 @@ jobs:
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor-001"
             ram: 12
-            cache: true
+            cache: false
 
           # run codeQL on SHR: Actions
           - language: actions
@@ -60,7 +60,7 @@ jobs:
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor-001"
             ram: 12
-            cache: true
+            cache: false
 
           # run codeQL on SHR: Actions
           - language: actions
@@ -68,7 +68,7 @@ jobs:
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor-001"
             ram: 12
-            cache: true
+            cache: false
 
           # run codeQL on GH: Actions
           - language: actions
@@ -96,6 +96,29 @@ jobs:
 
 
     steps:
+    - name: Show actor
+      run: echo "Triggered by ${{ github.actor }}"
+
+    # Block unallowed push users
+    - name: Block unallowed push user
+      if: github.event_name == 'push' && github.actor != 'go-while'
+      run: |
+        echo "Push not allowed for user ${{ github.actor }}"
+        exit 1
+
+    # Block unallowed PR users
+    - name: Block unallowed PR user
+      if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
+      run: |
+        echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
+        exit 1
+
+    - name: "@Start Clean directory"
+      run: |
+        echo "deleting workspace"
+        rm -rf dist build ${{ github.workspace }}/
+        mkdir -vp ${{ github.workspace }}
+
     - name: Set up Go
       if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
       uses: actions/setup-go@v5
@@ -139,3 +162,9 @@ jobs:
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
+
+    - name: "@End Clean directory"
+      run: |
+        echo "deleting workspace"
+        rm -rf dist build ${{ github.workspace }}/
+        mkdir -vp ${{ github.workspace }}
