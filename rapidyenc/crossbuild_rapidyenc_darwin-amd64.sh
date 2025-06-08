@@ -1,6 +1,7 @@
+#!/usr/bin/env bash
 cd rapidyenc || exit 2
-rm -rf rapidyenc/build
-mkdir -p build 
+rm -rf build
+mkdir -p build
 cd build || exit 3
 cmake .. -DCMAKE_TOOLCHAIN_FILE=../../toolchain-darwin.cmake || exit 4
 cmake --build . --config Release || exit 5
