@@ -71,8 +71,16 @@ jobs:
       if: matrix.language == 'c-cpp'
       # Run the build step only for C/C++ jobs
       run: |
-        cd rapidyenc # enter the workdir
-        test ! -e rapidyenc && ./clone_rapidyenc.sh
+        cd rapidyenc
+        if [ ! -e rapidyenc ]; then
+          ./clone_rapidyenc.sh
+          if [ ! -e rapidyenc/.git ]; then
+            echo "rapidyenc/ src not found, exiting"
+            exit 1
+          fi
+        else
+          echo "rapidyenc/ src exists, skipping clone"
+        fi
         ./build_rapidyenc_linux-amd64.sh
 
     - name: Perform CodeQL Analysis
