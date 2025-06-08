@@ -352,7 +352,17 @@ jobs:
 #        run: runner/go-cache-restore.sh
 
       - name: "clone rapidyenc"
-        run: cd rapidyenc && ./clone_rapidyenc.sh
+        run: |
+          cd rapidyenc
+          if [ ! -e rapidyenc ]; then
+            ./clone_rapidyenc.sh
+            if [ ! -e rapidyenc/.git ]; then
+              echo "rapidyenc/ src not found, exiting"
+              exit 1
+            fi
+          else
+            echo "rapidyenc/ src exists, skipping clone"
+          fi
 
       - name: "compile rapidyenc linux-amd64"
         if: matrix.os == 'linux' && matrix.arch == 'amd64'

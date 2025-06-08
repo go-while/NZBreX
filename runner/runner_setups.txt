@@ -3,7 +3,7 @@
 
 ## get setup script
 apt -y update && apt -y full-upgrade && apt -y install psmisc vnstat
-wget https://github.com/go-while/NZBreX/raw/refs/heads/gpt-tests-1748319193/runner/runner_install_debian.sh -O /root/runner_install_debian.sh
+wget https://raw.githubusercontent.com/go-while/NZBreX/refs/heads/testing/runner/runner_install_debian.sh -O /root/runner_install_debian.sh
 chmod +x /root/runner_install_debian.sh
 vnstat --create -i eth0 || vnstat --add -i eth0
 chown -R vnstat:vnstat /var/lib/vnstat
@@ -45,3 +45,5 @@ userdel -r go-while
 
 ### goreleaser-dedicated runners
 ./runner_install_debian.sh "go-while" "/home/go-while" "go-while" "NZBreX" "$GATOKEN" "ubu2204-gor" "runner-ubu2204-gor-001" "default"
+
+./runner_install_debian.sh "NZBreX" "/home/NZBreX" "go-while" "NZBreX" "$GATOKEN" "ubu2404-gor" "runner-ubu2404-gor-001" "default"
