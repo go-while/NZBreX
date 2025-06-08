@@ -178,25 +178,6 @@ func (d *Decoder) SetSegmentId(segId *string) {
 }
 
 // Meta returns the Meta information parsed from the yEnc headers.
-/*
-	// This includes the size of the file, the begin and end offsets, the CRC32 hash,
-	// and the name of the file.
-	// This is set when the ybegin, ypart, and yend headers are processed.
-	// If the headers are not present, the Meta will contain default values.
-	// The Meta can be used to verify the integrity of the decoded data and to
-	// extract information about the file being decoded.
-	// It is recommended to call this after the decoder has processed the yEnc data,
-	// typically after the Read method has returned io.EOF.
-	// If the yEnc headers are not present, the Meta will contain default values.
-	// For example, Size will be 0, Begin and End will be 0, Hash will be 0,
-	// and Name will be an empty string.
-	// If the yEnc headers are present, the Meta will contain the parsed values.
-	// For example, Size will be the total size of the file, Begin will be the
-	// part begin offset (0-indexed), End will be the part end offset (0-indexed, exclusive),
-	// Hash will be the CRC32 hash of the decoded data, and Name will be the name of the file.
-	// This is useful for verifying the integrity of the decoded data and for extracting
-	// information about the file being decoded.
-*/
 func (d *Decoder) Meta() Meta {
 	return d.m
 }
@@ -216,6 +197,10 @@ var (
 	ErrCrcMismatch    = errors.New("crc32 mismatch")
 )
 
+// Read reads transformed bytes from the Decoder instance.
+// It reads from the underlying io.Reader, transforms the data using the Transform method,
+// and returns the transformed bytes in the provided byte slice p.
+// It returns the number of bytes read and any error encountered during the process.
 func (d *Decoder) Read(p []byte) (int, error) {
 	n, err := 0, error(nil)
 	for {
@@ -586,6 +571,10 @@ var (
 )
 
 // extractCRC converts a hexadecimal representation of a crc32 hash
+// from the data starting after the given substring.
+// It searches for the substring in the data, and if found, it extracts
+// the crc32 hash value, ensuring it is 8 characters long.
+// Zero-pads the value if it is shorter than 8 characters.
 func extractCRC(data, substr []byte) (uint32, error) {
 	start := bytes.Index(data, substr)
 	if start == -1 {
