@@ -222,7 +222,7 @@ static RapidYenc::YencDecoderEnd do_decode_end_scalar(const unsigned char** src,
 	} else // treat as YDEC_STATE_CRLF
 		goto do_decode_endable_scalar_c0;
 	
-	for(; i < -2; i++) {
+	while (i < -2) {
 		c = es[i];
 		switch(c) {
 			case '\r': if(es[i+1] == '\n') {
@@ -283,6 +283,7 @@ static RapidYenc::YencDecoderEnd do_decode_end_scalar(const unsigned char** src,
 			default:
 				*p++ = c - 42;
 		}
+		i++; // Increment `i` at the end of each iteration
 	}
 	if(state) *state = YDEC_STATE_NONE;
 	
