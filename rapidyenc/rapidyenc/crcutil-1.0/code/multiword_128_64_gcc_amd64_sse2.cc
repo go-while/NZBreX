@@ -93,20 +93,33 @@ uint128_sse2 GenericCrc<uint128_sse2, uint128_sse2, uint64, 4>::CrcMultiword(
 template<> uint128_sse2
 GenericCrc<uint128_sse2, uint128_sse2, uint64, 4>::CrcMultiwordGccAmd64Sse2(
     const uint8 *src, const uint8 *end, const uint128_sse2 &start) const {
-  __m128i crc0 = start;
-  __m128i crc1;
-  __m128i crc2;
-  __m128i crc3;
-  __m128i crc_carryover;
+  // This function computes a multiword CRC using GCC assembly optimizations
+  // for AMD64 architecture with SSE2 instructions. It processes data in
+  // chunks and uses SIMD registers to perform efficient CRC calculations.
+  // Inputs:
+  //   - src: Pointer to the start of the data buffer.
+  //   - end: Pointer to the end of the data buffer.
+  //   - start: Initial CRC value.
+  // Output:
+  //   - Returns the computed CRC value as a uint128_sse2 object.
 
-  uint64 buf0;
-  uint64 buf1;
-  uint64 buf2;
-  uint64 buf3;
+  __m128i crc0 = start;  // Initialize CRC register with the starting value.
+  __m128i crc1;          // Temporary CRC register for intermediate values.
+  __m128i crc2;          // Temporary CRC register for intermediate values.
+  __m128i crc3;          // Temporary CRC register for intermediate values.
+  __m128i crc_carryover; // Register for carryover CRC calculations.
 
-  uint64 tmp0;
-  uint64 tmp1;
+  uint64 buf0;  // Buffer for data processing.
+  uint64 buf1;  // Buffer for data processing.
+  uint64 buf2;  // Buffer for data processing.
+  uint64 buf3;  // Buffer for data processing.
 
+  uint64 tmp0;  // Temporary variable for intermediate calculations.
+  uint64 tmp1;  // Temporary variable for intermediate calculations.
+
+  // Assembly block for CRC calculation. This block uses SIMD instructions
+  // to process data efficiently. The 'sub' instruction adjusts the end
+  // pointer to align with the processing requirements.
   asm(
     "sub $2*4*8 - 1, %[end]\n"
     "cmpq  %[src], %[end]\n"
