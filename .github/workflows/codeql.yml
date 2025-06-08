@@ -51,7 +51,7 @@ jobs:
         ./build_rapidyenc_linux-amd64.sh
 
     - name: Perform CodeQL Analysis
-      if: matrix.language != 'actions'
+      #if: matrix.language != 'actions'
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
