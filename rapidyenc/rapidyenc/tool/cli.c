@@ -16,88 +16,105 @@ static int print_usage(const char *app) {
 #define LINE_SIZE 128
 
 int main(int argc, char **argv) {
-	if(argc < 2)
-		return print_usage(argv[0]);
-	if(argv[1][0] != 'e' && argv[1][0] != 'd')
-		return print_usage(argv[0]);
-	
+    // Main function for the rapidyenc tool.
+    // This function handles encoding or decoding of data from stdin to stdout,
+    // based on the command-line arguments provided.
+    // It performs error handling, memory allocation, and optional CRC computation.
+
+    // Check if the correct number of arguments is provided.
+    if(argc < 2)
+        return print_usage(argv[0]);
+    // Validate the operation mode (encode or decode).
+    if(argv[1][0] != 'e' && argv[1][0] != 'd')
+        return print_usage(argv[0]);
+    
 #ifdef RAPIDYENC_DISABLE_ENCODE
-	if(argv[1][0] == 'e') {
-		fprintf(stderr, "encoder has been disabled in this build\n");
-		return 1;
-	}
+    // Handle case where encoding is disabled in the build.
+    if(argv[1][0] == 'e') {
+        fprintf(stderr, "encoder has been disabled in this build\n");
+        return 1;
+    }
 #endif
 #ifdef RAPIDYENC_DISABLE_DECODE
-	if(argv[1][0] == 'd') {
-		fprintf(stderr, "decoder has been disabled in this build\n");
-		return 1;
-	}
+    // Handle case where decoding is disabled in the build.
+    if(argv[1][0] == 'd') {
+        fprintf(stderr, "decoder has been disabled in this build\n");
+        return 1;
+    }
 #endif
-	
-	FILE* infile = stdin; // fopen("", "rb");
-	if(!infile) {
-		fprintf(stderr, "error opening input: %s\n", strerror(errno));
-		return 1;
-	}
-	FILE* outfile = stdout; // fopen("", "rb");
-	if(!outfile) {
-		fprintf(stderr, "error opening output: %s\n", strerror(errno));
-		fclose(infile);
-		return 1;
-	}
-	
-	void* data = malloc(BUFFER_SIZE);
-	if(!data) {
-		fprintf(stderr, "error allocating input buffer\n");
-		fclose(infile);
-		fclose(outfile);
-		return 1;
-	}
-	
+    
+    // Open input and output streams.
+    FILE* infile = stdin; // Default to stdin for input.
+    if(!infile) {
+        fprintf(stderr, "error opening input: %s\n", strerror(errno));
+        return 1;
+    }
+    FILE* outfile = stdout; // Default to stdout for output.
+    if(!outfile) {
+        fprintf(stderr, "error opening output: %s\n", strerror(errno));
+        fclose(infile);
+        return 1;
+    }
+    
+    // Allocate buffer for reading input data.
+    void* data = malloc(BUFFER_SIZE);
+    if(!data) {
+        fprintf(stderr, "error allocating input buffer\n");
+        fclose(infile);
+        fclose(outfile);
+        return 1;
+    }
+    
 #ifndef RAPIDYENC_DISABLE_CRC
-	rapidyenc_crc_init();
-	uint32_t crc = 0;
+    // Initialize CRC computation if enabled.
+    rapidyenc_crc_init();
+    uint32_t crc = 0;
 #endif
-	int has_error = 0;
-	
+    int has_error = 0; // Flag to track errors during processing.
+    
 #ifndef RAPIDYENC_DISABLE_ENCODE
-	if(argv[1][0] == 'e') {
-		void* output = malloc(rapidyenc_encode_max_length(BUFFER_SIZE, LINE_SIZE));
-		if(!output) {
-			fprintf(stderr, "error allocating output buffer\n");
-			fclose(infile);
-			fclose(outfile);
-			free(data);
-			return 1;
-		}
-		rapidyenc_encode_init();
-		
-		int column = 0;
-		while(1) {
-			size_t read = fread(data, 1, BUFFER_SIZE, infile);
-			int eof = feof(infile);
-			if(read < BUFFER_SIZE && !eof) {
-				if(ferror(infile)) {
-					fprintf(stderr, "error reading input\n");
-				} else {
-					fprintf(stderr, "error: got zero bytes when reading input\n");
-				}
-				has_error = 1;
-				break;
-			}
-			size_t out_len = rapidyenc_encode_ex(LINE_SIZE, &column, data, output, read, eof);
+    // Encoding block: Handles encoding of input data to output.
+    if(argv[1][0] == 'e') {
+        void* output = malloc(rapidyenc_encode_max_length(BUFFER_SIZE, LINE_SIZE));
+        if(!output) {
+            fprintf(stderr, "error allocating output buffer\n");
+            fclose(infile);
+            fclose(outfile);
+            free(data);
+            return 1;
+        }
+        rapidyenc_encode_init(); // Initialize the encoder.
+        
+        int column = 0; // Tracks the current column for encoding.
+        while(1) {
+            // Read data from input stream.
+            size_t read = fread(data, 1, BUFFER_SIZE, infile);
+            int eof = feof(infile); // Check for end-of-file.
+            if(read < BUFFER_SIZE && !eof) {
+                // Handle errors during reading.
+                if(ferror(infile)) {
+                    fprintf(stderr, "error reading input\n");
+                } else {
+                    fprintf(stderr, "error: got zero bytes when reading input\n");
+                }
+                has_error = 1;
+                break;
+            }
+            // Perform encoding and write to output stream.
+            size_t out_len = rapidyenc_encode_ex(LINE_SIZE, &column, data, output, read, eof);
 #ifndef RAPIDYENC_DISABLE_CRC
-			crc = rapidyenc_crc(data, read, crc);
+            // Update CRC with the input data.
+            crc = rapidyenc_crc(data, read, crc);
 #endif
-			if(fwrite(output, 1, out_len, outfile) != out_len) {
-				fprintf(stderr, "error writing output\n");
-				has_error = 1;
-				break;
-			}
-			if(eof) break;
-		}
-		free(output);
-	}
+            if(fwrite(output, 1, out_len, outfile) != out_len) {
+                fprintf(stderr, "error writing output\n");
+                has_error = 1;
+                break;
+            }
+            if(eof) break; // Exit loop on end-of-file.
+        }
+        free(output); // Free allocated memory for output buffer.
+    }
 #endif
 #ifndef RAPIDYENC_DISABLE_DECODE
 	if(argv[1][0] == 'd') {
