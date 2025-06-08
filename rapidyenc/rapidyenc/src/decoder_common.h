@@ -1,3 +1,6 @@
+#ifndef RAPIDYENC_SRC_DECODER_COMMON_H
+#define RAPIDYENC_SRC_DECODER_COMMON_H
+
 #include "decoder.h"
 
 namespace RapidYenc {
@@ -159,6 +162,8 @@ template<bool isRaw, bool searchEnd, size_t width, void(&kernel)(const uint8_t*,
 static RapidYenc::YencDecoderEnd do_decode_simd(const unsigned char** src, unsigned char** dest, size_t len, RapidYenc::YencDecoderState* state) {
 	return _do_decode_simd<isRaw, searchEnd, kernel>(width, src, dest, len, state);
 }
+
+#endif // RAPIDYENC_SRC_DECODER_COMMON_H
 template<bool isRaw, bool searchEnd, size_t(&getWidth)(), void(&kernel)(const uint8_t*, long&, unsigned char*&, unsigned char&, uint16_t&)>
 static RapidYenc::YencDecoderEnd do_decode_simd(const unsigned char** src, unsigned char** dest, size_t len, RapidYenc::YencDecoderState* state) {
 	return _do_decode_simd<isRaw, searchEnd, kernel>(getWidth(), src, dest, len, state);
