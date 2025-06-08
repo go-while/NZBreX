@@ -226,29 +226,37 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 	}
 
 	filename_tmp := filename + ".tmp"
-	if file, err := os.OpenFile(filename_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		defer file.Close()
-		datawriter := bufio.NewWriterSize(file, DefaultCacheWriteBuffer)
-		for _, line := range item.article {
-			if n, err := datawriter.WriteString(line + LF); err != nil {
-				dlog(always, "ERROR GoCacheWriter datawriter.Write err='%v'", err)
-				return 0
-			} else {
-				wrote_bytes += n
-			}
+	file, err := os.OpenFile(filename_tmp, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		dlog(always, "ERROR CacheWriter OpenFile err='%v'", err)
+		return 0
+	}
+	defer func() {
+		cerr := file.Close()
+		if cerr != nil {
+			dlog(always, "ERROR CacheWriter file.Close err='%v'", cerr)
 		}
+	}()
 
-		if err := datawriter.Flush(); err != nil {
-			dlog(always, "ERROR CacheWriter datawriter.Flush err='%v'", err)
+	datawriter := bufio.NewWriterSize(file, DefaultCacheWriteBuffer)
+	for _, line := range item.article {
+		if n, err := datawriter.WriteString(line + LF); err != nil {
+			dlog(always, "ERROR GoCacheWriter datawriter.Write err='%v'", err)
 			return 0
+		} else {
+			wrote_bytes += n
 		}
+	}
 
-		file.Close()
-		if err := os.Rename(filename_tmp, filename); err != nil {
-			dlog(always, "ERROR GoCacheWriter move .tmp failed err='%v'", err)
-			return 0
-		}
-	} // end OpenFile
+	if err := datawriter.Flush(); err != nil {
+		dlog(always, "ERROR CacheWriter datawriter.Flush err='%v'", err)
+		return 0
+	}
+
+	if err := os.Rename(filename_tmp, filename); err != nil {
+		dlog(always, "ERROR GoCacheWriter move .tmp failed err='%v'", err)
+		return 0
+	}
 
 	item.mux.Lock()
 	item.flagCache = true
@@ -320,9 +328,12 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 	}
 
 	dlog(c.debug, "Writing yenc part: '%s'", fp_tmp)
-	//doMemReturn := true
 	if file, err := os.OpenFile(fp_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		defer file.Close()
+		defer func() {
+			if cerr := file.Close(); cerr != nil {
+				dlog(always, "ERROR YencWriter file.Close err='%v'", cerr)
+			}
+		}()
 		datawriter := bufio.NewWriterSize(file, DefaultYencWriteBuffer)
 		if n, err := datawriter.Write(yitem.yPart.Body); err != nil {
 			dlog(always, "ERROR YencWriter datawriter.Write err='%v'", err)
@@ -337,8 +348,6 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 			c.resetYencFlagsOnErr(yitem.item)
 			return 0
 		}
-
-		file.Close()
 
 		if err := os.Rename(fp_tmp, fp); err != nil {
 			dlog(always, "ERROR YencWriter move .tmp failed err='%v'", err)
@@ -356,11 +365,6 @@ func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 		*/
 		yitem.item.mux.Unlock()
 	} // end OpenFile
-	/* // watch out for broken wings #99ffff!
-	if doMemReturn {
-		memlim.MemReturn("yenc:cache", yitem.item)
-	}
-	*/
 	yitem.yPart.Body = nil
 	yitem.yPart = nil
 	return

@@ -243,7 +243,12 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() {
+		cerr := dstFile.Close()
+		if err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
 	nul := make([]byte, nullbytes)
 	for i := 0; i < nullbytes; i++ {
 		nul = append(nul, 0x00)
@@ -262,26 +267,33 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 // If the source file does not exist, it returns an error.
 // If the destination file does not exist, it creates a new file.
 // If the source file is empty, it does nothing.
-func AppendFile(srcPath string, dstPath string, delsrc bool) error {
+func AppendFile(srcPath string, dstPath string, delsrc bool) (err error) {
 	if srcPath == "" || dstPath == "" {
 		return fmt.Errorf("error AppendFile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
 	}
 
-	// Open source file for reading
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() {
+		cerr := srcFile.Close()
+		if err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
 
-	// Open destination file in append mode, create if not exists
 	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() {
+		cerr := dstFile.Close()
+		if err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
 
-	// Create a buffer and copy in chunks
 	buf := make([]byte, DefaultYencWriteBuffer)
 	for {
 		n, readErr := srcFile.Read(buf)
@@ -302,8 +314,8 @@ func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
 		}
 	}
-	return nil
-} // end func AppendFile (written by AI! GPT-4o)
+	return
+} // end func AppendFile (written by AI! GPT-4o, complaint and changed by GPT-4.1!)
 
 func SHA256SumFile(path string) (string, error) {
 	// Open the file for reading
@@ -336,6 +348,11 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to open csv file: %v", err)
 	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			log.Printf("ERROR closing file %s: %v", csvFileName, cerr)
+		}
+	}()
 	log.Println("writing csv file...")
 	fmt.Print("Writing csv file... ")
 	csvWriter := csv.NewWriter(f)
@@ -379,7 +396,6 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err := csvWriter.Error(); err != nil {
 		return fmt.Errorf("unable to write to the csv file: %v", err)
 	}
-	f.Close()
 	dlog(cfg.opt.Csv, "writeCsv: done")
 	return
 } // end func writeCsv
