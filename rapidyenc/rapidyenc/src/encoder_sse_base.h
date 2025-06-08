@@ -691,19 +691,19 @@ HEDLEY_ALWAYS_INLINE void do_encode_sse(int line_size, int* colOffset, const uin
 				maskB = _mm_movemask_epi8(cmpB);
 				
 				mask = (maskB<<16) | maskA;
-				bool manyBitsSet; // don't retain this across loop cycles
+				bool loopManyBitsSet; // don't retain this across loop cycles
 #if defined(__POPCNT__) && !defined(__tune_btver1__)
 				if(use_isa & ISA_FEATURE_POPCNT) {
 					maskBits = popcnt32(mask);
 					outputBytes = maskBits + XMM_SIZE*2;
-					manyBitsSet = maskBits > 1;
+					loopManyBitsSet = maskBits > 1;
 				} else
 #endif
 				{
-					manyBitsSet = (mask & (mask-1)) != 0;
+					loopManyBitsSet = (mask & (mask-1)) != 0;
 				}
 				
-				if (LIKELIHOOD(0.089, manyBitsSet))
+				if (LIKELIHOOD(0.089, loopManyBitsSet))
 					goto _encode_loop_branch_slow;
 				if(_PREFER_BRANCHING && LIKELIHOOD(0.663, !mask))
 					goto _encode_loop_branch_fast_noesc;
