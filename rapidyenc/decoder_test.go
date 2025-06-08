@@ -581,8 +581,6 @@ func GenerateTestUUEncodedFiles(t *testing.T) error {
 	// Create test content for uuencode files
 	// These contents are just examples, you can modify them as needed.
 	// The files will be created in the "uuencode" directory.
-	content1 := []byte("Hello from test1!\nThis is a test file.\n")
-	content2 := []byte("Another file for test2.\nWith more lines.\n1234567890\r\n")
 
 	// check if files already exist
 	if _, err := os.Stat(filepath.Join("uuencode", "test1.uue")); err == nil {
@@ -593,6 +591,9 @@ func GenerateTestUUEncodedFiles(t *testing.T) error {
 		t.Logf("File uuencode/test2.uue already exists, skipping creation.")
 		return nil
 	}
+
+	content1 := []byte("Hello from test1!\nThis is a test file.\n")
+	content2 := []byte("Another file for test2.\nWith more lines.\n1234567890\r\n")
 
 	uue1 := UUEncode(content1, "test1.txt", 644)
 	uue2 := UUEncode(content2, "test2.txt", 644)
