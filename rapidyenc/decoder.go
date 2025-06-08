@@ -327,10 +327,39 @@ transform:
 					d.actualSize += int64(nd)
 					nDst += nd
 				}
-				continue
+				goto transform
 			}
 		case FormatUU:
-			nDst += copy(dst[nDst:], line)
+			//nDst += copy(dst[nDst:], line) // <-- this is not correct, we need to decode the line first
+			if bytes.HasPrefix(line, []byte("begin ")) {
+				// Parse mode and filename here if needed
+				d.body = true
+				d.format = FormatUU
+				// Optionally store filename/mode in d.m
+				goto transform // Don't decode this line
+			}
+			if d.body {
+				// Decode the UUencoded line
+				decoded, err := UUdecode(line)
+				if err != nil {
+					d.err = fmt.Errorf("[rapidyenc] error decoding UUencoded line: %w", err)
+					return nDst, nSrc, d.err
+				}
+				if len(decoded) > 0 {
+					d.hash.Write(decoded)
+					d.actualSize += int64(len(decoded))
+					if nDst+len(decoded) > len(dst) {
+						d.err = fmt.Errorf("[rapidyenc] destination buffer too small for UUencoded data: %w", errDestinationTooSmall)
+						return nDst, nSrc, d.err
+					}
+					nDst += copy(dst[nDst:], decoded)
+				}
+			}
+			if bytes.Equal(line, []byte("end\r\n")) {
+				d.body = false
+				// End of UUencoded data
+				goto transform // Don't decode this line
+			}
 		}
 	}
 
@@ -444,6 +473,47 @@ func detectFormat(line []byte) Format {
 	}
 
 	return FormatUnknown
+}
+
+// UUdecode decodes a single UUencoded line (e.g., "M<uu-bytes>\r\n").
+// It returns the decoded bytes or an error.
+func UUdecode(line []byte) ([]byte, error) {
+	if len(line) == 0 {
+		return nil, nil
+	}
+	// Remove trailing \r\n if present
+	if len(line) >= 2 && line[len(line)-2] == '\r' && line[len(line)-1] == '\n' {
+		line = line[:len(line)-2]
+	}
+	if len(line) == 0 {
+		return nil, nil
+	}
+	// The first byte is the encoded length
+	encLen := int(line[0]-0x20) & 0x3F
+	if encLen == 0 {
+		return []byte{}, nil
+	}
+	decoded := make([]byte, 0, encLen)
+	i := 1
+	for encLen > 0 && i+4 <= len(line) {
+		// Each group of 4 chars encodes 3 bytes
+		var c [4]byte
+		for j := 0; j < 4; j++ {
+			c[j] = (line[i+j] - 0x20) & 0x3F
+		}
+		decoded = append(decoded,
+			(c[0]<<2)|(c[1]>>4),
+			(c[1]<<4)|(c[2]>>2),
+			(c[2]<<6)|c[3],
+		)
+		i += 4
+		encLen -= 3
+	}
+	// Truncate to the actual length
+	if encLen < 0 {
+		decoded = decoded[:len(decoded)+encLen]
+	}
+	return decoded, nil
 }
 
 type Format int

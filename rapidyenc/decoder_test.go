@@ -318,6 +318,19 @@ func TestDetectFormat(t *testing.T) {
 	}
 }
 
+func TestUUdecode(t *testing.T) {
+	encoded := []byte("-22!,3U9%($=05\"$A(0``")
+	want := []byte("I LOVE GPT!!!")
+
+	got, err := UUdecode(encoded)
+	if err != nil {
+		t.Fatalf("UUdecode error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("UUdecode(%q) = %q, want %q", encoded, got, want)
+	}
+}
+
 // TestRapidyencDecoderFiles runs rapidyenc decoder tests on sample files.
 func TestRapidyencDecoderFiles(t *testing.T) {
 	errList := RapidyencDecoderFilesTest(t)
