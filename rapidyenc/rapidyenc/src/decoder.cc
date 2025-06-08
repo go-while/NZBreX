@@ -49,7 +49,7 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 		} else // treat as YDEC_STATE_CRLF
 			if(es[i] == '.') i++;
 		
-		for(; i < -2; i++) {
+		while (i < -2) {
 			c = es[i];
 			switch(c) {
 				case '\r':
@@ -59,6 +59,7 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 						i += 2;
 					// fall-thru
 				case '\n':
+					i++; // Increment i explicitly
 					continue;
 				case '=':
 					c = es[i+1];
@@ -67,6 +68,7 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 					continue;
 				default:
 					*p++ = c - 42;
+					i++; // Increment i explicitly
 			}
 		}
 		if(state) *state = YDEC_STATE_NONE;
