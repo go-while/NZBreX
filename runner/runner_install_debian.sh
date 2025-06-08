@@ -16,7 +16,7 @@ RUNNER_SHA256="e8e24a3477da17040b4d6fa6d34c6ecb9a2879e800aa532518ec21e49e21d7b4"
 GITHUB_URL="https://github.com"
 GITREL_URL="${GITHUB_URL}/actions/runner/releases/download"
 
-CHECK_RUNNERS_URL="https://github.com/go-while/NZBreX/raw/ee7ab8d8bdbc675c32c4dc7044d50092e03c72df/runner/check_runners.sh"
+CHECK_RUNNERS_URL="https://raw.githubusercontent.com/go-while/NZBreX/refs/heads/testing/runner/check_runners.sh"
 
 test $(whoami) != "root" && echo "error: you are not root" && exit 1
 test $(pwd) != "/root" && echo "error: you are not in /root" && exit 1

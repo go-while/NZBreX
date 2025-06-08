@@ -14,7 +14,6 @@ package rapidyenc
 */
 import "C"
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
@@ -24,8 +23,6 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
-	"os"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -45,6 +42,17 @@ var (
 	// private variables for the package to stay compatible with the old API
 	defaultBufSize = DefaultBufSize
 )
+
+// errors for yEnc decoding
+var errCrcNotfound = errors.New("crc not found")
+
+var ErrDataMissing = errors.New("no binary data")              // .\r\n reached before =ybegin or =ypart
+var ErrDataCorruption = errors.New("data corruption detected") // .\r\n reached before =yend
+var ErrCrcMismatch = errors.New("crc32 mismatch")
+
+// errDestinationTooSmall is returned when the destination buffer is smaller than the source,
+// indicating that the destination must be at least as long as the source to proceed.
+var errDestinationTooSmall = errors.New("destination must be at least the length of source")
 
 // Meta is the result of parsing the yEnc headers (ybegin, ypart, yend)
 type Meta struct {
@@ -89,9 +97,10 @@ type Decoder struct {
 	// regardless of whether it was successful.
 	transformComplete bool
 
-	debug1 bool    // debug mode, prints debug messages
-	debug2 bool    // debug mode, prints more floody debug messages
-	segId  *string // segment ID, if supplied, used for debugging
+	debug1 bool // debug mode, prints debug messages
+	// debugSpam enables verbose debug output, printing additional detailed debug messages for troubleshooting purposes.
+	debugSpam bool    // debug mode, prints more floody debug messages
+	segId     *string // segment ID, if supplied, used for debugging
 }
 
 // AcquireDecoder returns an empty Decoder instance from Decoder pool.
@@ -140,11 +149,6 @@ func NewDecoder(bufSize int) *Decoder {
 		dlog(always, "rapidyenc.NewDecoder: bufSize must be greater than 0, using constBufSize %d", constBufSize)
 		bufSize = constBufSize
 	}
-	/*
-		if bufSize != constBufSize {
-			dlog(always, "rapidyenc.NewDecoder: bufSize is not constBufSize %d, using %d", constBufSize, bufSize)
-		}
-	*/
 	segId := "" // empty segment ID pointer by default to prevent nil pointer dereference
 	return &Decoder{
 		dst:   make([]byte, bufSize),
@@ -163,9 +167,9 @@ func (d *Decoder) SetReader(reader io.Reader) {
 // SetDebug enables debug mode, which prints debug messages to the console.
 // This is useful for debugging the yEnc decoding process.
 // has to be set before the first call to Read, otherwise it will data race.
-func (d *Decoder) SetDebug(debug1 bool, debug2 bool) {
+func (d *Decoder) SetDebug(debug1 bool, debugSpam bool) {
 	d.debug1 = debug1
-	d.debug2 = debug2
+	d.debugSpam = debugSpam
 }
 
 // SetSegmentId sets the segment ID for the Decoder instance.
@@ -178,25 +182,6 @@ func (d *Decoder) SetSegmentId(segId *string) {
 }
 
 // Meta returns the Meta information parsed from the yEnc headers.
-/*
-	// This includes the size of the file, the begin and end offsets, the CRC32 hash,
-	// and the name of the file.
-	// This is set when the ybegin, ypart, and yend headers are processed.
-	// If the headers are not present, the Meta will contain default values.
-	// The Meta can be used to verify the integrity of the decoded data and to
-	// extract information about the file being decoded.
-	// It is recommended to call this after the decoder has processed the yEnc data,
-	// typically after the Read method has returned io.EOF.
-	// If the yEnc headers are not present, the Meta will contain default values.
-	// For example, Size will be 0, Begin and End will be 0, Hash will be 0,
-	// and Name will be an empty string.
-	// If the yEnc headers are present, the Meta will contain the parsed values.
-	// For example, Size will be the total size of the file, Begin will be the
-	// part begin offset (0-indexed), End will be the part end offset (0-indexed, exclusive),
-	// Hash will be the CRC32 hash of the decoded data, and Name will be the name of the file.
-	// This is useful for verifying the integrity of the decoded data and for extracting
-	// information about the file being decoded.
-*/
 func (d *Decoder) Meta() Meta {
 	return d.m
 }
@@ -210,25 +195,15 @@ func (d *Decoder) ExpectedCrc() uint32 {
 	return d.expectedCrc
 }
 
-var (
-	ErrDataMissing    = errors.New("no binary data")
-	ErrDataCorruption = errors.New("data corruption detected") // .\r\n reached before =yend
-	ErrCrcMismatch    = errors.New("crc32 mismatch")
-)
-
+// Read reads transformed bytes from the Decoder instance.
+// It reads from the underlying io.Reader, transforms the data using the Transform method,
+// and returns the transformed bytes in the provided byte slice p.
+// It returns the number of bytes read and any error encountered during the process.
 func (d *Decoder) Read(p []byte) (int, error) {
 	n, err := 0, error(nil)
 	for {
 		// Defensive: clamp d.dst0 and d.dst1 to valid range BEFORE using them
-		if d.dst0 < 0 {
-			d.dst0 = 0
-		}
-		if d.dst1 > len(d.dst) {
-			d.dst1 = len(d.dst)
-		}
-		if d.dst0 > d.dst1 {
-			d.dst0 = d.dst1
-		}
+		d.clampDst()
 
 		// Copy out any transformed bytes and return the final error if we are done.
 		if d.dst0 != d.dst1 {
@@ -251,12 +226,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 			d.dst1, n, err = d.Transform(d.dst, d.src[d.src0:d.src1], d.err == io.EOF)
 			d.src0 += n
 			// Clamp again after increment
-			if d.src0 < 0 {
-				d.src0 = 0
-			}
-			if d.src0 > d.src1 {
-				d.src0 = d.src1
-			}
+			d.clampSrc()
 
 			switch {
 			case err == nil:
@@ -277,19 +247,13 @@ func (d *Decoder) Read(p []byte) (int, error) {
 		// Move any untransformed source bytes to the start of the buffer
 		// and read more bytes.
 		if d.src0 != 0 {
-			// Clamp d.src0 BEFORE slicing!
-			if d.src0 < 0 {
-				d.src0 = 0
-			}
-			if d.src0 > d.src1 {
-				d.src0 = d.src1
-			}
+			d.clampSrc()
 			d.src0, d.src1 = 0, copy(d.src, d.src[d.src0:d.src1])
 		}
 		n, d.err = d.r.Read(d.src[d.src1:])
 		d.src1 += n
 	}
-}
+} // end func Read
 
 // Transform starts by reading line-by-line to parse yEnc headers until it encounters yEnc data.
 // It then incrementally decodes chunks of yEnc encoded data before returning to line-by-line processing
@@ -304,20 +268,29 @@ transform:
 		// Article EOF
 		if bytes.HasPrefix(src[nSrc:], []byte(".\r\n")) {
 			d.m.Hash = d.hash.Sum32()
-			if d.format == FormatUU {
-				return nDst, nSrc + 3, fmt.Errorf("[rapidyenc] uuencode not implemented")
-			} else if !d.begin {
-				err = fmt.Errorf("[rapidyenc] end of article without finding \"=begin\" header: %w", ErrDataMissing)
+			if !d.begin {
+				switch d.format {
+				case FormatUnknown:
+					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin header: %w", ErrDataMissing)
+				case FormatYenc:
+					err = fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=ybegin\" header: %w", ErrDataMissing)
+				case FormatUU:
+					err = fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"begin\" header: %w", ErrDataCorruption)
+				}
 			} else if !d.end {
-				err = fmt.Errorf("[rapidyenc] end of article without finding \"=yend\" trailer: %w", ErrDataCorruption)
-			} else if (!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize) {
+				switch d.format {
+				case FormatUnknown:
+					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *end header: %w", ErrDataMissing)
+				case FormatYenc:
+					err = fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=yend\" trailer: %w", ErrDataMissing)
+				case FormatUU:
+					err = fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"end\" trailer: %w", ErrDataCorruption)
+				}
+			} else if (d.format != FormatUU && d.format != FormatUnknown) && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
-			} else if d.crc && d.expectedCrc != d.m.Hash {
-				// If we have a segment ID, use it for debugging
-				// otherwise use an empty string.
-				errStr := fmt.Sprintf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s'", d.expectedCrc, d.m.Hash, *d.segId)
-				dlog(always, "%s", errStr)
-				err = fmt.Errorf("%s: %w", errStr, ErrCrcMismatch)
+			} else if d.format == FormatYenc && d.crc && d.expectedCrc != d.m.Hash {
+				// If we have a segment ID, use it for debugging otherwise use an empty string.
+				err = fmt.Errorf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s' err: %w", d.expectedCrc, d.m.Hash, *d.segId, ErrCrcMismatch)
 			} else {
 				err = io.EOF
 			}
@@ -353,7 +326,7 @@ transform:
 					bodyLine = bodyLine[:len(bodyLine)-2]
 				}
 
-				dlog(d.debug2, "DecodeIncremental input: %q\n", bodyLine)
+				dlog(d.debugSpam, "DecodeIncremental input: %q\n", bodyLine)
 				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
 				if derr != nil && derr != io.EOF {
 					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
@@ -364,19 +337,56 @@ transform:
 					d.actualSize += int64(nd)
 					nDst += nd
 				}
-				continue
+				goto transform
 			}
+
 		case FormatUU:
-			nDst += copy(dst[nDst:], line)
+			if bytes.HasPrefix(line, []byte("begin ")) || bytes.Equal(line, []byte("end\r\n")) {
+				d.processYenc(line)
+				goto transform
+			}
+			if d.body {
+				bodyLine := line
+				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
+					bodyLine = bodyLine[:len(bodyLine)-2]
+				}
+				// Decode the UUencoded line
+				decoded, err := UUdecode(bodyLine)
+				if err != nil {
+					d.err = fmt.Errorf("[rapidyenc] error decoding UUencoded line: %w", err)
+					return nDst, nSrc, d.err
+				}
+				if len(decoded) > 0 {
+					d.hash.Write(decoded)
+					d.actualSize += int64(len(decoded))
+					if nDst+len(decoded) > len(dst) {
+						d.err = fmt.Errorf("[rapidyenc] destination buffer too small for UUencoded data: %w", errDestinationTooSmall)
+						return nDst, nSrc, d.err
+					}
+					nDst += copy(dst[nDst:], decoded)
+				}
+			}
 		}
 	}
 
 	if atEOF {
+		// Check for missing yEnc header at EOF
+		// ! REVIEW ! not sure if we even get here since the formatUnknown is checked above
+		if !d.begin || !d.end {
+			switch d.format {
+			case FormatUnknown:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin or *end header: %w", ErrDataMissing)
+			case FormatYenc:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=ybegin\" or \"=yend\" header: %w", ErrDataMissing)
+			case FormatUU:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"begin\" or \"end\" header: %w", ErrDataMissing)
+			}
+		}
 		return nDst, nSrc, io.EOF
 	} else {
 		return nDst, nSrc, transform.ErrShortSrc
 	}
-}
+} // end func Transform
 
 func (d *Decoder) Reset() {
 	d.r = nil
@@ -405,53 +415,74 @@ func (d *Decoder) Reset() {
 	d.transformComplete = false
 
 	d.debug1 = false
-	d.debug2 = false
+	d.debugSpam = false
 	if d.segId != nil {
 		// Reset the segment ID to an empty string
 		// to prevent nil pointer dereference.
 		// If a new segment ID is needed, it should be set via SetSegmentId.
 		d.segId = new(string)
 	}
-}
+} // end func Reset
 
 func (d *Decoder) processYenc(line []byte) {
-	dlog(d.debug2, "rapidyenc.processYenc(%q)", line)
-	if bytes.HasPrefix(line, []byte("=ybegin ")) {
-		d.begin = true
-		d.m.Size, _ = extractInt(line, []byte(" size="))
-		d.m.Name, _ = extractString(line, []byte(" name="))
-		if _, err := extractInt(line, []byte(" part=")); err != nil {
+	dlog(d.debugSpam, "rapidyenc.processYenc(%q)", line)
+	switch d.format {
+	case FormatYenc:
+		if bytes.HasPrefix(line, []byte("=ybegin ")) {
+			d.begin = true
+			d.m.Size, _ = extractInt(line, []byte(" size="))
+			d.m.Name, _ = extractString(line, []byte(" name="))
+			if _, err := extractInt(line, []byte(" part=")); err != nil {
+				d.body = true
+				d.m.End = d.m.Size
+				dlog(d.debug1, "DEBUG: yEnc single-part, body starts")
+			} else {
+				dlog(d.debug1, "DEBUG: yEnc multi-part, waiting for =ypart")
+			}
+		} else if bytes.HasPrefix(line, []byte("=ypart ")) {
+			d.part = true
 			d.body = true
-			d.m.End = d.m.Size
-			dlog(d.debug1, "DEBUG: yEnc single-part, body starts")
-		} else {
-			dlog(d.debug1, "DEBUG: yEnc multi-part, waiting for =ypart")
-		}
-	} else if bytes.HasPrefix(line, []byte("=ypart ")) {
-		d.part = true
-		d.body = true
-		if beginPos, err := extractInt(line, []byte(" begin=")); err == nil {
-			d.m.Begin = beginPos - 1
-		}
-		if endPos, err := extractInt(line, []byte(" end=")); err == nil {
-			d.m.End = endPos - 1
-		}
-		dlog(d.debug1, "DEBUG: =ypart found, body starts")
-	} else if bytes.HasPrefix(line, []byte("=yend ")) {
-		d.end = true
-		if d.part {
-			if crc, err := extractCRC(line, []byte(" pcrc32=")); err == nil {
+			if beginPos, err := extractInt(line, []byte(" begin=")); err == nil {
+				d.m.Begin = beginPos - 1
+			}
+			if endPos, err := extractInt(line, []byte(" end=")); err == nil {
+				d.m.End = endPos - 1
+			}
+			dlog(d.debug1, "DEBUG: =ypart found, body starts")
+		} else if bytes.HasPrefix(line, []byte("=yend ")) {
+			d.end = true
+			if d.part {
+				if crc, err := extractCRC(line, []byte(" pcrc32=")); err == nil {
+					d.expectedCrc = crc
+					d.crc = true
+				}
+			} else if crc, err := extractCRC(line, []byte(" crc32=")); err == nil {
 				d.expectedCrc = crc
 				d.crc = true
 			}
-		} else if crc, err := extractCRC(line, []byte(" crc32=")); err == nil {
-			d.expectedCrc = crc
-			d.crc = true
+			d.endSize, _ = extractInt(line, []byte(" size="))
+			dlog(d.debug1, "DEBUG: =yend found")
 		}
-		d.endSize, _ = extractInt(line, []byte(" size="))
-		dlog(d.debug1, "DEBUG: =yend found")
-	}
-}
+	case FormatUU:
+		if bytes.HasPrefix(line, []byte("begin ")) {
+			// UUencode header: begin <mode> <filename>
+			d.begin = true
+			d.body = true
+			d.format = FormatUU
+			// Optionally extract filename and mode
+			fields := bytes.Fields(line)
+			if len(fields) >= 3 {
+				d.m.Name = string(fields[2])
+			}
+			dlog(d.debug1, "DEBUG: UUencode begin found, body starts")
+		} else if bytes.Equal(line, []byte("end\r\n")) || bytes.Equal(line, []byte("end\n")) {
+			// UUencode trailer
+			d.end = true
+			d.body = false
+			dlog(d.debug1, "DEBUG: UUencode end found")
+		}
+	} // end switch d.format
+} //end func processYenc
 
 func detectFormat(line []byte) Format {
 	if bytes.HasPrefix(line, []byte("=ybegin ")) {
@@ -459,28 +490,30 @@ func detectFormat(line []byte) Format {
 	}
 
 	length := len(line)
-	if (length == 62 || length == 63) && (line[62] == '\n' || line[62] == '\r') && line[0] == 'M' {
+	if length >= 1 && line[0] == 'M' &&
+		((length == 63 && (line[62] == '\n' || line[62] == '\r')) ||
+			(length == 62 && (line[61] == '\n' || line[61] == '\r'))) {
 		return FormatUU
 	}
 
 	if bytes.HasPrefix(line, []byte("begin ")) {
-		ok := true
 		pos := len("begin ")
-		for pos < len(line) && line[pos] != ' ' {
-			pos++
-
-			if line[pos] < '0' || line[pos] > '7' {
-				ok = false
-				break
+		// Parse mode: must be 3 octal digits
+		if pos+3 <= len(line) {
+			for i := range 3 {
+				if line[pos+i] < '0' || line[pos+i] > '7' {
+					return FormatUnknown
+				}
 			}
-		}
-		if ok {
-			return FormatUU
+			// Next must be a space
+			if pos+3 < len(line) && line[pos+3] == ' ' {
+				return FormatUU
+			}
 		}
 	}
 
 	return FormatUnknown
-}
+} //end func detectFormat
 
 type Format int
 
@@ -514,10 +547,6 @@ const (
 	EndNone    = End(C.RYDEC_END_NONE)    // end not reached
 	EndControl = End(C.RYDEC_END_CONTROL) // \r\n=y sequence found, src points to byte after 'y'
 	EndArticle = End(C.RYDEC_END_ARTICLE) // \r\n.\r\n sequence found, src points to byte after last '\n'
-)
-
-var (
-	errDestinationTooSmall = errors.New("destination must be at least the length of source")
 )
 
 var decodeInitOnce sync.Once
@@ -581,11 +610,52 @@ func extractInt(data, substr []byte) (int64, error) {
 	return strconv.ParseInt(string(data), 10, 64)
 }
 
-var (
-	errCrcNotfound = errors.New("crc not found")
-)
+// UUdecode decodes a single UUencoded line (e.g., "M<uu-bytes>\r\n").
+// It returns the decoded bytes or an error.
+func UUdecode(line []byte) ([]byte, error) {
+	if len(line) == 0 {
+		return nil, nil
+	}
+	// Remove trailing \r\n if present
+	if len(line) >= 2 && line[len(line)-2] == '\r' && line[len(line)-1] == '\n' {
+		line = line[:len(line)-2]
+	}
+	if len(line) == 0 {
+		return nil, nil
+	}
+	// The first byte is the encoded length
+	encLen := int(line[0]-0x20) & 0x3F
+	if encLen == 0 {
+		return []byte{}, nil
+	}
+	decoded := make([]byte, 0, encLen)
+	i := 1
+	for encLen > 0 && i+4 <= len(line) {
+		// Each group of 4 chars encodes 3 bytes
+		var c [4]byte
+		for j := 0; j < 4; j++ {
+			c[j] = (line[i+j] - 0x20) & 0x3F
+		}
+		decoded = append(decoded,
+			(c[0]<<2)|(c[1]>>4),
+			(c[1]<<4)|(c[2]>>2),
+			(c[2]<<6)|c[3],
+		)
+		i += 4
+		encLen -= 3
+	}
+	// Truncate to the actual length
+	if encLen < 0 {
+		decoded = decoded[:len(decoded)+encLen]
+	}
+	return decoded, nil
+} //end func UUdecode
 
 // extractCRC converts a hexadecimal representation of a crc32 hash
+// from the data starting after the given substring.
+// It searches for the substring in the data, and if found, it extracts
+// the crc32 hash value, ensuring it is 8 characters long.
+// Zero-pads the value if it is shorter than 8 characters.
 func extractCRC(data, substr []byte) (uint32, error) {
 	start := bytes.Index(data, substr)
 	if start == -1 {
@@ -626,104 +696,25 @@ func dlog(logthis bool, format string, a ...any) {
 	log.Printf(format, a...)
 } // end dlog
 
-func TestRapidyencDecoderFiles() (errs []error) {
-	files := []string{
-		"yenc/multipart_test.yenc",
-		"yenc/multipart_test_badcrc.yenc",
-		"yenc/singlepart_test.yenc",
-		"yenc/singlepart_test_badcrc.yenc",
+// clampDst clamps d.dst0 and d.dst1 to valid ranges
+func (d *Decoder) clampDst() {
+	if d.dst0 < 0 {
+		d.dst0 = 0
 	}
-	for _, fname := range files {
-		fmt.Printf("\n=== Testing rapidyenc with file: %s ===\n", fname)
-		f, err := os.Open(filepath.Clean(fname))
-		if err != nil {
-			fmt.Printf("Failed to open %s: %v\n", fname, err)
-			continue
-		}
+	if d.dst1 > len(d.dst) {
+		d.dst1 = len(d.dst)
+	}
+	if d.dst0 > d.dst1 {
+		d.dst0 = d.dst1
+	}
+}
 
-		pipeReader, pipeWriter := io.Pipe()
-		decoder := AcquireDecoderWithReader(pipeReader)
-		decoder.SetDebug(true, true)
-		defer ReleaseDecoder(decoder)
-		segId := fname
-		decoder.SetSegmentId(&segId)
-
-		// Start goroutine to read decoded data
-		var decodedData bytes.Buffer
-		done := make(chan error, 1)
-		go func() {
-			buf := make([]byte, DefaultBufSize)
-			for {
-				n, aerr := decoder.Read(buf)
-				if n > 0 {
-					decodedData.Write(buf[:n])
-				}
-				if aerr == io.EOF {
-					done <- nil
-					return
-				}
-				if aerr != nil {
-					done <- aerr
-					return
-				}
-			}
-		}()
-
-		// Write file lines to the pipeWriter
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if _, err := pipeWriter.Write([]byte(line + "\r\n")); err != nil {
-				fmt.Printf("Error writing to pipe: %v\n", err)
-				pipeWriter.Close()
-				ReleaseDecoder(decoder)
-				return
-			}
-		}
-		if _, err := pipeWriter.Write([]byte(".\r\n")); err != nil { // NNTP end marker
-			fmt.Printf("Error writing end marker to pipe: %v\n", err)
-			pipeWriter.Close()
-			ReleaseDecoder(decoder)
-			return
-		}
-		pipeWriter.Close()
-		f.Close()
-		if aerr := <-done; aerr != nil {
-			err = aerr
-			var aBadCrc uint32
-			meta := decoder.Meta()
-			dlog(always, "DEBUG Decoder error: '%v' (maybe an expected error, check below)\n", err)
-			expectedCrc := decoder.ExpectedCrc()
-			if expectedCrc != 0 && expectedCrc != meta.Hash {
-
-				// Set aBadCrc based on the file name
-				switch fname {
-				case "yenc/singlepart_test_badcrc.yenc":
-					aBadCrc = 0x6d04a475
-				case "yenc/multipart_test_badcrc.yenc":
-					aBadCrc = 0xf6acc027
-				}
-				if aBadCrc > 0 && aBadCrc != meta.Hash {
-					fmt.Printf("WARNING1 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
-					errs = append(errs, aerr)
-				} else if aBadCrc > 0 && aBadCrc == meta.Hash {
-					fmt.Printf("rapidyenc OK expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
-				} else if expectedCrc != meta.Hash {
-					fmt.Printf("WARNING2 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
-					errs = append(errs, aerr)
-				} else {
-					fmt.Printf("GOOD CRC matches! aBadCrc=%#08x Name: '%s' fname: '%s'\n", aBadCrc, meta.Name, fname)
-				}
-
-			} else if expectedCrc == 0 {
-				fmt.Printf("WARNING rapidyenc: No expected CRC set, cannot verify integrity. fname: '%s'\n", fname)
-				errs = append(errs, aerr)
-			}
-		} else {
-			meta := decoder.Meta()
-			fmt.Printf("OK Decoded %d bytes, CRC32: %#08x, Name: '%s' fname: '%s'\n", decodedData.Len(), meta.Hash, meta.Name, fname)
-		}
-		ReleaseDecoder(decoder)
-	} // end for range files
-	return errs
+// clampSrc clamps d.src0 to [0, d.src1]
+func (d *Decoder) clampSrc() {
+	if d.src0 < 0 {
+		d.src0 = 0
+	}
+	if d.src0 > d.src1 {
+		d.src0 = d.src1
+	}
 }

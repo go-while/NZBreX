@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -99,9 +102,9 @@ func ParseFlags() {
 		decoder.SetDebug(true, true)
 		segId := "any@thing.net"
 		decoder.SetSegmentId(&segId)
-		rapidyenc.ReleaseDecoder(decoder)             // release the decoder
-		decoder = nil                                 // clear memory
-		errs := rapidyenc.TestRapidyencDecoderFiles() // test rapidyenc decoder with files
+		rapidyenc.ReleaseDecoder(decoder)   // release the decoder
+		decoder = nil                       // clear memory
+		errs := rapidyencDecoderFilesTest() // test rapidyenc decoder with files
 		if len(errs) != 0 {
 			dlog(always, "ERROR testing rapidyenc decoder: %v", errs)
 			os.Exit(1)
@@ -218,3 +221,104 @@ func ParseFlags() {
 	dlog(cfg.opt.Verbose, "Settings: '%#v'", *cfg.opt)
 
 } // end func ParseFlags
+
+func rapidyencDecoderFilesTest() (errs []error) {
+	files := []string{
+		"yenc/multipart_test.yenc",
+		"yenc/multipart_test_badcrc.yenc",
+		"yenc/singlepart_test.yenc",
+		"yenc/singlepart_test_badcrc.yenc",
+	}
+	for _, fname := range files {
+		dlog(always, "\n=== Testing rapidyenc with file: %s ===\n", fname)
+		f, err := os.Open(filepath.Clean(fname))
+		if err != nil {
+			dlog(always, "Failed to open %s: %v\n", fname, err)
+			continue
+		}
+
+		pipeReader, pipeWriter := io.Pipe()
+		decoder := rapidyenc.AcquireDecoderWithReader(pipeReader)
+		decoder.SetDebug(true, true)
+		segId := fname
+		decoder.SetSegmentId(&segId)
+
+		// Start goroutine to read decoded data
+		var decodedData bytes.Buffer
+		done := make(chan error, 1)
+		go func() {
+			buf := make([]byte, rapidyenc.DefaultBufSize)
+			for {
+				n, aerr := decoder.Read(buf)
+				if n > 0 {
+					decodedData.Write(buf[:n])
+				}
+				if aerr == io.EOF {
+					done <- nil
+					return
+				}
+				if aerr != nil {
+					done <- aerr
+					return
+				}
+			}
+		}()
+
+		// Write file lines to the pipeWriter
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if _, err := pipeWriter.Write([]byte(line + "\r\n")); err != nil {
+				dlog(always, "Error writing to pipe: %v\n", err)
+				pipeWriter.Close()
+				rapidyenc.ReleaseDecoder(decoder)
+				return
+			}
+		}
+		if _, err := pipeWriter.Write([]byte(".\r\n")); err != nil { // NNTP end marker
+			dlog(always, "Error writing end marker to pipe: %v\n", err)
+			pipeWriter.Close()
+			rapidyenc.ReleaseDecoder(decoder)
+			return
+		}
+		pipeWriter.Close()
+		f.Close()
+		if aerr := <-done; aerr != nil {
+			err = aerr
+			var aBadCrc uint32
+			meta := decoder.Meta()
+			dlog(always, "DEBUG Decoder error: '%v' (maybe an expected error, check below)\n", err)
+			expectedCrc := decoder.ExpectedCrc()
+			if expectedCrc != 0 && expectedCrc != meta.Hash {
+
+				// Set aBadCrc based on the file name
+				switch fname {
+				case "yenc/singlepart_test_badcrc.yenc":
+					aBadCrc = 0x6d04a475
+				case "yenc/multipart_test_badcrc.yenc":
+					aBadCrc = 0xf6acc027
+				}
+				if aBadCrc > 0 && aBadCrc != meta.Hash {
+					dlog(always, "WARNING1 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+					errs = append(errs, aerr)
+				} else if aBadCrc > 0 && aBadCrc == meta.Hash {
+					dlog(always, "rapidyenc OK expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+				} else if expectedCrc != meta.Hash {
+					dlog(always, "WARNING2 rapidyenc: CRC mismatch! expected=%#08x | got meta.Hash=%#08x | wanted aBadCrc=%#08x fname: '%s'\n\n", expectedCrc, meta.Hash, aBadCrc, fname)
+					errs = append(errs, aerr)
+				} else {
+					dlog(always, "GOOD CRC matches! aBadCrc=%#08x Name: '%s' fname: '%s'\n", aBadCrc, meta.Name, fname)
+				}
+
+			} else if expectedCrc == 0 {
+				dlog(always, "WARNING rapidyenc: No expected CRC set, cannot verify integrity. fname: '%s'\n", fname)
+				errs = append(errs, aerr)
+			}
+		} else {
+			meta := decoder.Meta()
+			dlog(always, "OK Decoded %d bytes, CRC32: %#08x, Name: '%s' fname: '%s'\n", decodedData.Len(), meta.Hash, meta.Name, fname)
+		}
+		rapidyenc.ReleaseDecoder(decoder)
+	} // end for range files
+	return errs
+} // end func rapidyencDecoderFilesTest
