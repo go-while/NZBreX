@@ -338,6 +338,11 @@ transform:
 				// Optionally store filename/mode in d.m
 				goto transform // Don't decode this line
 			}
+			if bytes.Equal(line, []byte("end\r\n")) {
+				d.body = false
+				// End of UUencoded data
+				goto transform // Don't decode this line
+			}
 			if d.body {
 				// Decode the UUencoded line
 				decoded, err := UUdecode(line)
@@ -355,11 +360,7 @@ transform:
 					nDst += copy(dst[nDst:], decoded)
 				}
 			}
-			if bytes.Equal(line, []byte("end\r\n")) {
-				d.body = false
-				// End of UUencoded data
-				goto transform // Don't decode this line
-			}
+
 		}
 	}
 
