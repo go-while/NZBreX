@@ -10,7 +10,8 @@ on:
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.language }})
+    name: Analyze (${{ matrix.runner }}-${{ matrix.language }})
+    #name: Analyze (${{ matrix.language }})
     #runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
     #runs-on: [self-hosted, ubu2204-gor]
     runs-on: ${{ matrix.runner }}
@@ -46,7 +47,8 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
-        queries: security-extended,security-and-quality # Removed '+' as it is unnecessary and unconventional
+        queries: security-extended,security-and-quality
+        ram: 1 # Optional, specify in GB
 
     - name: Build (manual, for C/C++)
       if: matrix.language == 'c-cpp'
