@@ -27,54 +27,72 @@ jobs:
             build-mode: autobuild
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor"
+            ram: 12
+            cache: true
 
           # run codeQL on SHR: Go
           - language: go
             build-mode: autobuild
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor"
+            ram: 12
+            cache: true
 
           # run codeQL on SHR: C/C++
           - language: c-cpp
             build-mode: manual
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor"
+            ram: 12
+            cache: true
 
           # run codeQL on SHR: C/C++
           - language: c-cpp
             build-mode: manual
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor"
+            ram: 12
+            cache: true
 
           # run codeQL on SHR: Actions
           - language: actions
             build-mode: none
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor"
+            ram: 12
+            cache: true
 
           # run codeQL on SHR: Actions
           - language: actions
             build-mode: none
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor"
+            ram: 12
+            cache: true
 
           # run codeQL on GH: Actions
           - language: actions
             build-mode: none
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
+            ram: 6
+            cache: true
 
           # run codeQL on GH: Go
           - language: go
             build-mode: autobuild
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
+            ram: 6
+            cache: true
 
           # run codeQL on GH: C/C++
           - language: c-cpp
             build-mode: manual
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
+            ram: 6
+            cache: true
 
 
     steps:
@@ -83,7 +101,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24.3' # or whatever version you need
-        cache: false
+        cache: ${{ matrix.cache }}
 
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -96,7 +114,7 @@ jobs:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended,security-and-quality
-        ram: 8 # Optional, specify in GB
+        ram: ${{ matrix.ram }}
 
     - name: Autobuild
       if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
@@ -120,5 +138,4 @@ jobs:
         ./build_rapidyenc_linux-amd64.sh
 
     - name: Perform CodeQL Analysis
-      #if: matrix.language != 'actions'
       uses: github/codeql-action/analyze@v3
