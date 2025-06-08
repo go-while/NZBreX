@@ -122,15 +122,23 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 			i += isEquals;
 			*p++ = src[i] - (42 + (isEquals << 6));
 		}*/
-		for(; i < -1; i++) {
-			c = es[i];
-			switch(c) {
-				case '\n': case '\r': continue;
-				case '=':
+		while(i < -1) {
+			// The loop processes characters from the end of the source buffer (`es`) towards the beginning.
+			// It stops when `i` reaches -1, as this indicates that all characters have been processed.
+			// The condition `i < -1` ensures that the loop does not process out-of-bounds memory.
+			while(i < -1) {
+				c = es[i];
+				case '\n': case '\r': {
+					i++;
+					continue;
+				}
+				case '=': {
 					i++;
 					c = es[i] - 64;
+				}
 			}
 			*p++ = c - 42;
+			i++;
 		}
 		if(state) *state = YDEC_STATE_NONE;
 		// do final char; we process this separately to prevent an overflow if the final char is '='
