@@ -96,7 +96,7 @@ jobs:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
         queries: security-extended,security-and-quality
-        ram: 4 # Optional, specify in GB
+        ram: 8 # Optional, specify in GB
 
     - name: Autobuild
       if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
@@ -120,4 +120,5 @@ jobs:
         ./build_rapidyenc_linux-amd64.sh
 
     - name: Perform CodeQL Analysis
+      #if: matrix.language != 'actions'
       uses: github/codeql-action/analyze@v3
