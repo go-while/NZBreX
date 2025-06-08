@@ -2,11 +2,20 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "main", "testing" ]
-  pull_request:
-    branches: [ "main" ]
-  schedule:
-    - cron: '16 06 * * 1'
+  #  branches:
+  #    - 'testing'
+    tags:
+      - "testing"
+  release:
+    types: [published]
+  workflow_dispatch:
+  repository_dispatch:
+  #pull_request:
+  #  branches:
+  #    - main
+  #    - "test*"
+  #schedule:
+  #  - cron: '16 06 * * 1'
 
 jobs:
   analyze:
@@ -27,7 +36,7 @@ jobs:
             build-mode: autobuild
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor-001"
-            ram: 12
+            ram: 8
             cache: false
 
           # run codeQL on SHR: Go
@@ -35,7 +44,7 @@ jobs:
             build-mode: autobuild
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor-001"
-            ram: 12
+            ram: 8
             cache: false
 
           # run codeQL on SHR: C/C++
@@ -43,7 +52,7 @@ jobs:
             build-mode: manual
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor-001"
-            ram: 12
+            ram: 8
             cache: false
 
           # run codeQL on SHR: C/C++
@@ -51,7 +60,7 @@ jobs:
             build-mode: manual
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor-001"
-            ram: 12
+            ram: 8
             cache: false
 
           # run codeQL on SHR: Actions
@@ -59,7 +68,7 @@ jobs:
             build-mode: none
             runner: [self-hosted, ubu2204-gor]
             runner_name: "runner-ubu2204-gor-001"
-            ram: 12
+            ram: 8
             cache: false
 
           # run codeQL on SHR: Actions
@@ -67,7 +76,7 @@ jobs:
             build-mode: none
             runner: [self-hosted, ubu2404-gor]
             runner_name: "runner-ubu2404-gor-001"
-            ram: 12
+            ram: 8
             cache: false
 
           # run codeQL on GH: Actions
@@ -119,17 +128,17 @@ jobs:
         rm -rf dist build ${{ github.workspace }}/
         mkdir -vp ${{ github.workspace }}
 
-    - name: Set up Go
-      if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24.3' # or whatever version you need
-        cache: ${{ matrix.cache }}
-
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+
+    - name: Set up Go
+      if: matrix.language == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.3' # or whatever version you need
+        cache: ${{ matrix.cache }}
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
