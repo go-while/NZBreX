@@ -149,11 +149,6 @@ func NewDecoder(bufSize int) *Decoder {
 		dlog(always, "rapidyenc.NewDecoder: bufSize must be greater than 0, using constBufSize %d", constBufSize)
 		bufSize = constBufSize
 	}
-	/*
-		if bufSize != constBufSize {
-			dlog(always, "rapidyenc.NewDecoder: bufSize is not constBufSize %d, using %d", constBufSize, bufSize)
-		}
-	*/
 	segId := "" // empty segment ID pointer by default to prevent nil pointer dereference
 	return &Decoder{
 		dst:   make([]byte, bufSize),
