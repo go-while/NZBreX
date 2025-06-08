@@ -2,16 +2,18 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "testing" ]
   pull_request:
     branches: [ "main" ]
   schedule:
-    - cron: '16 0 * * 1'
+    - cron: '06 00 * * 1'
 
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    #runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    #runs-on: [self-hosted, ubu2204-gor]
+    runs-on: ${{ matrix.runner }}
     permissions:
       security-events: write
       packages: read
@@ -21,13 +23,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        runner:
+          - [self-hosted, ubu2204-gor]
+          - ubuntu-latest
         include:
-        - language: actions
-          build-mode: none
-        - language: c-cpp
-          build-mode: manual   # Use manual for C/C++
-        - language: go
-          build-mode: autobuild # Use autobuild for Go
+          - language: go
+            build-mode: autobuild
+          - language: c-cpp
+            build-mode: manual
+          - language: actions
+            build-mode: none
 
     steps:
     - name: Checkout repository
