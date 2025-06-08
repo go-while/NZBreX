@@ -34,12 +34,12 @@ int main(int argc, char **argv) {
 	}
 #endif
 	
-	FILE* infile = stdin; // fopen("", "rb");
+	FILE* infile = stdin;
 	if(!infile) {
 		fprintf(stderr, "error opening input: %s\n", strerror(errno));
 		return 1;
 	}
-	FILE* outfile = stdout; // fopen("", "rb");
+	FILE* outfile = stdout;
 	if(!outfile) {
 		fprintf(stderr, "error opening output: %s\n", strerror(errno));
 		fclose(infile);
