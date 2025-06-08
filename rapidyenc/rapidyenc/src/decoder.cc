@@ -145,6 +145,55 @@ static size_t do_decode_noend_scalar(const unsigned char* src, unsigned char* de
 	return p - dest;
 }
 
+static long handleRawSequence(const unsigned char* es, unsigned char*& p, long i, RapidYenc::YencDecoderState* state, const unsigned char** src, unsigned char** dest) {
+	i += 3;
+	YDEC_CHECK_END(YDEC_STATE_CRLFDT)
+	if (es[i] == '\r') {
+		i++;
+		YDEC_CHECK_END(YDEC_STATE_CRLFDTCR)
+		if (es[i] == '\n') {
+			*src = es + i + 1;
+			*dest = p;
+			*state = YDEC_STATE_CRLF;
+			return YDEC_END_ARTICLE;
+		} else {
+			i--;
+		}
+	} else if (es[i] == '=') {
+		i++;
+		YDEC_CHECK_END(YDEC_STATE_CRLFEQ)
+		if (es[i] == 'y') {
+			*src = es + i + 1;
+			*dest = p;
+			*state = YDEC_STATE_NONE;
+			return YDEC_END_CONTROL;
+		} else {
+			unsigned char c = es[i];
+			*p++ = c - 42 - 64;
+			i -= (c == '\r');
+		}
+	} else {
+		i--;
+	}
+	return i;
+}
+
+static long handleControlSequence(const unsigned char* es, unsigned char*& p, long i, RapidYenc::YencDecoderState* state, const unsigned char** src, unsigned char** dest) {
+	i += 3;
+	YDEC_CHECK_END(YDEC_STATE_CRLFEQ)
+	if (es[i] == 'y') {
+		*src = es + i + 1;
+		*dest = p;
+		*state = YDEC_STATE_NONE;
+		return YDEC_END_CONTROL;
+	} else {
+		unsigned char c = es[i];
+		*p++ = c - 42 - 64;
+		i -= (c == '\r');
+	}
+	return i;
+}
+
 template<bool isRaw>
 static RapidYenc::YencDecoderEnd do_decode_end_scalar(const unsigned char** src, unsigned char** dest, size_t len, RapidYenc::YencDecoderState* state) {
 	using namespace RapidYenc;
@@ -225,54 +274,15 @@ static RapidYenc::YencDecoderEnd do_decode_end_scalar(const unsigned char** src,
 	for(; i < -2; i++) {
 		c = es[i];
 		switch(c) {
-			case '\r': if(es[i+1] == '\n') {
-				if(isRaw && es[i+2] == '.') {
-					// skip past \r\n. sequences
-					i += 3;
-					YDEC_CHECK_END(YDEC_STATE_CRLFDT)
-					// check for end
-					if(es[i] == '\r') {
-						i++;
-						YDEC_CHECK_END(YDEC_STATE_CRLFDTCR)
-						if(es[i] == '\n') {
-							*src = es + i + 1;
-							*dest = p;
-							*state = YDEC_STATE_CRLF;
-							return YDEC_END_ARTICLE;
-						} else i--;
-					} else if(es[i] == '=') {
-						i++;
-						YDEC_CHECK_END(YDEC_STATE_CRLFEQ)
-						if(es[i] == 'y') {
-							*src = es + i + 1;
-							*dest = p;
-							*state = YDEC_STATE_NONE;
-							return YDEC_END_CONTROL;
-						} else {
-							// escape char & continue
-							c = es[i];
-							*p++ = c - 42 - 64;
-							i -= (c == '\r');
-						}
-					} else i--;
-				}
-				else if(es[i+2] == '=') {
-					i += 3;
-					YDEC_CHECK_END(YDEC_STATE_CRLFEQ)
-					if(es[i] == 'y') {
-						// ended
-						*src = es + i + 1;
-						*dest = p;
-						*state = YDEC_STATE_NONE;
-						return YDEC_END_CONTROL;
-					} else {
-						// escape char & continue
-						c = es[i];
-						*p++ = c - 42 - 64;
-						i -= (c == '\r');
+			case '\r': 
+				if (es[i+1] == '\n') {
+					if (isRaw && es[i+2] == '.') {
+						i = handleRawSequence(es, p, i, state, src, dest);
+					} else if (es[i+2] == '=') {
+						i = handleControlSequence(es, p, i, state, src, dest);
 					}
 				}
-			} // fall-thru
+				// fall-thru
 			case '\n':
 				continue;
 			case '=':
