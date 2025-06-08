@@ -72,8 +72,7 @@ jobs:
       # Run the build step only for C/C++ jobs
       run: |
         cd rapidyenc # enter the workdir
-        test -e rapidyenc && rm -rf rapidyenc # get rid of old clone
-        ./clone_rapidyenc.sh
+        test ! -e rapidyenc && ./clone_rapidyenc.sh
         ./build_rapidyenc_linux-amd64.sh
 
     - name: Perform CodeQL Analysis
