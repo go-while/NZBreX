@@ -298,7 +298,7 @@ func RapidyencDecoderFilesTest(t *testing.T) (errs []error) {
 		pipeReader, pipeWriter := io.Pipe()
 		decoder := AcquireDecoderWithReader(pipeReader)
 		decoder.SetDebug(true, true)
-		defer ReleaseDecoder(decoder)
+		//defer ReleaseDecoder(decoder) // Moved to returns and end of function, no defer in for loop
 		segId := fname
 		decoder.SetSegmentId(&segId)
 
