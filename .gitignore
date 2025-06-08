@@ -21,6 +21,7 @@
 go.work
 vendor/
 #rapidyenc/rapidyenc
+rapidyenc/.git.bak/
 rapidyenc/librapidyenc.a
 rapidyenc/librapidyenc.dll
 
