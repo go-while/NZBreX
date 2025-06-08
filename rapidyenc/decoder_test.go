@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -266,6 +267,24 @@ func TestDecodeSizeMismatch(t *testing.T) {
 	_, err := dec.Read(buf)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "expected size 5 but got 3")
+}
+
+// TestUUEncodeNotImplemented tests that uuencode decoding is not implemented.
+func TestUUEncodeNotImplemented(t *testing.T) {
+	// Minimal valid UUencode message with NNTP EOF
+	// "begin 644 file.txt\r\n" + "M" + 61 'A's + "\r\n" + ".\r\n"
+	uu := []byte("begin 644 file.txt\r\n" +
+		"MAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r\n" +
+		".\r\n")
+
+	dec := NewDecoder(1024)
+	dec.SetReader(bytes.NewReader(uu))
+
+	buf := make([]byte, 1024)
+	_, err := dec.Read(buf)
+	if err == nil || !errors.Is(err, ErrDataMissing) && err.Error() != "[rapidyenc] uuencode not implemented" {
+		t.Fatalf("expected uuencode not implemented error, got: %v", err)
+	}
 }
 
 // TestRapidyencDecoderFiles runs rapidyenc decoder tests on sample files.
