@@ -467,21 +467,21 @@ jobs:
           pwd && ls -lha && echo ".zip Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
           zip "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* \
               cleanHeaders.txt provider.sample.json provider.ygg.json \
-              LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
+              LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
           #
           # .tgz (tar + gzip)
           pwd && ls -lha && echo ".tgz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
           tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
             -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
             -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
-            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
+            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
           #
           # .xz (tar + xz)
           pwd && ls -lha && echo ".xz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
           tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
             -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
             -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
-            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
+            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
           #
           # done packing
           #
