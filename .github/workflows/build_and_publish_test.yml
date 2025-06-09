@@ -562,7 +562,7 @@ jobs:
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
           upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
           #
-          DIST="dist.${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.$(hostname).tgz"
+          DIST="dist.${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.$(hostname).tar.gz"
           if [ -e "$DIST" ]; then
             echo "$DIST already exists. Skipping tar."
           else
