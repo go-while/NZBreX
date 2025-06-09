@@ -2,8 +2,8 @@ name: "CodeQL Advanced"
 
 on:
   push:
-  #  branches:
-  #    - 'testing'
+    branches:
+      - 'testing-agent'
     tags:
       - "testing"
   release:
