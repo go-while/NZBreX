@@ -2,8 +2,8 @@ name: "TEST Self-Hosted Runners"
 
 on:
   push:
-  #  branches:
-  #    - 'testing'
+    branches:
+      - 'testing-agent'
     tags:
       - "testing"
   release:
