@@ -31,13 +31,23 @@ var (
 
 	CID = uint64(0) // Global connection ID counter, can be used for session tracking - currently unused
 
-	proxyMutex    = &sync.RWMutex{}                // proxyMutex is used to synchronize access to passwdMap, ProxySessions and CountConns
-	proxyCron     = time.Now()                     // reload passwdMap every minute
-	passwdMap     = make(map[string]*UserData)     // passwdMap holds user credentials (k is username, v is UserData)
-	ProxySessions = make(map[string]*ProxySession) // ProxySessions map to hold active user sessions (k is username, v is ProxySession)
-	CountConns    = make(map[string]int)           // CountConns keeps track of active connections per user (k is username, v is count)
-	ProxyParent   *SESSION                         // ProxyParent is the parent session for the proxy, used to link sessions to the main loop
+	proxyMutex     = &sync.RWMutex{}                  // proxyMutex is used to synchronize access to passwdMap, ProxySessions and CountConns
+	proxyCron      = time.Now()                       // reload passwdMap every minute
+	passwdMap      = make(map[string]*UserData)       // passwdMap holds user credentials (k is username, v is UserData)
+	ProxySessions  = make(map[string]*ProxySession)   // ProxySessions map to hold active user sessions (k is username, v is ProxySession)
+	CountConns     = make(map[string]int)             // CountConns keeps track of active connections per user (k is username, v is count)
+	ProxyParent    *SESSION                           // ProxyParent is the parent session for the proxy, used to link sessions to the main loop
+	CliRxTxCounter = make(map[string]*Counter_uint64) // RxTxCounter is a global counter for received and sent bytes (used for statistics)
+	CliRxTxMux     = &sync.RWMutex{}                  // CliRxTxMux is used to synchronize access to CliRxTxCounter
+	statsChan      = make(chan *statsItem, 1000)      // statsChan is used to send segment items for statistics processing
 )
+
+type statsItem struct {
+	username string // Username of the client
+	rxbytes  uint64 // Received bytes
+	txbytes  uint64 // Sent bytes
+	clear    error  // Clear is used to indicate that the stats item should be cleared
+}
 
 // UserData holds user information.
 // When loading from .passwd, Password will be the bcrypt hash string.
@@ -52,26 +62,26 @@ type UserData struct {
 
 // ProxySession represents an active user session (currently a placeholder, expand as needed)
 type ProxySession struct {
-	id       uint64            // Unique session ID, can be used for tracking
-	mux      sync.RWMutex      // Mutex for session data access
-	Authed   bool              // Indicates if the user is authenticated
-	Username string            // Username of the authenticated user
-	Password string            // password for the session, can be used for re-authentication
-	ExpireAt int64             // session expiration time (Unix timestamp)
-	Conn     net.Conn          // The user's network connection
-	Writer   *bufio.Writer     // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
-	tpReader *textproto.Reader // textproto reader for easier command handling
-	tpWriter *textproto.Writer // textproto writer for easier command handling
-	CliTp    *textproto.Conn   // textproto connection for easier command handling
-	//tmpRXBytes  uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
-	RXBytes     uint64    // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
-	tmpTXBytes  uint64    // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
-	TXBytes     uint64    // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in total this session
-	ConnectedAt time.Time // Timestamp when the session was created
-	LastCmd     time.Time // Timestamp of the last command received
-	Group       string    // current group the user is in (used by GROUP command)
-	MsgNum      int64     // current message number in the group (used by STAT, ARTICLE, etc. commands)
-	Cron        time.Time // last run of periodic tasks, e.g., checking session expiration
+	id          uint64            // Unique session ID, can be used for tracking
+	mux         sync.RWMutex      // Mutex for session data access
+	Authed      bool              // Indicates if the user is authenticated
+	Username    string            // Username of the authenticated user
+	Password    string            // password for the session, can be used for re-authentication
+	ExpireAt    int64             // session expiration time (Unix timestamp)
+	Conn        net.Conn          // The user's network connection
+	Writer      *bufio.Writer     // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
+	tpReader    *textproto.Reader // textproto reader for easier command handling
+	tpWriter    *textproto.Writer // textproto writer for easier command handling
+	CliTp       *textproto.Conn   // textproto connection for easier command handling
+	tmpRXBytes  uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
+	RXBytes     uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
+	tmpTXBytes  uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
+	TXBytes     uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in total this session
+	ConnectedAt time.Time         // Timestamp when the session was created
+	LastCmd     time.Time         // Timestamp of the last command received
+	Group       string            // current group the user is in (used by GROUP command)
+	MsgNum      int64             // current message number in the group (used by STAT, ARTICLE, etc. commands)
+	Cron        time.Time         // last run of periodic tasks, e.g., checking session expiration
 	// Add other session-specific data here, e.g., current group, article pointer, etc.
 }
 
@@ -122,6 +132,10 @@ func handleConnection(conn net.Conn) {
 			}
 			// ProxySessions is used to track this specific session, remove it here.
 			delete(ProxySessions, s.Username)
+			statsChan <- &statsItem{
+				username: s.Username,
+				clear:    fmt.Errorf("1"),
+			}
 			proxyMutex.Unlock()
 		}
 		if ps.Authed {
@@ -443,6 +457,22 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 	}
 	//dlog(always, "Handling command '%s' for user '%s' in session.", command, ps.Username)
 	// Handle these commands for authenticated users
+	if time.Since(ps.Cron) > time.Second*15 { // every 15s
+		// calulate download speed of this user session
+		txspeedinKB := float64(ps.tmpTXBytes) / 1024 / float64(time.Since(ps.Cron)) // speed in KB
+		rxspeedinKB := float64(ps.tmpRXBytes) / 1024 / float64(time.Since(ps.Cron)) // speed in KB
+		log.Printf(" %s | session DL speed: %.0f KB/s | session UL speed: %.0f KB/s", ps.Username, rxspeedinKB, txspeedinKB)
+		if ps.tmpTXBytes > 0 || ps.tmpRXBytes > 0 {
+			statsChan <- &statsItem{
+				username: ps.Username,
+				rxbytes:  ps.tmpRXBytes,
+				txbytes:  ps.tmpTXBytes,
+			}
+		}
+		ps.Cron = time.Now() // Reset cron time for the next speed calculation
+		ps.tmpTXBytes = 0
+		ps.tmpRXBytes = 0
+	}
 	pass := false
 	var item *segmentChanItem // segmentChanItem to hold the message ID or number
 	switch command {          //switch command1
@@ -1032,3 +1062,61 @@ func (ps *ProxySession) IsExpired() (isExpired bool) {
 	}
 	return
 } // end func IsExpired
+
+func GoCliRxTxCounter() {
+	// GoCliRxTxCounter starts a goroutine to periodically log received and sent bytes per user
+	go func() {
+		for {
+			si := <-statsChan // Wait for stats items from the channel
+			CliRxTxMux.Lock() // Lock the global mutex to ensure thread-safe access to CliRxTxCounter
+			if si.clear != nil {
+				delete(CliRxTxCounter, si.username)
+				CliRxTxMux.Unlock()
+				continue
+			}
+			if _, ok := CliRxTxCounter[si.username]; !ok {
+				CliRxTxCounter[si.username] = NewCounter(4) // Initialize counter for the user if it doesn't exist
+			}
+			if si.rxbytes > 0 {
+				CliRxTxCounter[si.username].Add("tmpRXBytes", si.rxbytes)
+			}
+			if si.txbytes > 0 {
+				CliRxTxCounter[si.username].Add("tmpTXBytes", si.txbytes)
+			}
+			CliRxTxMux.Unlock() // Unlock the global mutex
+		}
+	}()
+	go func() {
+		for {
+			time.Sleep(time.Minute)
+			CliRxTxMux.Lock()
+			for username, counter := range CliRxTxCounter {
+				if counter == nil {
+					continue
+				}
+				rxbytes := counter.GetReset("tmpRXBytes") // Get and reset temporary RX bytes
+				txbytes := counter.GetReset("tmpTXBytes") // Get and reset temporary TX bytes
+				var RXspeedInKB, TXspeedInKB float64
+				if rxbytes > 0 {
+					counter.Add("RXBytes", rxbytes)
+					RXspeedInKB = float64(rxbytes) / 1024 / 60 // Calculate speed in KB/s
+				}
+				if txbytes > 0 {
+					counter.Add("TXBytes", txbytes)
+					TXspeedInKB = float64(txbytes) / 1024 / 60 // Calculate speed in KB/s
+				}
+				var rxMiB, txMiB float64
+				trx := counter.GetValue("RXBytes")
+				ttx := counter.GetValue("TXBytes")
+				if trx > 1024*1024 {
+					rxMiB = float64(trx) / 1024 / 1024
+				}
+				if ttx > 1024*1024 {
+					txMiB = float64(ttx) / 1024 / 1024
+				}
+				log.Printf(" %s | total DL: %.0f KiB/s (%.2f MiB) [%d bytes] | total UP: %.0f KiB/s (%.2f MiB) [%d bytes]", username, TXspeedInKB, txMiB, ttx, RXspeedInKB, rxMiB, trx)
+			}
+			CliRxTxMux.Unlock()
+		}
+	}()
+}
