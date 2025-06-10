@@ -71,17 +71,15 @@ type ConnPool struct {
 	openConns  int    // counter
 	nextconnId uint64 // unique connection id
 	//mux        sync.RWMutex
-	mux     *loggedrwmutex.LoggedSyncRWMutex
-	Counter *Counter_uint64      // used to count connections, parked conns, etc.
-	pool    chan *ConnItem       // idle/parked conns are in here
-	poolmap map[uint64]*ConnItem // idle/parked conns are in here
-	//wait       []chan *ConnItem
-	rserver    string // "host:port"
+	mux        *loggedrwmutex.LoggedSyncRWMutex
+	Counter    *Counter_uint64 // used to count connections, parked conns, etc.
+	pool       chan *ConnItem  // idle/parked conns are in here
+	rserver    string          // "host:port"
 	wants_auth bool
 	// we have created an endless loop
 	// provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.CloseConn(provider, connitem) xD
 	// if we want to call closeconn from outside the routine which keep a provider ptr too
-	// we cann call ConnPools[provider.id].CloseConn(provider, connitem)
+	// we cann call ConnPools[provider.id].CloseConn(connitem)
 	provider *Provider // pointer to the provider which created this ConnPool and holds the config
 	s        *SESSION  // session pointer to the session which created this ConnPool (access via c.s.%%SESSIONVARIABLES%% OR provider.ConnPool.s.%%SESSIONVARIABLES%%).
 }
@@ -127,7 +125,6 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 	provider.ConnPool = &ConnPool{
 		Counter: NewCounter(10), // used to count connections, parked conns, etc.
 		pool:    make(chan *ConnItem, provider.MaxConns),
-		poolmap: make(map[uint64]*ConnItem, provider.MaxConns), // use map
 		rserver: rserver, wants_auth: wants_auth,
 		provider: provider,
 		mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: fmt.Sprintf("ConnPool-%s", provider.Name)},
