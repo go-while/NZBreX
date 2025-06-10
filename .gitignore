@@ -36,6 +36,7 @@ test*.*
 *.pem
 *.key
 *.crt
+.*passwd*
 
 bak/*
 log/
