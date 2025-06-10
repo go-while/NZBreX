@@ -46,11 +46,11 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		return 0, fmt.Errorf("ERROR in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
-	code, err = CMD_STAT(connitem, item)
+	code, msg, err := CMD_STAT(connitem, item)
 	if code == 0 && err != nil {
 		// connection problem, closed?
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-		dlog(always, "WARN checking seg.Id='%s' failed @ '%s' err='%v'", item.segment.Id, provider.Name, err)
+		dlog(always, "WARN checking seg.Id='%s' failed @ '%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, code, msg, err)
 		return code, err
 	}
 
@@ -174,7 +174,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
 	startArticle := time.Now()
-	code, msg, rxb, err := CMD_ARTICLE(connitem, item)
+	code, msg, rxb, err := CMD(connitem, item, cmdARTICLE)
 
 	if err != nil {
 		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
@@ -198,8 +198,8 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		s.counter.Add("TOTAL_RXbytes", uint64(item.size))
 
 		// to calulate total download speed of this provider
-		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
-		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TMP_RXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TOTAL_RXbytes", uint64(item.size))
 
 		// to calulate global total download speed
 		GCounter.Add("TMP_RXbytes", uint64(item.size))
@@ -402,8 +402,8 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		s.counter.Add("TOTAL_TXbytes", uint64(item.size))
 
 		// to calulate total upload speed of this provider
-		provider.ConnPool.counter.Add("TMP_TXbytes", uint64(item.size))
-		provider.ConnPool.counter.Add("TOTAL_TXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TMP_TXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TOTAL_TXbytes", uint64(item.size))
 
 		// to calulate global total upload speed
 		GCounter.Add("TMP_TXbytes", uint64(item.size))

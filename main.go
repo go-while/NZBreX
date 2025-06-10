@@ -55,6 +55,7 @@ var (
 	nzbfile       string    // flag
 	testmode      bool      // flag: used to test compilation
 	testrapidyenc bool      // flag: used to test rapidyenc decoder
+	proxy         bool      // flag: used to enable proxy server
 )
 
 func init() {
@@ -75,9 +76,8 @@ func main() {
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
 	go GoMutexStatus()
-
-	if err := thisProcessor.NewProcessor(); err != nil {
-		dlog(always, "ERROR NewProcessor: err='%v'", err)
+	if err := thisProcessor.NewProcessor(proxy); err != nil {
+		dlog(always, "ERROR NewProcessor: proxy err='%v'", err)
 		os.Exit(1)
 	} else {
 		if cfg.opt.NzbDir != "" {
@@ -86,8 +86,31 @@ func main() {
 			select {} // infinite wait!
 		}
 	}
-
-	if cfg.opt.NzbDir == "" && nzbfile != "" {
+	if proxy {
+		// boot proxy server
+		wg.Add(1) // waitSession
+		go func(wg *sync.WaitGroup) {
+			globalmux.Lock()
+			// set up a session as like for nzb files
+			// but only join launch the session to load the providerlist
+			// to establish connections to the providers and have pools running
+			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: proxy server")
+			s := &SESSION{
+				proc:  thisProcessor,
+				mux:   &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYSESSION"},
+				proxy: true,
+			}
+			ProxyParent = s // set global proxy session so proxy has access to provider list and pools
+			globalmux.Unlock()
+			go StartProxyServers(cfg.opt)
+			if err := thisProcessor.LaunchSession(s, "", wg); err != nil {
+				dlog(always, "ERROR NewProcessor Boot Proxy Server: err='%v'", err)
+				os.Exit(1)
+			}
+		}(wg)
+		dlog(cfg.opt.Debug, "main: wg.Wait()")
+		wg.Wait()
+	} else if cfg.opt.NzbDir == "" && nzbfile != "" {
 		wg.Add(1) // waitSession
 		go func(nzbfile string, wg *sync.WaitGroup) {
 			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: nzbfile='%s'", nzbfile)

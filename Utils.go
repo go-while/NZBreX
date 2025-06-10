@@ -243,12 +243,7 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		cerr := dstFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
+	defer dstFile.Close()
 	nul := make([]byte, nullbytes)
 	for i := 0; i < nullbytes; i++ {
 		nul = append(nul, 0x00)
@@ -267,33 +262,26 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 // If the source file does not exist, it returns an error.
 // If the destination file does not exist, it creates a new file.
 // If the source file is empty, it does nothing.
-func AppendFile(srcPath string, dstPath string, delsrc bool) (err error) {
+func AppendFile(srcPath string, dstPath string, delsrc bool) error {
 	if srcPath == "" || dstPath == "" {
 		return fmt.Errorf("error AppendFile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
 	}
 
+	// Open source file for reading
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		cerr := srcFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
+	defer srcFile.Close()
 
+	// Open destination file in append mode, create if not exists
 	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		cerr := dstFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
+	defer dstFile.Close()
 
+	// Create a buffer and copy in chunks
 	buf := make([]byte, DefaultYencWriteBuffer)
 	for {
 		n, readErr := srcFile.Read(buf)
@@ -314,8 +302,8 @@ func AppendFile(srcPath string, dstPath string, delsrc bool) (err error) {
 			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
 		}
 	}
-	return
-} // end func AppendFile (written by AI! GPT-4o, complaint and changed by GPT-4.1!)
+	return nil
+} // end func AppendFile (written by AI! GPT-4o)
 
 func SHA256SumFile(path string) (string, error) {
 	// Open the file for reading
@@ -348,11 +336,6 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to open csv file: %v", err)
 	}
-	defer func() {
-		if cerr := f.Close(); cerr != nil {
-			log.Printf("ERROR closing file %s: %v", csvFileName, cerr)
-		}
-	}()
 	log.Println("writing csv file...")
 	fmt.Print("Writing csv file... ")
 	csvWriter := csv.NewWriter(f)
@@ -396,6 +379,7 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err := csvWriter.Error(); err != nil {
 		return fmt.Errorf("unable to write to the csv file: %v", err)
 	}
+	f.Close()
 	dlog(cfg.opt.Csv, "writeCsv: done")
 	return
 } // end func writeCsv
@@ -637,6 +621,10 @@ func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Du
 	}
 	dlog(always, "AdjustMicroSleep: pushed=%d todo=%d lastRunTook=%s microsleep=%d -> newSleep=%d (min=%d max=%d)", pushed, todo, lastRunTook, microsleep, newSleep, min, max)
 	return newSleep
+}
+
+func fatal() bool {
+	return true
 }
 
 // GetImpossibleCloseCaseVariablesToString returns a string representation of the impossible close case variables.
