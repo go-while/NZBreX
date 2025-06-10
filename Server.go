@@ -226,6 +226,7 @@ forever:
 				// To avoid user enumeration, some servers always respond 381.
 				time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay
 				tpWriter.PrintfLine("381 Password required")
+				continue forever // Continue to handle further commands after AUTHINFO USER
 
 			case "PASS":
 
@@ -239,88 +240,94 @@ forever:
 				}
 				time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay
 				passwordToVerify := parts[2]
-				if verifyPassword(currentUser, passwordToVerify) {
 
-					proxyMutex.Lock() // Lock before checking and updating CountConns and user data
-					// reload passwd file
-					if time.Since(proxyCron) > time.Minute {
-						proxyCron = time.Now()
-						if err := loadPasswdFile(cfg.opt.ProxyPasswdFile); err != nil {
-							proxyMutex.Unlock()                                            // Unlock before sleeping
-							time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-							log.Printf("Failed to reload passwd file: %v", err)
-							tpWriter.PrintfLine("481 Authentication failed (passwd file reload error)")
-							return
-						}
-					}
-					userData, userExists := passwdMap[currentUser]
-					if !userExists {
-						// This case should ideally not be reached if verifyPassword relies on passwdMap
-						proxyMutex.Unlock()
-						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-						tpWriter.PrintfLine("481 Authentication failed (user data inconsistency)")
-						log.Printf("User data not found for '%s' in passwdMap after successful verifyPassword. Potential data inconsistency.", currentUser)
-						return
-					}
-
-					// Check if account is expired
-					if userData.ExpireAt > 0 && time.Now().Unix() > userData.ExpireAt {
-						proxyMutex.Unlock()
-						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-						tpWriter.PrintfLine("481 Authentication failed (account expired)")
-						log.Printf("Authentication failed for user '%s' from %s: account expired (ExpireAt: %d, Current: %d)", currentUser, conn.RemoteAddr(), userData.ExpireAt, time.Now().Unix())
-						return
-					}
-
-					// Check connection limit
-					if userData.MaxConns > 0 && CountConns[currentUser] >= userData.MaxConns {
-						proxyMutex.Unlock()
-						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-						tpWriter.PrintfLine("452 Too many connections for this user. Please try again later.")
-						log.Printf("Connection denied for user '%s' from %s: too many connections (current: %d, max: %d)", currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns)
-						// Do not set authenticated to true, connection is rejected before full authentication.
-						return
-					}
-
-					// Connection allowed, increment count and flag authenticate
-					CountConns[currentUser]++
-					authenticated = true
-
-					// Create a new ProxySession for the authenticated user
-					cidmux.Lock()
-					CID++       // Increment global connection ID counter
-					ps.id = CID // Assign a unique session ID
-					cidmux.Unlock()
-
-					ps.Authed = true
-					ps.Username = currentUser
-					ps.Password = passwordToVerify     // Store the hashed password in the session so we can check every now and then if password has changed and close the session
-					ps.ExpireAt = userData.ExpireAt    // Set session expiration time from user data
-					ps.Conn = conn                     // Store the connection in the session
-					ps.CliTp = textproto.NewConn(conn) // Create a textproto connection for easier command handling
-					ps.Writer = bufio.NewWriter(conn)  // Create a bufio writer for the client connection
-					ps.tpReader = tpReader             // Store the textproto reader in the session
-					ps.tpWriter = tpWriter             // Store the textproto writer in the session
-					ps.Cron = ps.ConnectedAt           // Initialize cron time for periodic tasks
-
-					// Store the session in the global ProxySessions map
-					ProxySessions[currentUser] = ps
-
-					tpWriter.PrintfLine("281 Welcome to NZBreX Proxy! Your conns: %d/%d. Exp: '%v'",
-						CountConns[currentUser], userData.MaxConns, time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z))
-
-					proxyMutex.Unlock() // Unlock after updating CountConns and user data
-
-					log.Printf("User '%s' authenticated from %s. Active connections for user: %d/%d. ExpireAt: %s",
-						currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns,
-						time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z)) // Log expiration time
-					continue forever // Continue to handle further commands after successful authentication
-
-				} else {
+				if !verifyPassword(currentUser, passwordToVerify) {
 					tpWriter.PrintfLine("481 Authentication failed")
 					log.Printf("Failed authentication attempt for user '%s' from %s", currentUser, conn.RemoteAddr())
 					return
 				}
+
+				proxyMutex.RLock() // Lock before checking and updating CountConns and user data
+				reloadCron := time.Since(proxyCron) > time.Minute
+				proxyMutex.RUnlock()
+
+				if reloadCron {
+					proxyMutex.Lock()
+					proxyCron = time.Now()
+					proxyMutex.Unlock()
+					if err := loadPasswdFile(cfg.opt.ProxyPasswdFile); err != nil {
+						// Unlock before sleeping
+						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
+						log.Printf("Failed to reload passwd file: %v", err)
+						tpWriter.PrintfLine("481 Authentication failed (passwd file reload error)")
+						return
+					}
+				}
+
+				proxyMutex.RLock()
+
+				userData, userExists := passwdMap[currentUser]
+				if !userExists {
+					// This case should ideally not be reached if verifyPassword relies on passwdMap
+					proxyMutex.RUnlock()
+					time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
+					tpWriter.PrintfLine("481 Authentication failed (user data inconsistency)")
+					log.Printf("User data not found for '%s' in passwdMap after successful verifyPassword. Potential data inconsistency.", currentUser)
+					return
+				}
+
+				// Check if account is expired
+				if userData.ExpireAt > 0 && time.Now().Unix() > userData.ExpireAt {
+					proxyMutex.RUnlock()
+					time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
+					tpWriter.PrintfLine("481 Authentication failed (account expired)")
+					log.Printf("Authentication failed for user '%s' from %s: account expired (ExpireAt: %d, Current: %d)", currentUser, conn.RemoteAddr(), userData.ExpireAt, time.Now().Unix())
+					return
+				}
+				proxyMutex.RUnlock()
+
+				proxyMutex.Lock()
+				// Check connection limit
+				if userData.MaxConns > 0 && CountConns[currentUser] >= userData.MaxConns {
+					proxyMutex.Unlock()
+					time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
+					tpWriter.PrintfLine("452 Too many connections for this user. Please try again later.")
+					log.Printf("Connection denied for user '%s' from %s: too many connections (current: %d, max: %d)", currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns)
+					// Do not set authenticated to true, connection is rejected before full authentication.
+					return
+				}
+				// Connection allowed, increment count and flag authenticate
+				CountConns[currentUser]++
+				authenticated = true
+
+				// Create a new ProxySession for the authenticated user
+
+				CID++       // Increment global connection ID counter
+				ps.id = CID // Assign a unique session ID
+				ps.Authed = true
+				ps.Username = currentUser
+				ps.Password = passwordToVerify     // Store the hashed password in the session so we can check every now and then if password has changed and close the session
+				ps.ExpireAt = userData.ExpireAt    // Set session expiration time from user data
+				ps.Conn = conn                     // Store the connection in the session
+				ps.CliTp = textproto.NewConn(conn) // Create a textproto connection for easier command handling
+				ps.Writer = bufio.NewWriter(conn)  // Create a bufio writer for the client connection
+				ps.tpReader = tpReader             // Store the textproto reader in the session
+				ps.tpWriter = tpWriter             // Store the textproto writer in the session
+				ps.Cron = ps.ConnectedAt           // Initialize cron time for periodic tasks
+
+				// Store the session in the global ProxySessions map
+				ProxySessions[currentUser] = ps
+
+				tpWriter.PrintfLine("281 Welcome to NZBreX Proxy! Your conns: %d/%d. Exp: '%v'",
+					CountConns[currentUser], userData.MaxConns, time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z))
+
+				log.Printf("User '%s' authenticated from %s. Active connections for user: %d/%d. ExpireAt: %s",
+					currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns,
+					time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z)) // Log expiration time
+
+				proxyMutex.Unlock() // Unlock after updating CountConns and user data
+
+				continue forever // Continue to handle further commands after successful authentication
 
 			default:
 				tpWriter.PrintfLine("501 Unknown AUTHINFO subcommand: %s", authCmd)
