@@ -1108,13 +1108,18 @@ func GoCliRxTxCounter() {
 				var rxMiB, txMiB float64
 				trx := counter.GetValue("RXBytes")
 				ttx := counter.GetValue("TXBytes")
-				if trx > 1024 {
+				if trx > 1024*1024 {
 					rxMiB = float64(trx) / 1024 / 1024
 				}
-				if ttx > 1024 {
+				if ttx > 1024*1024 {
 					txMiB = float64(ttx) / 1024 / 1024
 				}
-				log.Printf(" %s | total DL: %.0f KiB/s (%.2f MiB) [%d bytes] | total UP: %.0f KiB/s (%.2f MiB) [%d bytes]", username, TXspeedInKB, txMiB, ttx, RXspeedInKB, rxMiB, trx)
+				if RXspeedInKB > 0 || TXspeedInKB > 0 {
+					log.Printf(" %s | session DL speed: %.0f KiB/s (%.0f MiB) [%d bytes] | session UL speed: %.0f KiB/s (%.0f MiB) [%d bytes]", username, TXspeedInKB, txMiB, ttx, RXspeedInKB, rxMiB, trx)
+				} else {
+					log.Printf(" %s | idle, no data transfer in last minute", username)
+					// TODO close session if no data transfer in last minute?
+				}
 			}
 			CliRxTxMux.Unlock()
 		}
