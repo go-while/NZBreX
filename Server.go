@@ -1108,10 +1108,10 @@ func GoCliRxTxCounter() {
 				var rxMiB, txMiB float64
 				trx := counter.GetValue("RXBytes")
 				ttx := counter.GetValue("TXBytes")
-				if trx > 1024*1024 {
+				if trx > 1024 {
 					rxMiB = float64(trx) / 1024 / 1024
 				}
-				if ttx > 1024*1024 {
+				if ttx > 1024 {
 					txMiB = float64(ttx) / 1024 / 1024
 				}
 				log.Printf(" %s | total DL: %.0f KiB/s (%.2f MiB) [%d bytes] | total UP: %.0f KiB/s (%.2f MiB) [%d bytes]", username, TXspeedInKB, txMiB, ttx, RXspeedInKB, rxMiB, trx)
