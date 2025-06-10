@@ -533,6 +533,7 @@ loopProvider:
 			}
 			switch code {
 			case 220, 221, 222: // Valid response codes for ARTICLE, HEAD, BODY
+				provider.ConnPool.ParkConn(0, connitem, "proxy") // Park the connection for reuse
 				// send data to client
 				txb, err := LinesWriter(ps.Writer, ps.Conn, code, item) // Send data to client
 				if txb > 0 {
@@ -541,24 +542,21 @@ loopProvider:
 					ps.TXBytes += txb
 				}
 				if err != nil {
-					provider.ConnPool.CloseConn(connitem, nil) // Close the connection on error
 					return fmt.Errorf("error writing data command %s to client: %v", command, err)
 				}
-				response = "0"                                   // full response already sent, set response to 0 to indicate success
-				provider.ConnPool.ParkConn(0, connitem, "proxy") // Park the connection for reuse
-				break loopProvider                               // Break out of the provider loop after handling the command
+				response = "0"     // full response already sent, set response to 0 to indicate success
+				break loopProvider // Break out of the provider loop after handling the command
 
 			case 423, 430, 451: // messageid not found
+				provider.ConnPool.ParkConn(0, connitem, "proxy")
 				checkedProviderGroups[provider.Group] = true
 				response = fmt.Sprintf("%d %s", code, msg)
-				provider.ConnPool.ParkConn(0, connitem, "proxy")
 				SetArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) // Set article not found at provider group
 				continue loopProvider
 			default:
+				provider.ConnPool.CloseConn(connitem, nil)
 				dlog(always, "ERROR in CMD for provider %s: cmd=%s code=%d msg='%s'", provider.Name, command, code, msg)
 				response = fmt.Sprintf("502 Unknown Response: %d %s", code, msg)
-				// Handle other error codes
-				provider.ConnPool.CloseConn(connitem, nil)
 				continue loopProvider
 			}
 		case "STAT":
@@ -571,20 +569,20 @@ loopProvider:
 			}
 			switch code {
 			case 223: // Article found
-				response = fmt.Sprintf("%d 0 %s", code, item.segment.Id)
 				provider.ConnPool.ParkConn(0, connitem, "proxy") // Park the connection for reuse
-				break loopProvider                               // Break out of the provider loop after handling the command
+				response = fmt.Sprintf("%d 0 %s", code, item.segment.Id)
+				break loopProvider // Break out of the provider loop after handling the command
 
 			case 423, 430, 451: // messageid not found
+				provider.ConnPool.ParkConn(0, connitem, "proxy")
 				checkedProviderGroups[provider.Group] = true
 				response = fmt.Sprintf("%d nf", code)
-				provider.ConnPool.ParkConn(0, connitem, "proxy")
 				SetArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) // Set article not found at provider group
 				continue loopProvider
 
 			default:
-				response = fmt.Sprintf("%d %s", code, msg)
 				provider.ConnPool.CloseConn(connitem, nil)
+				response = fmt.Sprintf("%d %s", code, msg)
 				// Handle other error codes
 				dlog(always, "ERROR CMD_STAT for provider %s: code=%d msg='%s'", provider.Name, code, msg)
 				continue loopProvider // Continue to the next provider
