@@ -76,7 +76,7 @@ func main() {
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
 	go GoMutexStatus()
-	if err := thisProcessor.NewProcessor(proxy); err != nil {
+	if err := thisProcessor.NewProcessor(); err != nil {
 		dlog(always, "ERROR NewProcessor: proxy err='%v'", err)
 		os.Exit(1)
 	} else {
