@@ -1099,11 +1099,11 @@ func GoCliRxTxCounter() {
 				var RXspeedInKB, TXspeedInKB float64
 				if rxbytes > 0 {
 					counter.Add("RXBytes", rxbytes)
-					RXspeedInKB = float64(rxbytes) / 1024 / 60 // Calculate speed in KB/s
+					RXspeedInKB = float64(rxbytes) / 1024 / 60 // Calculate users upload speed in KB/s (proxy received)
 				}
 				if txbytes > 0 {
 					counter.Add("TXBytes", txbytes)
-					TXspeedInKB = float64(txbytes) / 1024 / 60 // Calculate speed in KB/s
+					TXspeedInKB = float64(txbytes) / 1024 / 60 // Calculate users download speed in KB/s (proxy transceived)
 				}
 				var rxMiB, txMiB float64
 				trx := counter.GetValue("RXBytes")
