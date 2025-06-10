@@ -101,14 +101,19 @@ type CFG struct {
 	DebugFlags              bool   `json:"DebugFlags"`              // if true, enable printing item flags
 	DebugRapidYenc          bool   `json:"DebugRapidYenc"`          // if true, enable rapidyenc debug output
 	//DebugSTREAM       bool   `json:"DebugSTREAM"`      // if true, enable STREAM debug output
-	Verbose       bool `json:"Verbose"`       // if true, enable verbose output
-	Bar           bool `json:"Bar"`           // if true, show progress bar
-	Colors        bool `json:"Colors"`        // if true, enable colored output
-	MaxArtSize    int  `json:"MaxArtSize"`    // maximum article size in bytes
-	SloMoC        int  `json:"SloMoC"`        // slow motion for checking articles
-	SloMoD        int  `json:"SloMoD"`        // slow motion for downloading articles
-	SloMoU        int  `json:"SloMoU"`        // slow motion for uploading articles
-	SessThreshold int  `json:"SessThreshold"` // max number of sessions a processor keeps open
+	Verbose         bool   `json:"Verbose"`         // if true, enable verbose output
+	Bar             bool   `json:"Bar"`             // if true, show progress bar
+	Colors          bool   `json:"Colors"`          // if true, enable colored output
+	MaxArtSize      int    `json:"MaxArtSize"`      // maximum article size in bytes
+	SloMoC          int    `json:"SloMoC"`          // slow motion for checking articles
+	SloMoD          int    `json:"SloMoD"`          // slow motion for downloading articles
+	SloMoU          int    `json:"SloMoU"`          // slow motion for uploading articles
+	SessThreshold   int    `json:"SessThreshold"`   // max number of sessions a processor keeps open
+	TLSCertPem      string `json:"TLSCertPem"`      // path to the TLS certificate in PEM format: /etc/letsencrypt/live/sub.domain.com/fullchain.pem
+	TLSPrivKey      string `json:"TLSPrivKey"`      // path to the TLS key in PEM format: /etc/letsencrypt/live/sub.domain.com/privkey.pem
+	ProxyTCP        int    `json:"ProxyTCP"`        // port for the TCP proxy, 0 = no proxy
+	ProxyTLS        int    `json:"ProxyTLS"`        // port for the TLS proxy, 0 = no proxy
+	ProxyPasswdFile string `json:"ProxyPasswdFile"` // path to the file with proxy passwords, format: "username|bcryptHash|MaxConns|ExpireAt(unix timestamp)|post" per line
 } // end CFG struct
 
 type Provider struct {

@@ -72,7 +72,7 @@ type ConnPool struct {
 	nextconnId uint64 // unique connection id
 	//mux        sync.RWMutex
 	mux     *loggedrwmutex.LoggedSyncRWMutex
-	counter *Counter_uint64      // used to count connections, parked conns, etc.
+	Counter *Counter_uint64      // used to count connections, parked conns, etc.
 	pool    chan *ConnItem       // idle/parked conns are in here
 	poolmap map[uint64]*ConnItem // idle/parked conns are in here
 	//wait       []chan *ConnItem
@@ -125,7 +125,7 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 	wants_auth := (provider.Username != "" && provider.Password != "")
 
 	provider.ConnPool = &ConnPool{
-		counter: NewCounter(10), // used to count connections, parked conns, etc.
+		Counter: NewCounter(10), // used to count connections, parked conns, etc.
 		pool:    make(chan *ConnItem, provider.MaxConns),
 		poolmap: make(map[uint64]*ConnItem, provider.MaxConns), // use map
 		rserver: rserver, wants_auth: wants_auth,
@@ -850,7 +850,7 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 	case cp == nil && cnt == nil:
 		name, group, counter = "Global", "Speedmeter", GCounter
 	case cp != nil && cnt == nil:
-		name, group, counter = cp.provider.Name, cp.provider.Group, cp.counter
+		name, group, counter = cp.provider.Name, cp.provider.Group, cp.Counter
 	case cp == nil && cnt != nil:
 		name, group, counter = "Global", "Speedmeter", cnt
 	default:
