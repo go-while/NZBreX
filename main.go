@@ -101,6 +101,7 @@ func main() {
 				proxy: true,
 			}
 			ProxyParent = s // set global proxy session so proxy has access to provider list and pools
+			go GoCliRxTxCounter()
 			globalmux.Unlock()
 			go StartProxyServers(cfg.opt)
 			if err := thisProcessor.LaunchSession(s, "", wg); err != nil {
