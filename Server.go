@@ -33,7 +33,7 @@ var (
 	CID    = uint64(0)     // Global connection ID counter, can be used for session tracking - currently unused
 
 	proxyMutex    = &sync.RWMutex{}                // proxyMutex is used to synchronize access to passwdMap, ProxySessions and CountConns
-	proxyCron     *time.Time                       // MainCron is the main cron job ticker
+	proxyCron     = time.Now()                     // reload passwdMap every minute
 	passwdMap     = make(map[string]*UserData)     // passwdMap holds user credentials (k is username, v is UserData)
 	ProxySessions = make(map[string]*ProxySession) // ProxySessions map to hold active user sessions (k is username, v is ProxySession)
 	CountConns    = make(map[string]int)           // CountConns keeps track of active connections per user (k is username, v is count)
@@ -96,7 +96,7 @@ func isValidMessageID(ps *ProxySession, messageID string) (isvalid bool, num int
 
 // handleConnection manages a single NNTP client connection.
 func handleConnection(conn net.Conn) {
-	log.Printf("Handling connection from %s", conn.RemoteAddr())
+	//log.Printf("Handling connection from %s", conn.RemoteAddr())
 
 	// Use textproto.Reader and textproto.Writer
 	tpReader := textproto.NewReader(bufio.NewReader(conn))
@@ -106,8 +106,9 @@ func handleConnection(conn net.Conn) {
 	authenticated := false
 	now := time.Now() // Get the current time for session initialization
 	var ps = &ProxySession{
-		LastCmd:     now, // Initialize last command time
-		ConnectedAt: now, // Set the connection time
+		Conn:        conn, // Store the connection in the session
+		LastCmd:     now,  // Initialize last command time
+		ConnectedAt: now,  // Set the connection time
 	} // ProxySession to hold user session data
 
 	// Ensure connection is closed and proxy session cleaned up when done
@@ -124,12 +125,15 @@ func handleConnection(conn net.Conn) {
 			delete(ProxySessions, s.Username)
 			proxyMutex.Unlock()
 		}
-		//log.Printf("Closed connection for user '%s' from %s", s.Username, conn.RemoteAddr())
+		if ps.Authed {
+			dlog(always, "Closed connection for user '%s'", s.Username)
+		}
 		if ps.CliTp != nil {
 			ps.CliTp.Close() // Close the textproto connection
 		} else if s.Conn != nil {
 			ps.Conn.Close()
 		}
+		ps.Authed = false            // Clear authentication status
 		ps.Username = ""             // Clear username to avoid dangling pointer
 		ps.ConnectedAt = time.Time{} // Clear timestamp to avoid dangling pointer
 		ps.LastCmd = time.Time{}     // Clear last command time to avoid dangling pointer
@@ -152,23 +156,29 @@ forever:
 			if err != io.EOF {
 				// Check for common textproto errors, like malformed lines or read errors
 				if perr, ok := err.(*textproto.Error); ok {
-					log.Printf("Textproto error from client %s: %v (Code: %d)", conn.RemoteAddr(), perr.Msg, perr.Code)
+					dlog(always, "Textproto error from client err='%v'", perr)
 					// You might want to send a specific NNTP error code back to the client here
 					// For example, if it's a syntax error related to line endings or length.
 					// tpWriter.PrintfLine("501 Syntax error or line too long")
 				} else {
-					log.Printf("Error reading from client %s: %v", conn.RemoteAddr(), err)
+					//DEBUG log.Printf("Error reading from client %s: %v", conn.RemoteAddr(), err)
 				}
 			} else {
-				log.Printf("Client %s disconnected (EOF).", conn.RemoteAddr())
+				//DEBUG log.Printf("Client %s disconnected (EOF).", conn.RemoteAddr())
 			}
 			return
 		}
-
+		if len(line) > 128 { // only command lines are captured here
+			// reading a line longer than 128 characters is not allowed by RFC 3977
+			// Line is too long, send error response
+			tpWriter.PrintfLine("501 Syntax error: cmd line too long")
+			return
+		}
 		line = strings.TrimSpace(line) // TrimSpace is still useful
 		parts := strings.Fields(line)
 		if len(parts) == 0 {
-			continue
+			// just close on an empty line
+			return
 		}
 		var args []string
 		command := strings.ToUpper(parts[0])
@@ -176,7 +186,8 @@ forever:
 			args = parts[1:] // Get all parts after the command as arguments
 		}
 
-		dlog(always, "Client %s command: %s args='%v'", conn.RemoteAddr(), line, args)
+		//dlog(cfg.opt.Bug, "Client %s command: %s args='%v'", conn.RemoteAddr(), line, args)
+
 		ps.LastCmd = time.Now() // Update last command timestamp for unauthenticated users
 
 		if authenticated {
@@ -195,11 +206,11 @@ forever:
 		case "AUTHINFO":
 			if authenticated {
 				tpWriter.PrintfLine("502 Already authenticated")
-				break forever
+				return
 			}
 			if len(parts) < 2 {
 				tpWriter.PrintfLine("501 Syntax error in AUTHINFO command")
-				break forever
+				return
 			}
 			authCmd := strings.ToUpper(parts[1])
 			switch authCmd {
@@ -208,7 +219,7 @@ forever:
 
 				if len(parts) < 3 {
 					tpWriter.PrintfLine("501 Syntax error: AUTHINFO USER <username>")
-					break
+					return
 				}
 				currentUser = parts[2]
 				// RFC 3977 suggests 381 if user is valid, otherwise 481/502 or proceed and fail at PASS.
@@ -220,18 +231,28 @@ forever:
 
 				if currentUser == "" {
 					tpWriter.PrintfLine("482 Authentication commands out of sequence (AUTHINFO USER first)")
-					break
+					return
 				}
 				if len(parts) < 3 {
 					tpWriter.PrintfLine("501 Syntax error: AUTHINFO PASS <password>")
-					break
+					return
 				}
 				time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay
 				passwordToVerify := parts[2]
 				if verifyPassword(currentUser, passwordToVerify) {
 
 					proxyMutex.Lock() // Lock before checking and updating CountConns and user data
-
+					// reload passwd file
+					if time.Since(proxyCron) > time.Minute {
+						proxyCron = time.Now()
+						if err := loadPasswdFile(cfg.opt.ProxyPasswdFile); err != nil {
+							proxyMutex.Unlock()                                            // Unlock before sleeping
+							time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
+							log.Printf("Failed to reload passwd file: %v", err)
+							tpWriter.PrintfLine("481 Authentication failed (passwd file reload error)")
+							return
+						}
+					}
 					userData, userExists := passwdMap[currentUser]
 					if !userExists {
 						// This case should ideally not be reached if verifyPassword relies on passwdMap
@@ -239,7 +260,7 @@ forever:
 						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
 						tpWriter.PrintfLine("481 Authentication failed (user data inconsistency)")
 						log.Printf("User data not found for '%s' in passwdMap after successful verifyPassword. Potential data inconsistency.", currentUser)
-						break
+						return
 					}
 
 					// Check if account is expired
@@ -248,7 +269,7 @@ forever:
 						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
 						tpWriter.PrintfLine("481 Authentication failed (account expired)")
 						log.Printf("Authentication failed for user '%s' from %s: account expired (ExpireAt: %d, Current: %d)", currentUser, conn.RemoteAddr(), userData.ExpireAt, time.Now().Unix())
-						break
+						return
 					}
 
 					// Check connection limit
@@ -258,17 +279,19 @@ forever:
 						tpWriter.PrintfLine("452 Too many connections for this user. Please try again later.")
 						log.Printf("Connection denied for user '%s' from %s: too many connections (current: %d, max: %d)", currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns)
 						// Do not set authenticated to true, connection is rejected before full authentication.
-						break
+						return
 					}
 
 					// Connection allowed, increment count and flag authenticate
 					CountConns[currentUser]++
 					authenticated = true
+
 					// Create a new ProxySession for the authenticated user
 					cidmux.Lock()
 					CID++       // Increment global connection ID counter
 					ps.id = CID // Assign a unique session ID
 					cidmux.Unlock()
+
 					ps.Authed = true
 					ps.Username = currentUser
 					ps.Password = passwordToVerify     // Store the hashed password in the session so we can check every now and then if password has changed and close the session
@@ -296,30 +319,32 @@ forever:
 				} else {
 					tpWriter.PrintfLine("481 Authentication failed")
 					log.Printf("Failed authentication attempt for user '%s' from %s", currentUser, conn.RemoteAddr())
-					continue forever // Continue to handle further commands after failed authentication
+					return
 				}
 
 			default:
 				tpWriter.PrintfLine("501 Unknown AUTHINFO subcommand: %s", authCmd)
-				continue forever // Continue to handle further commands after failed authentication
+				return
 			}
 
 		case "MODE":
 			if len(parts) < 2 {
 				tpWriter.PrintfLine("501 Syntax error in MODE command")
-				break
+				return
 			}
 			switch strings.ToUpper(parts[1]) {
 			case "READER":
 				tpWriter.PrintfLine("201 Posting prohibited")
+
 			case "STREAM":
 				if !authenticated {
 					tpWriter.PrintfLine("480 Authentication required for MODE STREAM")
-					break
+					return
 				}
 				tpWriter.PrintfLine("200 Switching to STREAM mode")
 			default:
-				tpWriter.PrintfLine("501 Unknown mode or mode not supported: %s", parts[1])
+				tpWriter.PrintfLine("501 Unknown mode")
+				return
 			}
 			continue forever // Continue to handle further commands after MODE command
 
@@ -342,6 +367,65 @@ forever:
 	} // end for forever
 } // end func handleConnection
 
+var articleNotFound = &ArticleNotFound{Map: make(map[string]map[string]*A430)} // Global variable to track articles not found by provider
+
+// ArticleNotFound is a map to track articles not found by provider (k is provider group, v is map of message IDs)
+type ArticleNotFound struct {
+	mux sync.RWMutex                // Mutex to protect access to the map
+	Map map[string]map[string]*A430 // Map of provider groups to message IDs not found
+}
+
+type A430 struct {
+	expires time.Time // Expiration time for the A430 article not found
+}
+
+func IsArticleNotFoundAtProviderGroup(messageId string, providerGroup string) bool {
+	// Check if the article is not found at the provider group
+	articleNotFound.mux.RLock()
+	defer articleNotFound.mux.RUnlock()
+	if providerGroupMap, exists := articleNotFound.Map[providerGroup]; exists {
+		if a430, found := providerGroupMap[messageId]; found {
+			if time.Now().Before(a430.expires) {
+				log.Printf("cache: a430 isflag messageId '%s' not found at provider group '%s'", messageId, providerGroup)
+				return true // messageId flaged as not found and entry not expired
+			}
+			log.Printf("cache: a430 expired messageId '%s' at provider group '%s'", messageId, providerGroup)
+			go ClearArticleNotFoundAtProviderGroup(messageId, providerGroup) // Clear expired article not found entry
+		}
+	}
+	return false // not cached
+}
+
+func ClearArticleNotFoundAtProviderGroup(messageId string, providerGroup string) {
+	// Clear the article not found at the provider group
+	articleNotFound.mux.Lock()
+	defer articleNotFound.mux.Unlock()
+	if providerGroupMap, exists := articleNotFound.Map[providerGroup]; exists {
+		if _, found := providerGroupMap[messageId]; found {
+			delete(providerGroupMap, messageId) // Remove the article not found entry
+			log.Printf("Cleared article not found for message ID '%s' at provider group '%s'", messageId, providerGroup)
+		} else {
+			log.Printf("Article '%s' not found at provider group '%s' (nothing to clear)", messageId, providerGroup)
+		}
+	} else {
+		log.Printf("Provider group '%s' does not exist in article not found map", providerGroup)
+	}
+}
+
+func SetArticleNotFoundAtProviderGroup(messageId string, providerGroup string) {
+	// Set the article not found at the provider group
+	articleNotFound.mux.Lock()
+	defer articleNotFound.mux.Unlock()
+	if _, exists := articleNotFound.Map[providerGroup]; !exists {
+		articleNotFound.Map[providerGroup] = make(map[string]*A430)
+	}
+	articleNotFound.Map[providerGroup][messageId] = &A430{
+		expires: time.Now().Add(1 * time.Minute), // Set expiration to 1 minute from now
+	}
+	log.Printf("Set article not found for message ID '%s' at provider group '%s'", messageId, providerGroup)
+}
+
+// handleRequest processes NNTP commands for an authenticated user session.
 func (ps *ProxySession) handleRequest(command string, args []string) error {
 	// Placeholder for handling specific NNTP commands in the session
 	// This function can be expanded to handle commands like GROUP, ARTICLE, etc.
@@ -379,7 +463,8 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 					Id: args[0],
 				},
 			}
-			pass = true // we have a valid message ID, so we can pass it to the provider
+			pass = true // we have a valid message ID, so we can pass it to a provider
+			// TODO: add disk caching here?
 		}
 
 	case "CAPABILITIES":
@@ -410,11 +495,13 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 	checkedProviderGroups := make(map[string]bool)
 loopProvider:
 	for _, provider := range ProxyParent.providerList {
-		if checkedProviderGroups[provider.Group] || provider.NoDownload {
-			continue
+		if provider.NoDownload ||
+			checkedProviderGroups[provider.Group] ||
+			IsArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) {
+			response = "430 NO"
+			// Skip this provider if it has already been checked or is not available for download
+			continue loopProvider
 		}
-		// TODO add some caching here for 430 article not found?
-
 		connitem, err := provider.ConnPool.GetConn() // providerconn / proxyconn
 		if err != nil {
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
@@ -460,6 +547,7 @@ loopProvider:
 				checkedProviderGroups[provider.Group] = true
 				response = fmt.Sprintf("%d %s", code, msg)
 				provider.ConnPool.ParkConn(0, connitem, "proxy")
+				SetArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) // Set article not found at provider group
 				continue loopProvider
 			default:
 				dlog(always, "ERROR in CMD for provider %s: cmd=%s code=%d msg='%s'", provider.Name, command, code, msg)
@@ -472,8 +560,8 @@ loopProvider:
 			// Handle STAT command
 			code, msg, err := CMD_STAT(connitem, item)
 			if err != nil {
-				provider.ConnPool.CloseConn(connitem, nil) // Close the connection on error
 				dlog(always, "ERROR CMD_STAT for provider %s: err='%v'", provider.Name, err)
+				provider.ConnPool.CloseConn(connitem, nil) // Close the connection on error
 				continue loopProvider
 			}
 			switch code {
@@ -486,6 +574,7 @@ loopProvider:
 				checkedProviderGroups[provider.Group] = true
 				response = fmt.Sprintf("%d nf", code)
 				provider.ConnPool.ParkConn(0, connitem, "proxy")
+				SetArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) // Set article not found at provider group
 				continue loopProvider
 
 			default:
@@ -497,8 +586,13 @@ loopProvider:
 			}
 		} // end switch command2
 	} // end for loopProvider
-	if response != "0" && response != "" {
-		ps.tpWriter.PrintfLine("%s", response)
+	if response != "0" {
+		if response != "" {
+			ps.tpWriter.PrintfLine("%s", response)
+		} else {
+			dlog(always, " %s | ERROR response to client empty", ps.Username)
+			ps.tpWriter.PrintfLine("500 Unknown error occurred while processing command %s", command)
+		}
 	}
 	return nil // Return nil to indicate the command was handled successfully. an error will disconnect the user
 } // end func handleRequest
@@ -537,7 +631,7 @@ func LinesWriter(cliwriter *bufio.Writer, conn net.Conn, code int, item *segment
 		n, err := io.WriteString(cliwriter, line+CRLF)
 		txb += uint64(n)
 		if err != nil {
-			return txb, fmt.Errorf("error DotWriter WriteString writer @ '%s' err='%v'", conn.RemoteAddr(), err)
+			return txb, fmt.Errorf("error DotWriter WriteString writer err='%v'", err)
 		}
 
 	}
@@ -545,7 +639,7 @@ func LinesWriter(cliwriter *bufio.Writer, conn net.Conn, code int, item *segment
 	n, err = io.WriteString(cliwriter, DOT+CRLF)
 	txb += uint64(n)
 	if err != nil {
-		return txb, fmt.Errorf("error DotWriter WriteString writer @ '%s' err='%v'", conn.RemoteAddr(), err)
+		return txb, fmt.Errorf("error DotWriter WriteString writer err='%v'", err)
 	}
 	return txb, nil
 } // end func DataWriter
