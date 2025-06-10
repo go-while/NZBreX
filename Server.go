@@ -500,10 +500,17 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 	checkedProviderGroups := make(map[string]bool)
 loopProvider:
 	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload ||
-			checkedProviderGroups[provider.Group] ||
+		switch command {
+		case "ARTICLE", "BODY", "HEAD", "STAT":
+			if provider.NoDownload {
+				// yes, doing stat on a provider that does not allow downloading articles does not make sense
+				response = "430 NODL" // 430 No Download, provider does not allow downloading articles
+				continue loopProvider // Skip this provider if it does not allow downloading articles
+			}
+		}
+		if checkedProviderGroups[provider.Group] ||
 			IsArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) {
-			response = "430 NO"
+			response = "430 NOPG" // 430 cached Not Found in ProviderGroup
 			// Skip this provider if it has already been checked or is not available for download
 			continue loopProvider
 		}
