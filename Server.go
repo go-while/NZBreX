@@ -321,9 +321,8 @@ forever:
 				tpWriter.PrintfLine("281 Welcome to NZBreX Proxy! Your conns: %d/%d. Exp: '%v'",
 					CountConns[currentUser], userData.MaxConns, time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z))
 
-				log.Printf("User '%s' authenticated from %s. Active connections for user: %d/%d. ExpireAt: %s",
-					currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns,
-					time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z)) // Log expiration time
+				log.Printf("User '%s' authenticated from %s. Active connections for user: %d/%d",
+					currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns)
 
 				proxyMutex.Unlock() // Unlock after updating CountConns and user data
 
@@ -443,7 +442,7 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 		ps.CliTp.PrintfLine("480 Authentication required for %s command", command)
 		return fmt.Errorf("authentication required")
 	}
-	log.Printf("Handling command '%s' for user '%s' in session.", command, ps.Username)
+	//dlog(always, "Handling command '%s' for user '%s' in session.", command, ps.Username)
 	// Handle these commands for authenticated users
 	pass := false
 	var item *segmentChanItem // segmentChanItem to hold the message ID or number
@@ -515,7 +514,7 @@ loopProvider:
 			continue loopProvider // Skip this provider if connection fails
 		}
 
-		dlog(always, " %s | provider %s: %s got pc='%v'", ps.Username, provider.Name, command, connitem)
+		dlog(cfg.opt.BUG, " %s | provider %s: %s got pc='%v'", ps.Username, provider.Name, command, connitem)
 
 		// got connection to a provider
 		switch command { // switch command2
