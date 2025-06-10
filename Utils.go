@@ -244,7 +244,7 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 		return err
 	}
 	defer dstFile.Close()
-	nul := make([]byte, nullbytes)
+	nul := make([]byte, 0, nullbytes)
 	for i := 0; i < nullbytes; i++ {
 		nul = append(nul, 0x00)
 	}
