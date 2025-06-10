@@ -85,7 +85,7 @@ type SESSION struct {
 	proxy                 bool              // flag to signal proxy is used in LaunchSession
 } // end type SESSION struct
 
-func (p *PROCESSOR) NewProcessor(proxy bool) error {
+func (p *PROCESSOR) NewProcessor() error {
 	p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: "PROCESSOR"} // use a logged sync mutex to log locking and unlocking
 	p.mux.Lock()
 	defer p.mux.Unlock()
