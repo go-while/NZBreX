@@ -487,19 +487,23 @@ readlines:
 			return 0, rxb, nil, err
 		}
 
+		if (parseHeader && len(line) == 0) || (len(line) == 1 && line == ".") {
+			// reading header ends here
+			parseHeader = false
+			if !proxy {
+				// add new headers for ignored ones
+				now := time.Now().Format(time.RFC1123Z)
+				datestr := fmt.Sprintf("Date: %s", now)
+				content = append(content, datestr)
+			} else {
+				//content = append(content, "X-NZBreX: "+appVersion)
+			}
+			content = append(content, "Path: not-for-mail")
+		}
+
 		// found final dot in line, break here
 		if len(line) == 1 && line == "." {
 			break
-		}
-
-		if parseHeader && len(line) == 0 {
-			// reading header ends here
-			parseHeader = false
-
-			// add new headers for ignored ones
-			now := time.Now().Format(time.RFC1123Z)
-			datestr := fmt.Sprintf("Date: %s", now)
-			content = append(content, datestr)
 		}
 
 		if parseHeader {
@@ -516,6 +520,11 @@ readlines:
 			if cfg.opt.CleanHeaders {
 				// ignore headers from cleanHeader slice
 				for _, key := range cleanHeader {
+					if proxy && key == "Date:" {
+						// if we are a proxy, we do not want to clean the Date header
+						// because we want to keep the original Date header from the article
+						continue
+					}
 					if strings.HasPrefix(line, key) {
 						ignoreNextContinuedLine = true
 						dlog(cfg.opt.DebugARTICLE, "cleanHeader: seg.ID='%s' ignore key='%s'", item.segment.Id, key)
