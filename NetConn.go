@@ -332,26 +332,26 @@ func CMD_POST(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, e
 // The function supports parsing headers, handling continued lines, and cleaning headers based on the configuration.
 // It also supports yenc decoding if enabled in the configuration.
 // WARNING: TODO! Be careful when reading X/OVER or X/HDR on large groups because you may run out of memory!
-func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code int, rxb int, content []string, err error) {
+func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (code int, rxb int, content []string, err error) {
 	if connitem.conn == nil || connitem.srvtp == nil {
 		connitem.c.CloseConn(connitem, nil)
 		return 0, 0, nil, fmt.Errorf("error readArticleDotLines: conn or srvtp nil @ '%s'", connitem.c.provider.Name)
 	}
-	if !IsItemCommand(what) && !IsOtherCommand(what) {
+	if !IsItemCommand(command) && !IsOtherCommand(command) {
 		// if not an item command or other command! this is a bug!
 		// we just die here because returning an error will f***up the connection as it is already receiving lines from remote
-		log.Printf("error readArticleDotLines: invalid command '%s'", what)
+		log.Printf("error readArticleDotLines: invalid command '%s'", command)
 		os.Exit(1)
 	}
-	if IsOtherCommand(what) && item != nil {
+	if IsOtherCommand(command) && item != nil {
 		// do not submit an item for other commands! this is a bug!
 		// we just die here because returning an error will f***up the connection as it is already receiving lines from remote
-		log.Printf("error readArticleDotLines: do not submit an item for command '%s'", what)
+		log.Printf("error readArticleDotLines: do not submit an item for command '%s'", command)
 		os.Exit(1)
 	}
 	var decoder *yenc.Decoder
 	var parseHeader, ignoreNextContinuedLine, gotYencHeader, gotMultipart, brokenYenc bool // = false, false, false, false
-	if what == cmdARTICLE || what == cmdHEAD {
+	if command == cmdARTICLE || command == cmdHEAD {
 		parseHeader = true
 	}
 	async, sentLinesToDecoder := false, 0 // initialize async and sentLinesToDecoder, will be set depending on -yenctest=1,2,3,4
@@ -478,16 +478,16 @@ readlines:
 		// see every line thats coming in
 		//dlog( "readArticleDotLines: seg.Id='%s' line='%s'", segment.Id, line)
 		rxb += len(line)
-		if IsItemCommand(what) && rxb > cfg.opt.MaxArtSize {
+		if IsItemCommand(command) && rxb > cfg.opt.MaxArtSize {
 			// max article size reached, stop reading
 			// this is a DoS protection, so we do not read more than maxartsize
-			err = fmt.Errorf("error readDotLines: maxartsize=%d > rxb=%d seg.Id='%s' what='%s'", cfg.opt.MaxArtSize, rxb, item.segment.Id, what)
+			err = fmt.Errorf("error readDotLines: maxartsize=%d > rxb=%d seg.Id='%s' what='%s'", cfg.opt.MaxArtSize, rxb, item.segment.Id, command)
 			log.Print(err)
 			connitem.c.CloseConn(connitem, nil)
 			return 0, rxb, nil, err
 		}
 
-		if (parseHeader && len(line) == 0) || (len(line) == 1 && line == ".") {
+		if (parseHeader && len(line) == 0) || (command == cmdHEAD && len(line) == 1 && line == ".") {
 			// reading header ends here
 			parseHeader = false
 			if !proxy {
@@ -536,9 +536,9 @@ readlines:
 			content = append(content, line)
 		} // end parseHeader
 
-		if !parseHeader && what != cmdHEAD {
+		if !parseHeader && command != cmdHEAD {
 			i++ // counts body lines
-			if what == cmdARTICLE || what == cmdBODY {
+			if command == cmdARTICLE || command == cmdBODY {
 				// dot-stuffing on received lines
 				/*
 					Receiver Side: How to Handle Dot-Stuffing
@@ -554,12 +554,12 @@ readlines:
 				}
 			}
 
-			if what == cmdARTICLE || what == cmdBODY || IsOtherCommand(what) {
+			if command == cmdARTICLE || command == cmdBODY || IsOtherCommand(command) {
 				// if we are in ARTICLE or BODY or any other multiline command, we store the line
 				content = append(content, line)
 			}
 
-			if cfg.opt.YencCRC && !brokenYenc && (what == cmdARTICLE || what == cmdBODY) {
+			if cfg.opt.YencCRC && !brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
 				switch cfg.opt.YencTest {
 				case 1:
 					// case 1 needs double the memory
@@ -682,9 +682,9 @@ readlines:
 	} else if async && decodeBodyChan != nil { // case 3:
 		close(decodeBodyChan) // close the channel to signal we are done with reading lines
 	}
-	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), what)
+	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), command)
 
-	if cfg.opt.YencCRC && !brokenYenc && (what == cmdARTICLE || what == cmdBODY) {
+	if cfg.opt.YencCRC && !brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
 		yencstart := time.Now()
 		var startReadSignals time.Time
 		var isBadCrc bool
@@ -899,7 +899,7 @@ readlines:
 			defer item.mux.Unlock()
 		}
 
-		switch what {
+		switch command {
 		case cmdARTICLE:
 			item.article = content
 			item.size = rxb
@@ -912,9 +912,9 @@ readlines:
 			item.headsize = rxb
 		default:
 			// handle multi-line dot-terminated command
-			if !IsOtherCommand(what) {
+			if !IsOtherCommand(command) {
 				// error unknown command
-				return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", what, connitem.c.provider.Name)
+				return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", command, connitem.c.provider.Name)
 			}
 			// these commands are not stored in item, but will be returned as content
 			// pass
@@ -922,7 +922,7 @@ readlines:
 
 		// reaching here means we have read the article or body or head
 		// or any other command that is not stored in the item
-		if !IsOtherCommand(what) {
+		if !IsOtherCommand(command) {
 			// clears content on head, body or article
 			content = nil // clear content if not an other command
 		} // else pass
