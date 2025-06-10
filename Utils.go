@@ -379,7 +379,14 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err := csvWriter.Error(); err != nil {
 		return fmt.Errorf("unable to write to the csv file: %v", err)
 	}
-	f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			log.Printf("error closing csv file: %v", closeErr)
+			if err == nil {
+				err = closeErr
+			}
+		}
+	}()
 	dlog(cfg.opt.Csv, "writeCsv: done")
 	return
 } // end func writeCsv
