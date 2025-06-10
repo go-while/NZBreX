@@ -28,13 +28,16 @@ var (
 	// Allow posting by default, can be set to false to disable posting (e.g., for read-only mode)
 	// this is a global flag. if user/passwd config does not allow posting. user will not be able to post, even if this is true.
 	globalAllowPosting = true
-	CID                = uint64(0)                      // Global connection ID counter, can be used for session tracking - currently unused
-	cidmux             = &sync.Mutex{}                  // cidmux is used to synchronize access to CID
-	passwdMap          = make(map[string]*UserData)     // passwdMap holds user credentials (k is username, v is UserData)
-	ProxySessions      = make(map[string]*ProxySession) // ProxySessions map to hold active user sessions (k is username, v is ProxySession)
-	CountConns         = make(map[string]int)           // CountConns keeps track of active connections per user (k is username, v is count)
-	proxyMutex         = &sync.RWMutex{}                // proxyMutex is used to synchronize access to CID, passwdMap, ProxySessions and CountConns
-	ProxyParent        *SESSION                         // ProxyParent is the parent session for the proxy, used to link sessions to the main loop
+
+	cidmux = &sync.Mutex{} // cidmux is used to synchronize access to CID1
+	CID    = uint64(0)     // Global connection ID counter, can be used for session tracking - currently unused
+
+	proxyMutex    = &sync.RWMutex{}                // proxyMutex is used to synchronize access to passwdMap, ProxySessions and CountConns
+	proxyCron     *time.Time                       // MainCron is the main cron job ticker
+	passwdMap     = make(map[string]*UserData)     // passwdMap holds user credentials (k is username, v is UserData)
+	ProxySessions = make(map[string]*ProxySession) // ProxySessions map to hold active user sessions (k is username, v is ProxySession)
+	CountConns    = make(map[string]int)           // CountConns keeps track of active connections per user (k is username, v is count)
+	ProxyParent   *SESSION                         // ProxyParent is the parent session for the proxy, used to link sessions to the main loop
 )
 
 // UserData holds user information.
@@ -828,11 +831,11 @@ func addUserToProxyPasswdFile(userData *UserData, filename string) error {
 
 	// Format the line to be appended to the file
 	// username:bcrypt_hash_string:maxconns:ExpireAt
-	postACL := "nopost" // Default ACL for new users, can be changed if needed
+	posting := "nopost" // Default ACL for new users, can be changed if needed
 	if userData.Posting {
-		postACL = "post" // Set ACL to post if userData.Posting is true
+		posting = "post" // Set ACL to post if userData.Posting is true
 	}
-	newUserLine := fmt.Sprintf("%s|%s|%d|%d|%s\n", userData.Username, bcrpytHashString, userData.MaxConns, userData.ExpireAt, postACL)
+	newUserLine := fmt.Sprintf("%s|%s|%d|%d|%s\n", userData.Username, bcrpytHashString, userData.MaxConns, userData.ExpireAt, posting)
 
 	// Open the file in append mode, create if it doesn't exist
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)

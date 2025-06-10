@@ -128,39 +128,42 @@ func ParseFlags() {
 		if len(password) < 10 {
 			log.Fatalf("-proxyadduser: password must be at least 10 characters long, got %d characters", len(password))
 		}
+		if Ausername == "auto" && Apassword == "auto" {
+			dlog(always, "-proxyadduser: auto generated credentials: username='%s' password='%s'", username, password)
+		}
 		maxconns, err1 := strconv.Atoi(parts[2])
 		expiresStr := strings.TrimSpace(parts[3])
 		var expires int64
 		if strings.HasSuffix(expiresStr, "d") {
 			days, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "d"), 10, 64)
 			if err != nil {
-				log.Fatalf("-adduser: invalid expires (days): %s", expiresStr)
+				log.Fatalf("-proxyadduser: invalid expires (days): %s", expiresStr)
 			}
 			expires = time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
 		} else if strings.HasSuffix(expiresStr, "h") {
 			hours, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "h"), 10, 64)
 			if err != nil {
-				log.Fatalf("-adduser: invalid expires (hours): %s", expiresStr)
+				log.Fatalf("-proxyadduser: invalid expires (hours): %s", expiresStr)
 			}
 			expires = time.Now().Add(time.Duration(hours) * time.Hour).Unix()
 		} else if strings.HasSuffix(expiresStr, "m") {
 			minutes, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "m"), 10, 64)
 			if err != nil {
-				log.Fatalf("-adduser: invalid expires (minutes): %s", expiresStr)
+				log.Fatalf("-proxyadduser: invalid expires (minutes): %s", expiresStr)
 			}
 			expires = time.Now().Add(time.Duration(minutes) * time.Minute).Unix()
 		} else {
 			expiresInt, err2 := strconv.ParseInt(parts[3], 10, 64)
 			if err1 != nil || err2 != nil {
-				log.Fatalf("-adduser: invalid maxconns or expires: maxconns='%s' expires='%s'", parts[2], parts[3])
+				log.Fatalf("-proxyadduser: invalid maxconns or expires: maxconns='%s' expires='%s'", parts[2], parts[3])
 			}
 			expires = expiresInt
 		}
 		if username == "" || password == "" {
-			log.Fatalf("-adduser: username and password must not be empty")
+			log.Fatalf("-proxyadduser: username and password must not be empty")
 		}
 		if expires < time.Now().Unix() {
-			log.Fatalf("-adduser: expires must be a future timestamp, got %d", expires)
+			log.Fatalf("-proxyadduser: expires must be a future timestamp, got %d", expires)
 		}
 		// Compose new passwd file name
 		newPasswdFile := fmt.Sprintf("%s.new.%d.%d", cfg.opt.ProxyPasswdFile, time.Now().Unix(), mrand.Intn(65535))
@@ -175,7 +178,7 @@ func ParseFlags() {
 			log.Fatalf("Failed to add user to %s: %v", newPasswdFile, err)
 			os.Exit(1)
 		}
-		log.Printf("User '%s' added to new passwd file: '%s'. Next reload in <60s", username, newPasswdFile)
+		log.Printf("User '%s':\n %#v \n added to new passwd file: '%s'. Next reload in <60s", username, userData, newPasswdFile)
 		os.Exit(0)
 	}
 	// test rapidyenc decoder
