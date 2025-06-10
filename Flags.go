@@ -110,7 +110,7 @@ func ParseFlags() {
 	}
 	if AddUserDataToProxy != "" {
 		// Format: 'user|password|maxconns|expires|(no)post' (expires is unix timestamp)
-		parts := strings.SplitN(AddUserDataToProxy, "|", 4)
+		parts := strings.SplitN(AddUserDataToProxy, "|", 5)
 		if len(parts) != 5 {
 			log.Fatalf("-proxyadduser expects format: user|password|maxconns|expires|(no)post (got: %q)", AddUserDataToProxy)
 		}
