@@ -29,8 +29,7 @@ var (
 	// this is a global flag. if user/passwd config does not allow posting. user will not be able to post, even if this is true.
 	globalAllowPosting = true
 
-	cidmux = &sync.Mutex{} // cidmux is used to synchronize access to CID1
-	CID    = uint64(0)     // Global connection ID counter, can be used for session tracking - currently unused
+	CID = uint64(0) // Global connection ID counter, can be used for session tracking - currently unused
 
 	proxyMutex    = &sync.RWMutex{}                // proxyMutex is used to synchronize access to passwdMap, ProxySessions and CountConns
 	proxyCron     = time.Now()                     // reload passwdMap every minute
