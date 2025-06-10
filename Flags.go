@@ -87,6 +87,8 @@ func ParseFlags() {
 	flag.BoolVar(&testrapidyenc, "testrapidyenc", false, "[true|false] will test rapidyenc testfiles on boot and exit (default: false)")
 	flag.IntVar(&cfg.opt.ProxyTCP, "proxytcp", 0, "if set: use this port (e.g.: 1119) for TCP proxying (default: 0 = no proxy)")
 	flag.IntVar(&cfg.opt.ProxyTLS, "proxytls", 0, "if set: use this port (e.g.: 1563) for TLS proxying (default: 0 = no proxy)")
+	flag.StringVar(&cfg.opt.TLSCertPem, "tlscrt", "fullchain.pem", "path to TLS certificate file (default: fullchain.pem in current dir)")
+	flag.StringVar(&cfg.opt.TLSPrivKey, "tlskey", "privkey.pem", "path to TLS private key file (default: privkey.pem in current dir)")
 	flag.StringVar(&AddUserDataToProxy, "proxyadduser", "", "if set: adds this user to proxy ( \ne.g.: -proxyadduser='username1234|password4567|maxconns|expires'\n ) \nPassword entered MUST be cleartext, hashing is done when writing to .passwd file!\n Expiration: you can use a 'number of days' with 'd' at the end (e.g. 7d, 30d, 365d) or 'h'  for hours (1h, 12h, ...) or 'm' minutes (1m, 30m, ...), it will be converted to a valid unixtimestamp expiring in the future from now on! (default: empty = no user added)\nExample -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d\" creates a user with 5 conns and 42 days to expiration")
 	flag.StringVar(&cfg.opt.ProxyPasswdFile, "proxypasswdfile", ".proxypasswd", "if set: use this file for proxy (default: .proxypasswd in current dir)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
