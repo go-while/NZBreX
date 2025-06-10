@@ -447,6 +447,7 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 	var item *segmentChanItem // segmentChanItem to hold the message ID or number
 	switch command {          //switch command1
 
+	// extract messageId from command
 	case "STAT", "ARTICLE", "BODY", "HEAD":
 		if len(args) == 0 {
 			ps.CliTp.PrintfLine("501 Syntax error: %s requires a message ID or number", command)
@@ -457,8 +458,9 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 			// protocol error, message ID is not valid
 			ps.CliTp.PrintfLine("501 Syntax error: command %s requires a valid message ID", command)
 			return fmt.Errorf("syntax error: command %s requires a valid message ID", command)
+
 		} else if num > 0 && ps.Group == "" {
-			// TODO
+			// TODO select newsgroup
 			ps.tpWriter.PrintfLine("412 No newsgroup selected to read messageid: %d", num)
 			return retry
 
@@ -475,17 +477,21 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 	case "CAPABILITIES":
 		printCapabilities(ps.tpWriter)
 		return nil // No error, capabilities printed
+
 	case "DATE":
 		ps.tpWriter.PrintfLine("111 %s", time.Now().Format(time.RFC1123Z))
 		return nil // No error, date printed
+
 	case "LIST", "XOVER", "XHDR", "GROUP", "NEXT", "LAST":
 		ps.tpWriter.PrintfLine("500 cmd: %s (not implemented)", command)
 		return fmt.Errorf("unknown command: %s (not implemented)", command)
+
 	case "QUIT":
 		ps.tpWriter.PrintfLine("205 Closing connection - goodbye. uploaded=%d downloaded=%d connected='%v'", ps.RXBytes, ps.TXBytes, time.Since(ps.ConnectedAt))
 		log.Printf("Client %s issued QUIT.", ps.Conn.RemoteAddr())
 		time.Sleep(time.Millisecond) // Sleep to ensure the message is sent before closing the connection
 		return fmt.Errorf("client %s issued QUIT", ps.Conn.RemoteAddr())
+
 	default:
 		ps.tpWriter.PrintfLine("502 Unknown command")
 		return fmt.Errorf("unknown command: %s", command)
@@ -495,7 +501,7 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 		ps.tpWriter.PrintfLine("501 Syntax error: command %s requires a valid message ID", command)
 		return fmt.Errorf("syntax error: command %s requires a valid message ID", command)
 	}
-	// Now we have a valid command and item (if applicable), proceed to handle the request
+	// Now we have a valid command and messageId (if applicable), proceed to handle the request
 	var response string // response to be sent to the client after loopProvider has completed
 	checkedProviderGroups := make(map[string]bool)
 loopProvider:
