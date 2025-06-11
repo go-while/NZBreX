@@ -121,6 +121,7 @@ type Provider struct {
 	NoCheck       bool      // if true, no check will be done for this provider
 	NoDownload    bool      // if true, no download will be done for this provider
 	NoUpload      bool      // if true, no upload will be done for this provider
+	Newsreader    bool      // if true, provider allows newsreader commands (group, list, xhdr, xover,... etc.)
 	Group         string    // group name is used internally to divide providers accounts into groups
 	Name          string    // provider name, used for logging and identification
 	Host          string    // provider host, used for connecting to the server
