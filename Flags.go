@@ -178,7 +178,6 @@ func ParseFlags() {
 		}
 		if err := addUserToProxyPasswdFile(userData, newPasswdFile); err != nil {
 			log.Fatalf("Failed to add user to %s: %v", newPasswdFile, err)
-			os.Exit(1)
 		}
 		log.Printf("User '%s':\n %#v \n added to new passwd file: '%s'. Next reload in <60s", username, userData, newPasswdFile)
 		os.Exit(0)
