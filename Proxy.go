@@ -234,7 +234,7 @@ func (ps *ProxySession) handleGroupCommand(args []string) error {
 	var group *GroupInfo
 
 	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload {
+		if provider.NoDownload || !provider.Newsreader {
 			continue // Skip providers that don't allow downloads
 		}
 
@@ -269,7 +269,7 @@ func (ps *ProxySession) handleGroupCommand(args []string) error {
 					High:  high,
 				}
 
-				ps.selectedProvider = provider
+				ps.selectedProvider = provider // Set the selected provider for this session when requesting GROUP
 				provider.ConnPool.ParkConn(0, connitem, "proxy")
 				break
 			}
@@ -305,8 +305,9 @@ func (ps *ProxySession) handleListCommand(args []string) error {
 		variant = strings.ToUpper(args[0])
 	}
 	// Find a suitable provider
+	selected := false // Track if we found a provider for this session
 	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload {
+		if provider.NoDownload || !provider.Newsreader {
 			continue
 		}
 		if ps.selectedProvider != nil && provider != ps.selectedProvider {
@@ -350,8 +351,10 @@ func (ps *ProxySession) handleListCommand(args []string) error {
 			continue
 		}
 		provider.ConnPool.ParkConn(0, connitem, "proxy")
-
-		ps.selectedProvider = provider // Set the selected provider for this session
+		selected = true
+		if ps.selectedProvider == nil {
+			ps.selectedProvider = provider // Set the selected provider for this session when requesting LIST
+		}
 
 		// Start our response to the client
 		ps.tpWriter.PrintfLine("215 List of newsgroups follows")
@@ -367,11 +370,13 @@ func (ps *ProxySession) handleListCommand(args []string) error {
 	}
 
 	// If we couldn't find any provider or all failed
-	if ps.selectedProvider == nil {
+	if !selected {
+		if ps.selectedProvider != nil {
+			ps.selectedProvider = nil
+		}
 		ps.tpWriter.PrintfLine("503 No providers available for LIST command")
 		return nil
 	}
-
 	return nil
 }
 
@@ -430,8 +435,9 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 	}
 
 	// Find provider with this group
+	selected := false // Track if we found a provider for this session
 	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload {
+		if provider.NoDownload || !provider.Newsreader {
 			continue
 		}
 		if ps.selectedProvider != nil && provider != ps.selectedProvider {
@@ -497,7 +503,7 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 			provider.ConnPool.CloseConn(connitem, nil)
 			continue
 		}
-
+		selected = true // We found a provider that can handle this command
 		// Start our response to the client
 		ps.tpWriter.PrintfLine("224 Overview information follows")
 		dw := ps.tpWriter.DotWriter()
@@ -511,9 +517,13 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 		provider.ConnPool.ParkConn(0, connitem, "proxy")
 		return nil
 	}
-
-	// If we couldn't find any provider or all failed
-	ps.tpWriter.PrintfLine("503 No providers have the selected group")
+	if !selected {
+		if ps.selectedProvider != nil {
+			ps.selectedProvider = nil
+		}
+		ps.tpWriter.PrintfLine("503 No providers have the selected group")
+		return nil
+	}
 	return nil
 }
 
@@ -554,8 +564,9 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 	}
 
 	// Find provider with this group
+	selected := false // Track if we found a provider for this session
 	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload {
+		if provider.NoDownload || !provider.Newsreader {
 			continue
 		}
 		if ps.selectedProvider != nil && provider != ps.selectedProvider {
@@ -622,7 +633,7 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 			provider.ConnPool.CloseConn(connitem, nil)
 			continue
 		}
-
+		selected = true
 		// Start our response to the client
 		ps.tpWriter.PrintfLine("221 Header follows")
 		dw := ps.tpWriter.DotWriter()
@@ -636,9 +647,14 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 		provider.ConnPool.ParkConn(0, connitem, "proxy")
 		return nil
 	}
-
+	if !selected {
+		if ps.selectedProvider != nil {
+			ps.selectedProvider = nil
+		}
+		ps.tpWriter.PrintfLine("503 No providers have the selected group or article")
+		return nil
+	}
 	// If we couldn't find any provider or all failed
-	ps.tpWriter.PrintfLine("503 No providers have the selected group or article")
 	return nil
 }
 
@@ -657,8 +673,9 @@ func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 	}
 
 	// Find provider with this group
+	selected := false // Track if we found a provider for this session
 	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload {
+		if provider.NoDownload || !provider.Newsreader {
 			continue
 		}
 		if ps.selectedProvider != nil && provider != ps.selectedProvider {
@@ -729,6 +746,7 @@ func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 		code, msg, err := connitem.srvtp.ReadCodeLine(223)
 		connitem.srvtp.EndResponse(id)
 		if code > 0 {
+			selected = true
 			provider.ConnPool.ParkConn(0, connitem, "proxy")
 		} else {
 			provider.ConnPool.CloseConn(connitem, nil)
@@ -763,8 +781,12 @@ func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 		}
 		return nil
 	}
-
-	// If we couldn't find any provider or all failed
-	ps.tpWriter.PrintfLine("503 No providers have the selected group")
+	if !selected {
+		if ps.selectedProvider != nil {
+			ps.selectedProvider = nil
+		}
+		ps.tpWriter.PrintfLine("503 No providers have the selected group")
+		return nil
+	}
 	return nil
 }
