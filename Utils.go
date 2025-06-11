@@ -243,16 +243,16 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	if err != nil {
 		return err
 	}
-	// Close the file and check for errors
-	if closeErr := dstFile.Close(); closeErr != nil {
-		return fmt.Errorf("error closing file '%s': %v", dstPath, closeErr)
-	}
 	nul := make([]byte, 0, nullbytes)
-	for i := 0; i < nullbytes; i++ {
+	for range nullbytes {
 		nul = append(nul, 0x00)
 	}
 	if _, writeErr := dstFile.Write(nul); writeErr != nil {
 		return writeErr
+	}
+	// Close the file and check for errors
+	if closeErr := dstFile.Close(); closeErr != nil {
+		return fmt.Errorf("error closing file '%s': %v", dstPath, closeErr)
 	}
 	return nil
 } // end func AppendFileBytes
