@@ -226,11 +226,10 @@ func LoadHeadersFromFile(path string) ([]string, error) {
 
 // AppendFileBytes appends null bytes to the end of a file.
 // It opens the file in append mode, creates it if it does not exist, and writes the specified number of null bytes.
-// If nullbytes is 0, it does nothing.
-// If nullbytes is negative, it returns an error.
+// If nullbytes is 0 or negative, it returns an error.
 // If the file does not exist, it creates a new file with the specified number of null bytes.
 // If the file exists, it appends the specified number of null bytes to the end of the file.
-func AppendFileBytes(nullbytes int, dstPath string) error {
+func AppendFileBytes(nullbytes int, dstPath string) (err error) {
 	if nullbytes <= 0 {
 		return fmt.Errorf("error AppendFileBytes nullbytes=%d must be greater than 0", nullbytes)
 	}
@@ -239,22 +238,38 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	}
 
 	// Open destination file in append mode, create if not exists
-	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
+	dstFile, openErr := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if openErr != nil {
+		return openErr // Return opening error directly
+	}
+	// Defer Close and handle its error.
+	// If err is already set (e.g., from Write or Flush), this deferred Close error will not overwrite it.
+	// If err is nil, and Close fails, err will be set to the Close error.
+	defer func() {
+		if closeErr := dstFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error closing file '%s': %v", dstPath, closeErr)
+			}
+			// Optional: Log closeErr if err was already set, e.g.:
+			// else { log.Printf("AppendFileBytes: additionally failed to close '%s' during error handling: %v", dstPath, closeErr) }
+		}
+	}()
+
+	writer := bufio.NewWriter(dstFile)
+	for i := 0; i < nullbytes; i++ {
+		if err = writer.WriteByte(0x00); err != nil {
+			// err is assigned (it's the named return), will be returned. Defer will run.
+			return err
+		}
+	}
+
+	// Ensure all buffered data is written to the file
+	if err = writer.Flush(); err != nil {
+		// err is assigned, will be returned. Defer will run.
 		return err
 	}
-	nul := make([]byte, 0, nullbytes)
-	for range nullbytes {
-		nul = append(nul, 0x00)
-	}
-	if _, writeErr := dstFile.Write(nul); writeErr != nil {
-		return writeErr
-	}
-	// Close the file and check for errors
-	if closeErr := dstFile.Close(); closeErr != nil {
-		return fmt.Errorf("error closing file '%s': %v", dstPath, closeErr)
-	}
-	return nil
+
+	return nil // If everything is successful, err remains nil (or gets set by defer if Close fails)
 } // end func AppendFileBytes
 
 // AppendFile appends (merges) the file contents of srcPath to dstPath.
@@ -265,48 +280,65 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 // If the source file does not exist, it returns an error.
 // If the destination file does not exist, it creates a new file.
 // If the source file is empty, it does nothing.
-func AppendFile(srcPath string, dstPath string, delsrc bool) error {
-	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("error AppendFile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
+func AppendFile(srcPath string, dstPath string, delsrc bool) (err error) {
+	if srcPath == "" {
+		return fmt.Errorf("error AppendFile srcPath is empty")
+	}
+	if dstPath == "" {
+		return fmt.Errorf("error AppendFile dstPath is empty")
 	}
 
 	// Open source file for reading
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return err
+	srcFile, openSrcErr := os.Open(srcPath)
+	if openSrcErr != nil {
+		return fmt.Errorf("error AppendFile opening source file '%s': %w", srcPath, openSrcErr)
 	}
-	defer srcFile.Close()
+	defer func() {
+		if closeErr := srcFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error AppendFile closing source file '%s': %w", srcPath, closeErr)
+			}
+			// Optional: Log closeErr if err was already set
+			// else { log.Printf("AppendFile: additionally failed to close source '%s' during error handling: %v", srcPath, closeErr) }
+		}
+	}()
 
 	// Open destination file in append mode, create if not exists
-	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		return err
+	dstFile, openDstErr := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if openDstErr != nil {
+		return fmt.Errorf("error AppendFile opening destination file '%s': %w", dstPath, openDstErr)
 	}
-	defer dstFile.Close()
-
-	// Create a buffer and copy in chunks
-	buf := make([]byte, DefaultYencWriteBuffer)
-	for {
-		n, readErr := srcFile.Read(buf)
-		if n > 0 {
-			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
-				return writeErr
+	defer func() {
+		if closeErr := dstFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error AppendFile closing destination file '%s': %w", dstPath, closeErr)
 			}
+			// Optional: Log closeErr if err was already set
+			// else { log.Printf("AppendFile: additionally failed to close destination '%s' during error handling: %v", dstPath, closeErr) }
 		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return readErr
-		}
+	}()
+
+	// Create a buffer and copy in chunks using io.CopyBuffer for efficiency
+	// DefaultYencWriteBuffer is assumed to be defined elsewhere, e.g., const DefaultYencWriteBuffer = 32 * 1024
+	buf := make([]byte, DefaultYencWriteBuffer) // Ensure DefaultYencWriteBuffer is a reasonable size
+	if _, copyErr := io.CopyBuffer(dstFile, srcFile, buf); copyErr != nil {
+		return fmt.Errorf("error AppendFile copying from '%s' to '%s': %w", srcPath, dstPath, copyErr)
 	}
+
+	// Ensure all buffered data for dstFile is written to disk before attempting to remove srcFile
+	if syncErr := dstFile.Sync(); syncErr != nil {
+		return fmt.Errorf("error AppendFile syncing destination file '%s': %w", dstPath, syncErr)
+	}
+
 	if delsrc {
-		if err := os.Remove(srcPath); err != nil {
-			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
+		if removeErr := os.Remove(srcPath); removeErr != nil {
+			// Assign to err, so it's returned by the named return, and defer for dstFile can still run.
+			err = fmt.Errorf("error AppendFile removing source file '%s': %w", srcPath, removeErr)
+			return err
 		}
 	}
-	return nil
-} // end func AppendFile (written by AI! GPT-4o)
+	return nil // If everything is successful, err remains nil (or gets set by defers if Close fails)
+} // end func AppendFile
 
 func SHA256SumFile(path string) (string, error) {
 	// Open the file for reading
