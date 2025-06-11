@@ -372,9 +372,23 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 		ps.tpWriter.PrintfLine("111 %s", time.Now().Format(time.RFC1123Z))
 		return nil // No error, date printed
 
-	case "LIST", "XOVER", "XHDR", "GROUP", "NEXT", "LAST":
-		ps.tpWriter.PrintfLine("500 cmd: %s (not implemented)", command)
-		return fmt.Errorf("unknown command: %s (not implemented)", command)
+	case "LIST":
+		return ps.handleListCommand(args)
+
+	case "XOVER", "OVER":
+		return ps.handleXOverCommand(args, command == "XOVER")
+
+	case "XHDR", "HDR":
+		return ps.handleXHdrCommand(args, command == "XHDR")
+
+	case "GROUP":
+		return ps.handleGroupCommand(args)
+
+	case "NEXT":
+		return ps.handleNextOrLastCommand(true)
+
+	case "LAST":
+		return ps.handleNextOrLastCommand(false)
 
 	case "QUIT":
 		ps.tpWriter.PrintfLine("205 Closing connection - goodbye. uploaded=%d downloaded=%d connected='%v'", ps.RXBytes, ps.TXBytes, time.Since(ps.ConnectedAt))
