@@ -251,8 +251,7 @@ forever:
 				tpWriter.PrintfLine("281 Welcome to NZBreX Proxy! Your conns: %d/%d. Exp: '%v'",
 					CountConns[currentUser], userData.MaxConns, time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z))
 
-				log.Printf("User '%s' authenticated from %s. Active connections for user: %d/%d",
-					currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns)
+				dlog(cfg.opt.Debug, "User '%s' authenticated. Active connections for user: %d/%d", currentUser, CountConns[currentUser], userData.MaxConns)
 
 				proxyMutex.Unlock() // Unlock after updating CountConns and user data
 
@@ -392,9 +391,8 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 
 	case "QUIT":
 		ps.tpWriter.PrintfLine("205 Closing connection - goodbye. uploaded=%d downloaded=%d connected='%v'", ps.RXBytes, ps.TXBytes, time.Since(ps.ConnectedAt))
-		log.Printf("Client %s issued QUIT.", ps.Conn.RemoteAddr())
-		time.Sleep(time.Millisecond) // Sleep to ensure the message is sent before closing the connection
-		return fmt.Errorf("client %s issued QUIT", ps.Conn.RemoteAddr())
+		log.Printf(" %s | quit", ps.Username)
+		return fmt.Errorf("client quit")
 
 	default:
 		ps.tpWriter.PrintfLine("502 Unknown command")
