@@ -364,67 +364,81 @@ func SHA256SumFile(path string) (string, error) {
 func (s *SESSION) writeCsvFile() (err error) {
 	// not tested since rewrite
 	if !cfg.opt.Csv {
-		return
+		return nil // Not an error, just not enabled
 	}
+	if s.nzbPath == "" {
+		return fmt.Errorf("writeCsvFile: nzbPath is empty, cannot determine CSV filename")
+	}
+
 	csvFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".csv"
-	f, err := os.Create(csvFileName)
-	if err != nil {
-		return fmt.Errorf("unable to open csv file: %v", err)
+	f, createErr := os.Create(csvFileName)
+	if createErr != nil {
+		return fmt.Errorf("writeCsvFile: unable to create csv file '%s': %w", csvFileName, createErr)
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil {
-			log.Printf("error closing csv file: %v", closeErr)
-			if err == nil {
-				err = closeErr
+			log.Printf("writeCsvFile: error closing csv file '%s': %v", csvFileName, closeErr) // Log the close error regardless
+			if err == nil {                                                                    // Only assign closeErr to the return if no other error has occurred
+				err = fmt.Errorf("writeCsvFile: error closing csv file '%s': %w", csvFileName, closeErr)
 			}
 		}
 	}()
-	log.Println("writing csv file...")
-	fmt.Print("Writing csv file... ")
+
+	log.Println("writing csv file...", csvFileName)      // Added filename to log
+	fmt.Printf("Writing csv file '%s'... ", csvFileName) // Added filename to print
+
 	csvWriter := csv.NewWriter(f)
-	firstLine := true
-	// make sorted provider name slice
+
+	// Prepare header
+	// Make sorted provider name slice
 	providers := make([]string, 0, len(s.providerList))
-	for n := range s.providerList {
-		providers = append(providers, s.providerList[n].Name)
+	for _, p := range s.providerList { // More idiomatic loop
+		providers = append(providers, p.Name)
 	}
-	sort.Strings(providers)
-	for fileName, file := range s.fileStat {
-		// write first line
-		if firstLine {
-			line := make([]string, len(providers)+2)
-			line[0] = "Filename"
-			line[1] = "Total segments"
-			for n, providerName := range providers {
-				line[n+2] = providerName
-			}
-			if err := csvWriter.Write(line); err != nil {
-				return fmt.Errorf("unable to write to the csv file: %v", err)
-			}
-			firstLine = false
-		}
-		// write line
-		line := make([]string, len(providers)+2)
-		line[0] = fileName
-		line[1] = fmt.Sprintf("%v", file.totalSegments)
-		for n, providerName := range providers {
-			if value, ok := file.available[providerName]; ok {
-				line[n+2] = fmt.Sprintf("%v", value)
-			} else {
-				line[n+2] = "0"
-			}
-		}
-		if err := csvWriter.Write(line); err != nil {
-			return fmt.Errorf("unable to write to the csv file: %v", err)
-		}
-	}
-	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		return fmt.Errorf("unable to write to the csv file: %v", err)
+	sort.Strings(providers) // Ensure consistent column order
+
+	header := make([]string, len(providers)+2)
+	header[0] = "Filename"
+	header[1] = "TotalSegments"
+	copy(header[2:], providers)
+
+	if writeErr := csvWriter.Write(header); writeErr != nil {
+		return fmt.Errorf("writeCsvFile: unable to write header to csv file '%s': %w", csvFileName, writeErr)
 	}
 
-	dlog(cfg.opt.Csv, "writeCsv: done")
-	return
+	// Write data rows
+	// To ensure consistent row order if fileStat is a map, consider sorting keys
+	fileNames := make([]string, 0, len(s.fileStat))
+	for fn := range s.fileStat {
+		fileNames = append(fileNames, fn)
+	}
+	sort.Strings(fileNames) // Sort filenames for consistent output order
+
+	for _, fileName := range fileNames {
+		file := s.fileStat[fileName]
+		line := make([]string, len(providers)+2)
+		line[0] = fileName
+		line[1] = fmt.Sprintf("%d", file.totalSegments) // Use %d for integers
+		for i, providerName := range providers {
+			if value, ok := file.available[providerName]; ok {
+				line[i+2] = fmt.Sprintf("%d", value) // Use %d for integers
+			} else {
+				line[i+2] = "0"
+			}
+		}
+		if writeErr := csvWriter.Write(line); writeErr != nil {
+			return fmt.Errorf("writeCsvFile: unable to write line for '%s' to csv file '%s': %w", fileName, csvFileName, writeErr)
+		}
+	}
+
+	csvWriter.Flush()
+	if flushErr := csvWriter.Error(); flushErr != nil {
+		return fmt.Errorf("writeCsvFile: error flushing csv writer for '%s': %w", csvFileName, flushErr)
+	}
+
+	fmt.Println("Done.") // Indicate completion for the fmt.Print above
+	dlog(cfg.opt.Csv, "writeCsvFile: done for '%s'", csvFileName)
+	return nil // err is nil if execution reaches here successfully
 } // end func writeCsv
 
 func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps float64) {
