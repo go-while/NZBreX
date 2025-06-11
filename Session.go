@@ -243,7 +243,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 					// create a new segmentChanItem for each segment
 					item := &segmentChanItem{
 						segmux, s, &segment, &file, // sync.RWMutex, *SESSION, *nzbparser.Segment, *nzbparser.File
-						"hashfieldfilllater",                  // string fields
+						"",                                    //  string fields: 1. hashedId will be filled below
 						&s.nzbHashedname,                      // *string fields
 						make(chan int, 1), make(chan bool, 1), // chan fields
 						// map fields for segment status
