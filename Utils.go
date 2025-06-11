@@ -371,6 +371,14 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err != nil {
 		return fmt.Errorf("unable to open csv file: %v", err)
 	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			log.Printf("error closing csv file: %v", closeErr)
+			if err == nil {
+				err = closeErr
+			}
+		}
+	}()
 	log.Println("writing csv file...")
 	fmt.Print("Writing csv file... ")
 	csvWriter := csv.NewWriter(f)
@@ -414,14 +422,7 @@ func (s *SESSION) writeCsvFile() (err error) {
 	if err := csvWriter.Error(); err != nil {
 		return fmt.Errorf("unable to write to the csv file: %v", err)
 	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
-			log.Printf("error closing csv file: %v", closeErr)
-			if err == nil {
-				err = closeErr
-			}
-		}
-	}()
+
 	dlog(cfg.opt.Csv, "writeCsv: done")
 	return
 } // end func writeCsv
