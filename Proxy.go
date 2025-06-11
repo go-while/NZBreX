@@ -8,6 +8,8 @@ import (
 	mrand "math/rand"
 	"net"
 	"net/textproto"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -62,27 +64,28 @@ type UserData struct {
 
 // ProxySession represents an active user session (currently a placeholder, expand as needed)
 type ProxySession struct {
-	id          uint64            // Unique session ID, can be used for tracking
-	mux         sync.RWMutex      // Mutex for session data access
-	cmdmux      sync.RWMutex      // Mutex for command handling
-	Authed      bool              // Indicates if the user is authenticated
-	Username    string            // Username of the authenticated user
-	Password    string            // password for the session, can be used for re-authentication
-	ExpireAt    int64             // session expiration time (Unix timestamp)
-	Conn        net.Conn          // The user's network connection
-	Writer      *bufio.Writer     // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
-	tpReader    *textproto.Reader // textproto reader for easier command handling
-	tpWriter    *textproto.Writer // textproto writer for easier command handling
-	CliTp       *textproto.Conn   // textproto connection for easier command handling
-	tmpRXBytes  uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
-	RXBytes     uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
-	tmpTXBytes  uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
-	TXBytes     uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in total this session
-	ConnectedAt time.Time         // Timestamp when the session was created
-	LastCmd     time.Time         // Timestamp of the last command received
-	Group       string            // current group the user is in (used by GROUP command)
-	MsgNum      int64             // current message number in the group (used by STAT, ARTICLE, etc. commands)
-	Cron        time.Time         // last run of periodic tasks, e.g., checking session expiration
+	id               uint64            // Unique session ID, can be used for tracking
+	mux              sync.RWMutex      // Mutex for session data access
+	cmdmux           sync.RWMutex      // Mutex for command handling
+	Authed           bool              // Indicates if the user is authenticated
+	Username         string            // Username of the authenticated user
+	Password         string            // password for the session, can be used for re-authentication
+	ExpireAt         int64             // session expiration time (Unix timestamp)
+	Conn             net.Conn          // The user's network connection
+	Writer           *bufio.Writer     // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
+	tpReader         *textproto.Reader // textproto reader for easier command handling
+	tpWriter         *textproto.Writer // textproto writer for easier command handling
+	CliTp            *textproto.Conn   // textproto connection for easier command handling
+	tmpRXBytes       uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
+	RXBytes          uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
+	tmpTXBytes       uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
+	TXBytes          uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in total this session
+	ConnectedAt      time.Time         // Timestamp when the session was created
+	LastCmd          time.Time         // Timestamp of the last command received
+	Group            string            // current group the user is in (used by GROUP command)
+	MsgNum           int64             // current message number in the group (used by STAT, ARTICLE, etc. commands)
+	Cron             time.Time         // last run of periodic tasks, e.g., checking session expiration
+	selectedProvider *Provider         // The provider selected for this session, used for routing commands
 	// Add other session-specific data here, e.g., current group, article pointer, etc.
 }
 
@@ -195,3 +198,573 @@ func StartProxyServers(appOpt *CFG) {
 		dlog(always, "No NNTP proxy servers were started (neither ProxyTCP nor ProxyTLS were configured with valid ports/settings).")
 	}
 } // end func StartProxyServers
+
+// GroupInfo holds information about a newsgroup
+type GroupInfo struct {
+	Name        string // Group name
+	Description string // Group description
+	Count       int    // Article count
+	Low         int64  // Low water mark (oldest article number)
+	High        int64  // High water mark (newest article number)
+	Posting     bool   // Posting allowed flag
+}
+
+// ArticleOverview holds fields for the XOVER/OVER response
+type ArticleOverview struct {
+	Number      int64             // Article number
+	Subject     string            // Subject header
+	From        string            // From header
+	Date        string            // Date header
+	MessageID   string            // Message-ID header
+	References  string            // References header
+	Bytes       int               // Size in bytes
+	Lines       int               // Lines count
+	ExtraFields map[string]string // Additional fields
+}
+
+// handleGroupCommand processes the GROUP command by selecting a newsgroup
+func (ps *ProxySession) handleGroupCommand(args []string) error {
+	if len(args) < 1 {
+		ps.tpWriter.PrintfLine("501 Syntax error: GROUP <group>")
+		return nil
+	}
+	groupName := args[0]
+
+	// Find a provider that has this group
+	var group *GroupInfo
+
+	for _, provider := range ProxyParent.providerList {
+		if provider.NoDownload {
+			continue // Skip providers that don't allow downloads
+		}
+
+		connitem, err := provider.ConnPool.GetConn()
+		if err != nil {
+			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
+			continue // Try next provider
+		}
+
+		id, err := connitem.srvtp.Cmd("GROUP %s", groupName)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue // Try next provider
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, msg, err := connitem.srvtp.ReadCodeLine(211)
+		connitem.srvtp.EndResponse(id)
+
+		// 211 count low high group_name
+		if err == nil && code == 211 {
+			parts := strings.Fields(msg)
+			if len(parts) >= 4 {
+				count, _ := strconv.Atoi(parts[0])
+				low, _ := strconv.ParseInt(parts[1], 10, 64)
+				high, _ := strconv.ParseInt(parts[2], 10, 64)
+
+				group = &GroupInfo{
+					Name:  groupName,
+					Count: count,
+					Low:   low,
+					High:  high,
+				}
+
+				ps.selectedProvider = provider
+				provider.ConnPool.ParkConn(0, connitem, "proxy")
+				break
+			}
+		}
+
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+	}
+
+	if group == nil {
+		ps.selectedProvider = nil // Reset selected provider if no group found
+		ps.tpWriter.PrintfLine("411 No such newsgroup")
+		return nil
+	}
+
+	// Update the session with the selected group info
+	ps.Group = group.Name
+	ps.MsgNum = group.High // Set to the high water mark as default
+
+	// Return a successful GROUP response: 211 count low high group_name
+	ps.tpWriter.PrintfLine("211 %d %d %d %s",
+		group.Count, group.Low, group.High, group.Name)
+
+	dlog(always, "%s | Selected group: %s (articles: %d, range: %d-%d)",
+		ps.Username, group.Name, group.Count, group.Low, group.High)
+
+	return nil
+}
+
+// handleListCommand processes the LIST command
+func (ps *ProxySession) handleListCommand(args []string) error {
+	var variant string
+	if len(args) >= 1 {
+		variant = strings.ToUpper(args[0])
+	}
+	// Find a suitable provider
+	for _, provider := range ProxyParent.providerList {
+		if provider.NoDownload {
+			continue
+		}
+		if ps.selectedProvider != nil && provider != ps.selectedProvider {
+			continue // Skip if this provider is not the selected one for this session
+		}
+
+		connitem, err := provider.ConnPool.GetConn()
+		if err != nil {
+			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
+			continue
+		}
+
+		// Different LIST variants
+		var command string
+		if variant == "" {
+			command = "LIST"
+		} else {
+			command = fmt.Sprintf("LIST %s", variant)
+		}
+
+		id, err := connitem.srvtp.Cmd("%s", command)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, _, err := connitem.srvtp.ReadCodeLine(215)
+		if err != nil || code != 215 {
+			connitem.srvtp.EndResponse(id)
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		// Read the dot-delimited response directly into a list of strings
+		lines, err := connitem.srvtp.ReadDotLines()
+		connitem.srvtp.EndResponse(id)
+
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+
+		ps.selectedProvider = provider // Set the selected provider for this session
+
+		// Start our response to the client
+		ps.tpWriter.PrintfLine("215 List of newsgroups follows")
+		dw := ps.tpWriter.DotWriter()
+
+		// Pass through the lines
+		for _, line := range lines {
+			fmt.Fprintln(dw, line)
+		}
+
+		dw.Close()
+		return nil
+	}
+
+	// If we couldn't find any provider or all failed
+	if ps.selectedProvider == nil {
+		ps.tpWriter.PrintfLine("503 No providers available for LIST command")
+		return nil
+	}
+
+	return nil
+}
+
+// handleXOverCommand processes the XOVER/OVER command
+func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
+	// Must have a selected group first
+	if ps.Group == "" {
+		ps.tpWriter.PrintfLine("412 No newsgroup selected")
+		return nil
+	}
+
+	var rangeArg string
+	if len(args) >= 1 {
+		rangeArg = args[0]
+	} else {
+		// If no range specified, use current article number
+		if ps.MsgNum <= 0 {
+			ps.tpWriter.PrintfLine("420 No current article selected")
+			return nil
+		}
+		rangeArg = fmt.Sprintf("%d", ps.MsgNum)
+	}
+
+	// Process the range argument
+	var startNum, endNum int64
+
+	if strings.Contains(rangeArg, "-") {
+		parts := strings.Split(rangeArg, "-")
+		if len(parts) == 2 {
+			var err error
+			startNum, err = strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				ps.tpWriter.PrintfLine("501 Invalid article range")
+				return nil
+			}
+
+			if parts[1] == "" {
+				// Format like "1000-" means "1000 to the end"
+				endNum = 0 // Will be handled as "to the end" by the server
+			} else {
+				endNum, err = strconv.ParseInt(parts[1], 10, 64)
+				if err != nil {
+					ps.tpWriter.PrintfLine("501 Invalid article range")
+					return nil
+				}
+			}
+		}
+	} else {
+		var err error
+		startNum, err = strconv.ParseInt(rangeArg, 10, 64)
+		if err != nil {
+			ps.tpWriter.PrintfLine("501 Invalid article number")
+			return nil
+		}
+		endNum = startNum // Just one article
+	}
+
+	// Find provider with this group
+	for _, provider := range ProxyParent.providerList {
+		if provider.NoDownload {
+			continue
+		}
+		if ps.selectedProvider != nil && provider != ps.selectedProvider {
+			continue // Skip if this provider is not the selected one for this session
+		}
+		connitem, err := provider.ConnPool.GetConn()
+		if err != nil {
+			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
+			continue
+		}
+
+		// Select the group first (required before XOVER/OVER)
+		id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, _, err := connitem.srvtp.ReadCodeLine(211)
+		connitem.srvtp.EndResponse(id)
+
+		if err != nil || code != 211 {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		// Now run the XOVER/OVER command
+		var command string
+		if isXOVER {
+			command = "XOVER"
+		} else {
+			command = "OVER"
+		}
+
+		if endNum > 0 {
+			command = fmt.Sprintf("%s %d-%d", command, startNum, endNum)
+		} else if endNum == 0 {
+			command = fmt.Sprintf("%s %d-", command, startNum)
+		} else {
+			command = fmt.Sprintf("%s %d", command, startNum)
+		}
+
+		id, err = connitem.srvtp.Cmd("%s", command)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, _, err = connitem.srvtp.ReadCodeLine(224)
+		if err != nil || code != 224 {
+			connitem.srvtp.EndResponse(id)
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		// Read the dot-delimited response
+		lines, err := connitem.srvtp.ReadDotLines()
+		connitem.srvtp.EndResponse(id)
+
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		// Start our response to the client
+		ps.tpWriter.PrintfLine("224 Overview information follows")
+		dw := ps.tpWriter.DotWriter()
+
+		// Pass through the lines
+		for _, line := range lines {
+			fmt.Fprintln(dw, line)
+		}
+
+		dw.Close()
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+		return nil
+	}
+
+	// If we couldn't find any provider or all failed
+	ps.tpWriter.PrintfLine("503 No providers have the selected group")
+	return nil
+}
+
+// handleXHdrCommand processes the XHDR/HDR command
+func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
+	if len(args) < 1 {
+		ps.tpWriter.PrintfLine("501 Syntax error: XHDR <header> [range|<message-id>]")
+		return nil
+	}
+
+	// Must have a selected group first, unless message-id is specified
+	if ps.Group == "" && !strings.HasPrefix(args[len(args)-1], "<") {
+		ps.tpWriter.PrintfLine("412 No newsgroup selected")
+		return nil
+	}
+
+	headerField := args[0]
+
+	// Get the message ID or range
+	var messageID string
+	var rangeSpec string
+
+	if len(args) >= 2 {
+		if strings.HasPrefix(args[1], "<") {
+			// It's a message ID
+			messageID = args[1]
+		} else {
+			// It's a range spec
+			rangeSpec = args[1]
+		}
+	} else {
+		// If no range/msgid specified, use current article number
+		if ps.MsgNum <= 0 {
+			ps.tpWriter.PrintfLine("420 No current article selected")
+			return nil
+		}
+		rangeSpec = fmt.Sprintf("%d", ps.MsgNum)
+	}
+
+	// Find provider with this group
+	for _, provider := range ProxyParent.providerList {
+		if provider.NoDownload {
+			continue
+		}
+		if ps.selectedProvider != nil && provider != ps.selectedProvider {
+			continue // Skip if this provider is not the selected one for this session
+		}
+
+		connitem, err := provider.ConnPool.GetConn()
+		if err != nil {
+			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
+			continue
+		}
+
+		// Select the group first if using an article number range
+		if messageID == "" {
+			id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
+			if err != nil {
+				provider.ConnPool.CloseConn(connitem, nil)
+				continue
+			}
+
+			connitem.srvtp.StartResponse(id)
+			code, _, err := connitem.srvtp.ReadCodeLine(211)
+			connitem.srvtp.EndResponse(id)
+
+			if err != nil || code != 211 {
+				provider.ConnPool.CloseConn(connitem, nil)
+				continue
+			}
+		}
+
+		// Now run the XHDR/HDR command
+		var command string
+		if isXHDR {
+			command = "XHDR"
+		} else {
+			command = "HDR"
+		}
+
+		if messageID != "" {
+			command = fmt.Sprintf("%s %s %s", command, headerField, messageID)
+		} else {
+			command = fmt.Sprintf("%s %s %s", command, headerField, rangeSpec)
+		}
+
+		id, err := connitem.srvtp.Cmd("%s", command)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, _, err := connitem.srvtp.ReadCodeLine(221)
+		if err != nil || code != 221 {
+			connitem.srvtp.EndResponse(id)
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		// Read the dot-delimited response
+		lines, err := connitem.srvtp.ReadDotLines()
+		connitem.srvtp.EndResponse(id)
+
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		// Start our response to the client
+		ps.tpWriter.PrintfLine("221 Header follows")
+		dw := ps.tpWriter.DotWriter()
+
+		// Pass through the lines
+		for _, line := range lines {
+			fmt.Fprintln(dw, line)
+		}
+
+		dw.Close()
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+		return nil
+	}
+
+	// If we couldn't find any provider or all failed
+	ps.tpWriter.PrintfLine("503 No providers have the selected group or article")
+	return nil
+}
+
+// handleNextOrLastCommand processes the NEXT/LAST command
+func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
+	// Must have a selected group first
+	if ps.Group == "" {
+		ps.tpWriter.PrintfLine("412 No newsgroup selected")
+		return nil
+	}
+
+	// Must have a current article selected
+	if ps.MsgNum <= 0 {
+		ps.tpWriter.PrintfLine("420 No current article selected")
+		return nil
+	}
+
+	// Find provider with this group
+	for _, provider := range ProxyParent.providerList {
+		if provider.NoDownload {
+			continue
+		}
+		if ps.selectedProvider != nil && provider != ps.selectedProvider {
+			continue // Skip if this provider is not the selected one for this session
+		}
+
+		connitem, err := provider.ConnPool.GetConn()
+		if err != nil {
+			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
+			continue
+		}
+
+		// Select the group first
+		id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, _, err := connitem.srvtp.ReadCodeLine(211)
+		connitem.srvtp.EndResponse(id)
+
+		if err != nil {
+			if code > 0 {
+				provider.ConnPool.ParkConn(0, connitem, "proxy")
+			} else {
+				provider.ConnPool.CloseConn(connitem, nil)
+			}
+			continue
+		}
+
+		// Set the current article
+		id, err = connitem.srvtp.Cmd("STAT %d", ps.MsgNum)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, _, err = connitem.srvtp.ReadCodeLine(223)
+		connitem.srvtp.EndResponse(id)
+
+		if err != nil {
+			if code > 0 {
+				provider.ConnPool.ParkConn(0, connitem, "proxy")
+			} else {
+				provider.ConnPool.CloseConn(connitem, nil)
+			}
+			continue
+		}
+
+		// Now run the NEXT/LAST command
+		var command string
+		if isNext {
+			command = "NEXT"
+		} else {
+			command = "LAST"
+		}
+
+		id, err = connitem.srvtp.Cmd("%s", command)
+		if err != nil {
+			provider.ConnPool.CloseConn(connitem, nil)
+			continue
+		}
+
+		connitem.srvtp.StartResponse(id)
+		code, msg, err := connitem.srvtp.ReadCodeLine(223)
+		connitem.srvtp.EndResponse(id)
+		if code > 0 {
+			provider.ConnPool.ParkConn(0, connitem, "proxy")
+		} else {
+			provider.ConnPool.CloseConn(connitem, nil)
+		}
+		if err != nil || code != 223 {
+			if code == 421 {
+				// No next/previous article in the group
+				var which string
+				if isNext {
+					which = "next"
+				} else {
+					which = "previous"
+				}
+				ps.tpWriter.PrintfLine("421 No %s article to retrieve", which)
+				return nil
+			}
+		} else {
+			// 223 article_number message_id
+			parts := strings.Fields(msg)
+			if len(parts) >= 2 {
+				newNum, _ := strconv.ParseInt(parts[0], 10, 64)
+				messageID := parts[1]
+
+				// Update the current article pointer
+				ps.MsgNum = newNum
+
+				// Return successful response
+				ps.tpWriter.PrintfLine("223 %d %s", newNum, messageID)
+			} else {
+				ps.tpWriter.PrintfLine("503 Invalid response from server")
+			}
+		}
+		return nil
+	}
+
+	// If we couldn't find any provider or all failed
+	ps.tpWriter.PrintfLine("503 No providers have the selected group")
+	return nil
+}
