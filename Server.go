@@ -359,8 +359,18 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 					Id: args[0],
 				},
 			}
-			pass = true // we have a valid message ID, so we can pass it to a provider
+			ps.MsgNum, ps.Group = 0, "" // Reset message number and group on valid <message@ID>
+			pass = true                 // we have a valid message ID, so we can pass it to a provider
 			// TODO: add disk caching here?
+		} else if num > 0 {
+			// newsreader message number
+			ps.MsgNum = num // Store the message number in the session
+			pass = true     // we have a valid message number, so we can pass it to a provider
+			item = &segmentChanItem{
+				segment: &nzbparser.NzbSegment{
+					Id: args[0],
+				},
+			}
 		}
 
 	case "CAPABILITIES":
@@ -410,12 +420,13 @@ loopProvider:
 	for _, provider := range ProxyParent.providerList {
 		switch command {
 		case "ARTICLE", "BODY", "HEAD", "STAT":
-			if provider.NoDownload {
+			if provider.NoDownload || (ps.Group != "" && ps.MsgNum > 0 && !provider.Newsreader) {
 				// yes, doing stat on a provider that does not allow downloading articles does not make sense
 				response = "430 NODL" // 430 No Download, provider does not allow downloading articles
 				continue loopProvider // Skip this provider if it does not allow downloading articles
 			}
 		}
+
 		if checkedProviderGroups[provider.Group] ||
 			IsArticleNotFoundAtProviderGroup(item.segment.Id, provider.Group) {
 			response = "430 NOPG" // 430 cached Not Found in ProviderGroup
@@ -427,7 +438,28 @@ loopProvider:
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
 			continue loopProvider // Skip this provider if connection fails
 		}
+		if ps.Group != "" && ps.MsgNum > 0 {
+			// execute GROUP command on remote if we have a group selected
+			id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
+			if err != nil {
+				dlog(always, "ERROR CMD_GROUP for provider %s: %v", provider.Name, err)
+				provider.ConnPool.CloseConn(connitem, nil)
+				continue loopProvider
+			}
+			connitem.srvtp.StartResponse(id)
+			code, _, err := connitem.srvtp.ReadCodeLine(211)
+			connitem.srvtp.EndResponse(id)
 
+			if err != nil {
+				dlog(always, "ERROR CMD_GROUP command=%s for provider %s: %v", provider.Name, command, err)
+				if code > 0 {
+					provider.ConnPool.ParkConn(0, connitem, "proxy")
+				} else {
+					provider.ConnPool.CloseConn(connitem, nil)
+				}
+				continue
+			}
+		}
 		dlog(cfg.opt.BUG, " %s | provider %s: %s got pc='%v'", ps.Username, provider.Name, command, connitem)
 
 		// got connection to a provider
