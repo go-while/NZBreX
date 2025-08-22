@@ -75,15 +75,47 @@ The tool uses the NNTP commands:
 
 ## Installation
 
-1. Compile from source or download the latest executable from the [Releases](../../releases) page.
-2. Configure `provider.json` with your Usenet provider details.
-3. Run the program from the command line:
+1. **Download pre-built binaries** from the [Releases](../../releases) page, or
+2. **Compile from source** (see Build Instructions below)
+3. Configure `provider.json` with your Usenet provider details.
+4. Run the program from the command line:
 
    ```sh
    ./nzbrex -checkonly -nzb nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz
    ./nzbrex -cd cache -checkfirst -nzb nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz
    ./nzbrex --cd=cache --checkfirst --nzb=nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz
    ```
+
+### Build Instructions
+
+NZBreX requires the rapidyenc C++ library to be compiled before building the Go application.
+
+#### Linux Build
+```sh
+# Build rapidyenc library
+cd rapidyenc && ./build_rapidyenc_linux-amd64.sh && cd ..
+
+# Build NZBreX
+go build .
+```
+
+#### Windows Native Build
+```cmd
+REM Install dependencies: Go, MinGW-w64, CMake
+REM Then run:
+build_windows.bat
+```
+
+#### Windows Cross-Compilation (from Linux)
+```sh
+# Install dependencies
+sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 cmake
+
+# Run cross-compilation script
+./local_crossbuild_windows-amd64.sh
+```
+
+The Windows executable will be statically linked and only depend on core Windows system libraries.
 
 ---
 
@@ -215,6 +247,26 @@ Example output:
 - #0060: streaming (CHECK/TAKETHIS)
 - #0080: progressbar (cosmetics)
 - ...
+
+---
+
+## Troubleshooting
+
+### Windows Executable Issues
+
+If you encounter an error like "The code execution cannot proceed because libc++.so.6.dll was not found" on Windows:
+
+1. **Download the latest release** - This issue has been fixed in recent builds
+2. **Ensure you're using the correct Windows version** - Download the Windows-specific executable from the releases page
+3. **The executable is self-contained** - No additional runtime libraries should be required
+
+The Windows executable is statically linked and only depends on core Windows system libraries that are guaranteed to be available.
+
+### Build Issues
+
+- **rapidyenc library missing**: Run the appropriate rapidyenc build script before building NZBreX
+- **Cross-compilation fails**: Ensure MinGW-w64 and cmake are installed
+- **Link errors**: Make sure the rapidyenc library matches your target platform
 
 ---
 
