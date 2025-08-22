@@ -67,7 +67,7 @@ echo rapidyenc library built successfully.
 
 echo Building NZBreX executable...
 set CGO_ENABLED=1
-go build -o NZBreX.exe -tags "windows rapidyenc" .
+go build -o NZBreX_ry.exe -tags "windows rapidyenc" .
 if errorlevel 1 (
     echo ERROR: Failed to build NZBreX executable.
     pause
