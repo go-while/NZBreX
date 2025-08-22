@@ -3,9 +3,9 @@ package rapidyenc
 /*
 #cgo CFLAGS: -I${SRCDIR}/src
 #cgo darwin LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo windows,386   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo windows,arm   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
+#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc.a -static-libstdc++ -static-libgcc
+#cgo windows,386   LDFLAGS: ${SRCDIR}/librapidyenc.a -static-libstdc++ -static-libgcc
+#cgo windows,arm   LDFLAGS: ${SRCDIR}/librapidyenc.a -static-libstdc++ -static-libgcc
 #cgo linux,amd64   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo linux,386     LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
 #cgo linux,arm     LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
