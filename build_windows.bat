@@ -7,7 +7,7 @@ echo Building NZBreX for Windows...
 REM Check if Go is available
 go version >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Go not found. Please install Go 1.19 or later.
+    echo ERROR: Go not found. Please install Go 1.24.3 or later.
     echo Download from: https://golang.org/dl/
     pause
     exit /b 1
