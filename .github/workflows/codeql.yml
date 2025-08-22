@@ -2,18 +2,19 @@ name: "CodeQL Advanced"
 
 on:
   push:
-  #  branches:
-  #    - 'testing'
+    branches:
+      - main
+      - testing
     tags:
-      - "testing"
+      - testing
   release:
     types: [published]
   workflow_dispatch:
   repository_dispatch:
-  #pull_request:
-  #  branches:
-  #    - main
-  #    - "test*"
+  pull_request:
+    branches:
+      - main
+      - testing
   schedule:
     - cron: '30 05 * * 1'
 
@@ -21,6 +22,7 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.runner_name }}-${{ matrix.language }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     permissions:
       security-events: write
       packages: read
@@ -31,63 +33,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # run codeQL on SHR: Go
+          # GitHub hosted runners only
           - language: go
             build-mode: autobuild
-            runner: [self-hosted, ubu2204-gor]
-            runner_name: "runner-ubu2204-gor-001"
-            ram: 8
-            cache: false
-
-          # run codeQL on SHR: Go
-          - language: go
-            build-mode: autobuild
-            runner: [self-hosted, ubu2404-gor]
-            runner_name: "runner-ubu2404-gor-001"
-            ram: 8
-            cache: false
-
-          # run codeQL on SHR: C/C++
-          - language: c-cpp
-            build-mode: manual
-            runner: [self-hosted, ubu2204-gor]
-            runner_name: "runner-ubu2204-gor-001"
-            ram: 8
-            cache: false
-
-          # run codeQL on SHR: C/C++
-          - language: c-cpp
-            build-mode: manual
-            runner: [self-hosted, ubu2404-gor]
-            runner_name: "runner-ubu2404-gor-001"
-            ram: 8
-            cache: false
-
-          # run codeQL on SHR: Actions
-          - language: actions
-            build-mode: none
-            runner: [self-hosted, ubu2204-gor]
-            runner_name: "runner-ubu2204-gor-001"
-            ram: 8
-            cache: false
-
-          # run codeQL on SHR: Actions
-          - language: actions
-            build-mode: none
-            runner: [self-hosted, ubu2404-gor]
-            runner_name: "runner-ubu2404-gor-001"
-            ram: 8
-            cache: false
-
-          # run codeQL on GH: Actions
-          - language: actions
-            build-mode: none
-            runner: ubuntu-latest
-            runner_name: "GH-ubuntu-latest"
+            runner: ubuntu-22.04
+            runner_name: "GH-ubuntu-22.04"
             ram: 6
             cache: true
 
-          # run codeQL on GH: Go
+          - language: go
+            build-mode: autobuild
+            runner: ubuntu-24.04
+            runner_name: "GH-ubuntu-24.04"
+            ram: 6
+            cache: true
+
           - language: go
             build-mode: autobuild
             runner: ubuntu-latest
@@ -95,9 +55,17 @@ jobs:
             ram: 6
             cache: true
 
-          # run codeQL on GH: C/C++
+          # C/C++ analysis for rapidyenc
           - language: c-cpp
             build-mode: manual
+            runner: ubuntu-latest
+            runner_name: "GH-ubuntu-latest"
+            ram: 6
+            cache: true
+
+          # Actions analysis
+          - language: actions
+            build-mode: none
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
             ram: 6
@@ -122,22 +90,22 @@ jobs:
         echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
         exit 1
 
-    - name: "@Start Clean directory"
-      run: |
-        echo "deleting workspace"
-        rm -rf dist build ${{ github.workspace }}/
-        mkdir -vp ${{ github.workspace }}
-
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
+    - name: Install build dependencies
+      if: matrix.language == 'c-cpp'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake ca-certificates curl git dpkg-dev wget
+
     - name: Set up Go
       if: matrix.language == 'go'
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24.3' # or whatever version you need
+        go-version-file: 'go.mod'
         cache: ${{ matrix.cache }}
 
     - name: Initialize CodeQL
@@ -156,6 +124,7 @@ jobs:
     - name: Build (manual, for C/C++)
       if: matrix.language == 'c-cpp' && matrix.build-mode != 'autobuild'
       # Run the build step only for C/C++ jobs
+      timeout-minutes: 10
       run: |
         cd rapidyenc
         if [ ! -e rapidyenc ]; then
@@ -171,9 +140,3 @@ jobs:
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
-
-    - name: "@End Clean directory"
-      run: |
-        echo "deleting workspace"
-        rm -rf dist build ${{ github.workspace }}/
-        mkdir -vp ${{ github.workspace }}
