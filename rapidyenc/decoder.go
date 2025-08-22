@@ -2,14 +2,10 @@ package rapidyenc
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/src
-#cgo darwin LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo windows,386   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo windows,arm   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo linux,amd64   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo linux,386     LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo linux,arm     LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
-#cgo linux,arm64   LDFLAGS: ${SRCDIR}/librapidyenc.a -lstdc++
+#cgo darwin LDFLAGS: ${SRCDIR}/librapidyenc_darwin.a -lstdc++
+#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_windows_amd64.a -lstdc++
+#cgo linux,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_amd64.a -lstdc++
+#cgo linux,arm64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_arm64.a -lstdc++
 #include "rapidyenc.h"
 */
 import "C"
@@ -260,6 +256,31 @@ func (d *Decoder) Read(p []byte) (int, error) {
 // for the footer and EOF pattern (.\r\n)
 func (d *Decoder) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
 transform:
+	if d.body && d.format == FormatYenc {
+		nd, ns, end, _ := DecodeIncremental(dst[nDst:], src[nSrc:], &d.State)
+		if nd > 0 {
+			d.hash.Write(dst[nDst : nDst+nd])
+			d.actualSize += int64(nd)
+			nDst += nd
+		}
+
+		switch end {
+		case EndControl:
+			nSrc += ns - 2
+			d.body = false
+		case EndArticle:
+			nSrc += ns - 3
+			d.body = false
+		default:
+			if d.State == StateCRLFEQ {
+				d.State = StateCRLF
+				nSrc += ns - 1
+			} else {
+				nSrc += ns
+			}
+			return nDst, nSrc, transform.ErrShortSrc
+		}
+	}
 	// Line by line processing
 	for {
 		if nSrc < 0 {
@@ -270,25 +291,21 @@ transform:
 			d.m.Hash = d.hash.Sum32()
 			if !d.begin {
 				switch d.format {
-				case FormatUnknown:
-					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin header: %w", ErrDataMissing)
 				case FormatYenc:
 					err = fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=ybegin\" header: %w", ErrDataMissing)
-				case FormatUU:
-					err = fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"begin\" header: %w", ErrDataCorruption)
+				default:
+					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin header: %w", ErrDataMissing)
 				}
 			} else if !d.end {
 				switch d.format {
-				case FormatUnknown:
-					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *end header: %w", ErrDataMissing)
 				case FormatYenc:
 					err = fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=yend\" trailer: %w", ErrDataMissing)
-				case FormatUU:
-					err = fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"end\" trailer: %w", ErrDataCorruption)
+				default:
+					err = fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *end header: %w", ErrDataMissing)
 				}
-			} else if (d.format != FormatUU && d.format != FormatUnknown) && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
+			} else if (!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
-			} else if d.format == FormatYenc && d.crc && d.expectedCrc != d.m.Hash {
+			} else if d.crc && d.expectedCrc != d.m.Hash {
 				// If we have a segment ID, use it for debugging otherwise use an empty string.
 				err = fmt.Errorf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s' err: %w", d.expectedCrc, d.m.Hash, *d.segId, ErrCrcMismatch)
 			} else {
@@ -311,61 +328,11 @@ transform:
 
 		switch d.format {
 		case FormatYenc:
-			// Header/trailer lines
-			if bytes.HasPrefix(line, []byte("=ybegin ")) ||
-				bytes.HasPrefix(line, []byte("=ypart ")) ||
-				bytes.HasPrefix(line, []byte("=yend ")) {
-				d.processYenc(line)
-				goto transform
-			}
-			// If we're in the body, decode this line
-			if d.body {
-				// Remove trailing \r\n for decoding
-				bodyLine := line
-				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
-					bodyLine = bodyLine[:len(bodyLine)-2]
-				}
-
-				dlog(d.debugSpam, "DecodeIncremental input: %q\n", bodyLine)
-				nd, ns, end, derr := DecodeIncremental(dst[nDst:], bodyLine, &d.State)
-				if derr != nil && derr != io.EOF {
-					dlog(always, "ERROR in rapidyenc.DecodeIncremental: nd=%d ns=%d end=%v err=%v\n", nd, ns, end, derr)
-				}
-
-				if nd > 0 {
-					d.hash.Write(dst[nDst : nDst+nd])
-					d.actualSize += int64(nd)
-					nDst += nd
-				}
-				goto transform
-			}
-
+			d.processYenc(line)
+			goto transform
 		case FormatUU:
-			if bytes.HasPrefix(line, []byte("begin ")) || bytes.Equal(line, []byte("end\r\n")) {
-				d.processYenc(line)
-				goto transform
-			}
-			if d.body {
-				bodyLine := line
-				if len(bodyLine) >= 2 && bodyLine[len(bodyLine)-2] == '\r' && bodyLine[len(bodyLine)-1] == '\n' {
-					bodyLine = bodyLine[:len(bodyLine)-2]
-				}
-				// Decode the UUencoded line
-				decoded, err := UUdecode(bodyLine)
-				if err != nil {
-					d.err = fmt.Errorf("[rapidyenc] error decoding UUencoded line: %w", err)
-					return nDst, nSrc, d.err
-				}
-				if len(decoded) > 0 {
-					d.hash.Write(decoded)
-					d.actualSize += int64(len(decoded))
-					if nDst+len(decoded) > len(dst) {
-						d.err = fmt.Errorf("[rapidyenc] destination buffer too small for UUencoded data: %w", errDestinationTooSmall)
-						return nDst, nSrc, d.err
-					}
-					nDst += copy(dst[nDst:], decoded)
-				}
-			}
+			// TODO: does not uudecode, for now just copies encoded data
+			nDst += copy(dst[nDst:], line)
 		}
 	}
 
@@ -374,12 +341,10 @@ transform:
 		// ! REVIEW ! not sure if we even get here since the formatUnknown is checked above
 		if !d.begin || !d.end {
 			switch d.format {
-			case FormatUnknown:
-				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin or *end header: %w", ErrDataMissing)
 			case FormatYenc:
 				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatYenc end of article without finding \"=ybegin\" or \"=yend\" header: %w", ErrDataMissing)
-			case FormatUU:
-				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUU end of article without finding \"begin\" or \"end\" header: %w", ErrDataMissing)
+			default:
+				return nDst, nSrc, fmt.Errorf("[rapidyenc] FormatUnknown end of article without finding any *begin or *end header: %w", ErrDataMissing)
 			}
 		}
 		return nDst, nSrc, io.EOF

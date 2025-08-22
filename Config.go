@@ -312,7 +312,7 @@ const (
 	cmdARTICLE = "ARTICLE"
 	cmdHEAD    = "HEAD"
 	cmdBODY    = "BODY"
-	cmdSTAT    = "STAT"
-	cmdIHAVE   = "IHAVE"
-	cmdPOST    = "POST"
+	//cmdSTAT    = "STAT"
+	//cmdIHAVE   = "IHAVE"
+	//cmdPOST    = "POST"
 )

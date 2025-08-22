@@ -592,19 +592,5 @@ func GenerateTestUUEncodedFiles(t *testing.T) error {
 		return nil
 	}
 
-	content1 := []byte("Hello from test1!\nThis is a test file.\n")
-	content2 := []byte("Another file for test2.\nWith more lines.\n1234567890\r\n")
-
-	uue1 := UUEncode(content1, "test1.txt", 644)
-	uue2 := UUEncode(content2, "test2.txt", 644)
-
-	if err := os.WriteFile(filepath.Join("uuencode", "test1.uue"), uue1, 0644); err != nil {
-		t.Errorf("Failed to write uuencode/test1.uue: %v", err)
-		return err
-	}
-	if err := os.WriteFile(filepath.Join("uuencode", "test2.uue"), uue2, 0644); err != nil {
-		t.Errorf("Failed to write uuencode/test2.uue: %v", err)
-		return err
-	}
 	return nil
 }
