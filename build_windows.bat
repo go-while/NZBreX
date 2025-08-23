@@ -76,7 +76,7 @@ if errorlevel 1 (
 
 echo.
 echo Build completed successfully!
-echo Executable: NZBreX.exe
+echo Executable: NZBreX_ry.exe
 echo.
-echo To test the build, run: NZBreX.exe -version
+echo To test the build, run: NZBreX_ry.exe -version
 pause
