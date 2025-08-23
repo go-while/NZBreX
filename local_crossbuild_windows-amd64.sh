@@ -65,23 +65,24 @@ echo "Windows executable built successfully: NZBreX_ry.exe"
 # Check dependencies (optional, for debugging)
 if command -v x86_64-w64-mingw32-objdump &> /dev/null; then
     echo "DLL dependencies:"
-if ! go build -o "${EXE_NAME}" -ldflags "-linkmode external -extldflags '-static'" -tags "windows rapidyenc" .; then
-    echo "ERROR: Failed to build Windows executable"
-    exit 1
-fi
+    if ! go build -o "${EXE_NAME}" -ldflags "-linkmode external -extldflags '-static'" -tags "windows rapidyenc" .; then
+        echo "ERROR: Failed to build Windows executable"
+        exit 1
+    fi
 
-# Verify the executable was created
-if [ ! -f "${EXE_NAME}" ]; then
-    echo "ERROR: Windows executable not created"
-    exit 1
-fi
+    # Verify the executable was created
+    if [ ! -f "${EXE_NAME}" ]; then
+        echo "ERROR: Windows executable not created"
+        exit 1
+    fi
 
-echo "Windows executable built successfully: ${EXE_NAME}"
+    echo "Windows executable built successfully: ${EXE_NAME}"
 
-# Check dependencies (optional, for debugging)
-if command -v x86_64-w64-mingw32-objdump &> /dev/null; then
-    echo "DLL dependencies:"
-    x86_64-w64-mingw32-objdump -p "${EXE_NAME}" | grep "DLL Name" || echo "  (none found)"
+    # Check dependencies (optional, for debugging)
+    if command -v x86_64-w64-mingw32-objdump &> /dev/null; then
+        echo "DLL dependencies:"
+        x86_64-w64-mingw32-objdump -p "${EXE_NAME}" | grep "DLL Name" || echo "  (none found)"
+    fi
 fi
 
 echo "Build completed successfully!"
