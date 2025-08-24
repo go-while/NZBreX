@@ -42,13 +42,24 @@ rmdir /s /q rapidyenc\build 2>nul
 mkdir rapidyenc\build
 cd rapidyenc\build
 
+REM Try to configure with MinGW Makefiles generator
 cmake .. -G "MinGW Makefiles"
 if errorlevel 1 (
-    echo ERROR: CMake configuration failed. Please ensure MinGW-w64 is properly installed.
-    echo You may need to install MSYS2 and MinGW-w64 from: https://www.msys2.org/
-    pause
-    cd ..\..\..\
-    exit /b 1
+    REM Try Ninja generator if MinGW Makefiles fails
+    cmake .. -G "Ninja"
+    if errorlevel 1 (
+        REM Try MSYS Makefiles generator if Ninja fails
+        cmake .. -G "MSYS Makefiles"
+        if errorlevel 1 (
+            echo ERROR: CMake configuration failed with all known generators.
+            echo Please ensure MinGW-w64, Ninja, or MSYS2 are properly installed.
+            echo You may need to install MSYS2 and MinGW-w64 from: https://www.msys2.org/
+            echo Or install Ninja from: https://ninja-build.org/
+            pause
+            cd ..\..\..\
+            exit /b 1
+        )
+    )
 )
 
 cmake --build . --config Release
