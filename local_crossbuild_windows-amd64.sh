@@ -65,8 +65,14 @@ echo "Windows executable built successfully: NZBreX_ry.exe"
 # Check dependencies (optional, for debugging)
 if command -v x86_64-w64-mingw32-objdump &> /dev/null; then
     echo "DLL dependencies:"
-    x86_64-w64-mingw32-objdump -p "NZBreX_ry.exe" | grep "DLL Name" || echo "  (none found)"
-fi
+    if ! x86_64-w64-mingw32-objdump -p "NZBreX_ry.exe" > objdump_output.txt; then
+        echo "  ERROR: objdump failed to analyze NZBreX_ry.exe"
+    elif ! grep -q "DLL Name" objdump_output.txt; then
+        echo "  (none found)"
+    else
+        grep "DLL Name" objdump_output.txt
+    fi
+    rm -f objdump_output.txt
 
 echo "Build completed successfully!"
 exit 0
