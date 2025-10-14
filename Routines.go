@@ -153,19 +153,21 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	if cacheON && cache.ReadCache(item) > 0 {
 		// item has been read from cache - set flags as if downloaded
 		// Mark all providers in this group as having the article
-	flagProviderCache:
-		for pid, prov := range s.providerList {
-			if prov.Group != provider.Group {
-				continue flagProviderCache
+		/* disabled, this looks wrong
+		flagProviderCache:
+			for pid, prov := range s.providerList {
+				if prov.Group != provider.Group {
+					continue flagProviderCache
+				}
+				item.mux.Lock()
+				item.availableOn[pid] = true
+				delete(item.missingOn, pid)
+				item.mux.Unlock()
 			}
-			item.mux.Lock()
-			item.availableOn[pid] = true
-			delete(item.missingOn, pid)
-			item.mux.Unlock()
-		}
-
+		*/
 		item.mux.Lock()
-		item.flagisDL = true
+		item.flagCache = true
+		item.flagisDL = false
 		item.flaginDL = false
 		item.flaginDLMEM = false
 		item.mux.Unlock()
