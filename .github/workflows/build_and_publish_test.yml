@@ -64,26 +64,26 @@ jobs:
             cross_compile: true
 
           # Windows cross-compilation from Ubuntu
+          # Windows amd64 (64-bit x86)
           - runner: ubuntu-latest
             os: windows
             arch: amd64
             name: windows-amd64
             cross_compile: true
 
-          # macOS builds - Multiple versions for maximum compatibility
-          # macOS 15 Intel (amd64) - Latest GA (requires -large for Intel)
-          - runner: macos-15-large
-            os: darwin
-            arch: amd64
-            name: macos-15-amd64
-            cross_compile: false
+          # Windows 386 (32-bit x86)
+          - runner: ubuntu-latest
+            os: windows
+            arch: 386
+            name: windows-386
+            cross_compile: true
 
-          # macOS 14 Intel (amd64) - Stable (requires -large for Intel)
-          - runner: macos-14-large
-            os: darwin
-            arch: amd64
-            name: macos-14-amd64
-            cross_compile: false
+          # Windows ARM64
+          - runner: ubuntu-latest
+            os: windows
+            arch: arm64
+            name: windows-arm64
+            cross_compile: true
 
           # macOS 15 ARM64 - Latest GA
           - runner: macos-15
