@@ -38,21 +38,21 @@ jobs:
             build-mode: autobuild
             runner: ubuntu-22.04
             runner_name: "GH-ubuntu-22.04"
-            ram: 6
+            ram: 12
             cache: true
 
           - language: go
             build-mode: autobuild
             runner: ubuntu-24.04
             runner_name: "GH-ubuntu-24.04"
-            ram: 6
+            ram: 12
             cache: true
 
           - language: go
             build-mode: autobuild
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
-            ram: 6
+            ram: 12
             cache: true
 
           # C/C++ analysis for rapidyenc
@@ -60,7 +60,7 @@ jobs:
             build-mode: manual
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
-            ram: 6
+            ram: 12
             cache: true
 
           # Actions analysis
@@ -68,7 +68,7 @@ jobs:
             build-mode: none
             runner: ubuntu-latest
             runner_name: "GH-ubuntu-latest"
-            ram: 6
+            ram: 12
             cache: true
 
 
