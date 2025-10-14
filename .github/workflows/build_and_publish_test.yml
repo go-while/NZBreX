@@ -219,7 +219,8 @@ jobs:
         run: |
           # Build first if not cross-compiling
           go build -o NZBreX -tags other .
-          ./NZBreX -testrapidyenc#      - name: Clean Go module cache
+          ./NZBreX -testrapidyenc
+#      - name: Clean Go module cache
 #        run: |
 #          rm -rf ~/.cache/go-build ~/go/pkg/mod
 #      - name: Restore Go modules cache
