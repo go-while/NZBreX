@@ -131,7 +131,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		defer waitSession.Done()
 	}
 
-	if !proxy {
+	if s != nil && !s.proxy {
 		// not booting proxy, no session supplied, create a new session
 		// checks for the correct inputs
 		if nzbfilepath == "" && s == nil {
