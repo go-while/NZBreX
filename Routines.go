@@ -167,14 +167,14 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		*/
 		item.mux.Lock()
 		item.flagCache = true
-		item.flagisDL = false
+		item.flagisDL = true
 		item.flaginDL = false
 		item.flaginDLMEM = false
 		item.mux.Unlock()
 
 		// Free memory slot immediately since no actual download happens
-		who := fmt.Sprintf("DR=%d@'%s'#'%s' seg.Id='%s'", wid, provider.Name, provider.Group, item.segment.Id)
-		memlim.MemReturn(who+":cacheRead", item)
+		//who := fmt.Sprintf("DR=%d@'%s'#'%s' seg.Id='%s'", wid, provider.Name, provider.Group, item.segment.Id)
+		//memlim.MemReturn(who+":cacheRead", item)
 		return 920, nil
 	}
 	start := time.Now() // start time for this routine
@@ -266,7 +266,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 		// Release memory BEFORE adding to cache to prevent deadlock
 		// Cache writer will not release memory since we already did it here
-		memlim.MemReturn("GoDownsRoutine:beforeCache", item)
+		//memlim.MemReturn("GoDownsRoutine:beforeCache", item)
 
 		cache.Add2Cache(item)
 		// pass to ParkConn
@@ -410,9 +410,11 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 			// pass
 		case 436:
 			retry = true
+			err = nil
 			// pass
 		case 437:
 			unwanted = true
+			err = nil
 			// pass
 		default:
 			dlog(always, "ERROR in GoReupsRoutine: CMD_IHAVE seg.Id='%s' @ '%s'#'%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, code, msg, err)
