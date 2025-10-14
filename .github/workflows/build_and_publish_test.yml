@@ -32,12 +32,12 @@ jobs:
         include:
           # Linux builds using GitHub runners
           # Ubuntu 20.04 amd64 (glibc)
-          - runner: ubuntu-20.04
-            os: linux
-            arch: amd64
-            name: ubuntu-20.04-amd64
-            libc: glibc
-            cross_compile: false
+          #- runner: ubuntu-20.04
+          #  os: linux
+          #  arch: amd64
+          #  name: ubuntu-20.04-amd64
+          #  libc: glibc
+          #  cross_compile: false
 
           # Ubuntu 22.04 amd64 (glibc)
           - runner: ubuntu-22.04
