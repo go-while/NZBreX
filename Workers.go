@@ -197,7 +197,11 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				code, err := s.GoCheckRoutine(wid, provider, item, sharedCC)
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 				if err != nil { // re-queue?
-					dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
+					dlog(always, "ERROR in GoCheckRoutine err='%v' flag retry item", err)
+					item.mux.Lock()
+					item.retryIn = time.Now().Unix() + 9 // retry in 9s
+					item.retryOn[provider.id] = true
+					item.mux.Unlock()
 				}
 			case true:
 				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
@@ -253,8 +257,12 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			if err != nil || (code != 220 && code != 920) {
 				if code != 430 {
 					// 430 is a normal error code for GoDownsRoutine, so we don't log it as an error
-					errStr = fmt.Sprintf("ERROR in GoDownsRoutine code='%d' err='%v'", code, err)
+					errStr = fmt.Sprintf("ERROR in GoDownsRoutine code='%d' err='%v' flag retry item", code, err)
 					dlog(always, "%s", errStr)
+					item.mux.Lock()
+					item.retryIn = time.Now().Unix() + 9 // retry in 9s
+					item.retryOn[provider.id] = true
+					item.mux.Unlock()
 				}
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoDownsRoutine on error
 				continue forGoDownsRoutine
@@ -317,9 +325,13 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 			DecreaseUPQueueCnt()
 			if err != nil {
-				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v'", code, err)
+				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' flag retry item", code, err)
 				dlog(always, "%s", errStr)
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
+				item.mux.Lock()
+				item.retryIn = time.Now().Unix() + 9 // retry in 9s
+				item.retryOn[provider.id] = true
+				item.mux.Unlock()
 				continue forGoReupsRoutine
 			}
 			speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())
