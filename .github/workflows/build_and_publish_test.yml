@@ -3,18 +3,18 @@ name: "Build and Publish (GitHub Runners)"
 on:
   push:
     branches:
-      - main
-      - 'testing'
+    #  - main
+      - testing
     tags:
-      - "testing"
+      - testing
   release:
     types: [published]
   workflow_dispatch:
   repository_dispatch:
-  pull_request:
-    branches:
-      - main
-      - "test*"
+  #pull_request:
+  #  branches:
+  #    - main
+  #    - "test*"
 
 permissions:
   contents: write
@@ -71,15 +71,15 @@ jobs:
             cross_compile: true
 
           # macOS builds - Multiple versions for maximum compatibility
-          # macOS 15 Intel (amd64) - Latest GA
-          - runner: macos-15
+          # macOS 15 Intel (amd64) - Latest GA (requires -large for Intel)
+          - runner: macos-15-large
             os: darwin
             arch: amd64
             name: macos-15-amd64
             cross_compile: false
 
-          # macOS 14 Intel (amd64) - Stable
-          - runner: macos-14
+          # macOS 14 Intel (amd64) - Stable (requires -large for Intel)
+          - runner: macos-14-large
             os: darwin
             arch: amd64
             name: macos-14-amd64
