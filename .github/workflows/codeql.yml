@@ -1,4 +1,4 @@
-name: "Build and Publish (GitHub Runners)"
+name: "CodeQL Advanced"
 
 on:
   #push:
@@ -18,528 +18,118 @@ on:
   #schedule:
   #  - cron: '30 05 * * 1'
 
-permissions:
-  contents: write
-  packages: read
-
 jobs:
-  build_matrix:
-    name: Build ${{ matrix.name }}
+  analyze:
+    name: Analyze (${{ matrix.runner_name }}-${{ matrix.language }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 60
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
     strategy:
       fail-fast: false
-      max-parallel: 6
       matrix:
         include:
-          # Linux builds using GitHub runners
-          # Ubuntu 24.04 amd64 (glibc) - Latest GA
-          - runner: ubuntu-24.04
-            os: linux
-            arch: amd64
-            name: ubuntu-24.04-amd64
-            libc: glibc
-            cross_compile: false
+          # GitHub hosted runners only
+          - language: go
+            build-mode: autobuild
+            runner: ubuntu-22.04
+            runner_name: "GH-ubuntu-22.04"
+            ram: 16
+            cache: true
 
-          # Ubuntu 22.04 amd64 (glibc) - Stable LTS
-          - runner: ubuntu-22.04
-            os: linux
-            arch: amd64
-            name: ubuntu-22.04-amd64
-            libc: glibc
-            cross_compile: false
+          - language: go
+            build-mode: autobuild
+            runner: ubuntu-24.04
+            runner_name: "GH-ubuntu-24.04"
+            ram: 16
+            cache: true
 
-          # Linux ARM64 cross-compilation from Ubuntu
-          - runner: ubuntu-latest
-            os: linux
-            arch: arm64
-            name: linux-arm64
-            libc: glibc
-            cross_compile: true
+          # C/C++ analysis for rapidyenc
+          - language: c-cpp
+            build-mode: manual
+            runner: ubuntu-latest
+            runner_name: "GH-ubuntu-latest"
+            ram: 16
+            cache: true
 
-          # Alpine Linux (musl) cross-compilation
-          - runner: ubuntu-latest
-            os: linux
-            arch: amd64
-            name: alpine-amd64
-            libc: musl
-            cross_compile: true
+          # Actions analysis
+          - language: actions
+            build-mode: none
+            runner: ubuntu-latest
+            runner_name: "GH-ubuntu-latest"
+            ram: 16
+            cache: true
 
-          # Windows cross-compilation from Ubuntu
-          # Windows amd64 (64-bit x86) - Covers vast majority of Windows users
-          - runner: ubuntu-latest
-            os: windows
-            arch: amd64
-            name: windows-amd64
-            cross_compile: true
-
-          # Note: Windows 386 (32-bit) and ARM64 removed due to:
-          # - No rapidyenc cross-compilation scripts for these architectures
-          # - Windows 32-bit is legacy/deprecated
-          # - Windows ARM64 has minimal market share
-          # - Windows amd64 covers 95%+ of users
-
-          # macOS 15 ARM64 - Latest GA
-          - runner: macos-15
-            os: darwin
-            arch: arm64
-            name: macos-15-arm64
-            cross_compile: false
-
-          # macOS 14 ARM64 - Stable
-          - runner: macos-14
-            os: darwin
-            arch: arm64
-            name: macos-14-arm64
-            cross_compile: false
-
-          # macOS 26 ARM64 - Public Preview (Beta) - For early compatibility testing
-          - runner: macos-26
-            os: darwin
-            arch: arm64
-            name: macos-26-arm64-beta
-            cross_compile: false
 
     steps:
-      - name: Show actor
-        run: echo "Triggered by ${{ github.actor }}"
+    - name: Show actor
+      run: echo "Triggered by ${{ github.actor }}"
 
-      # Block unallowed push users
-      - name: Block unallowed push user
-        if: github.event_name == 'push' && github.actor != 'go-while'
-        run: |
-          echo "Push not allowed for user ${{ github.actor }}"
-          exit 1
+    # Block unallowed push users
+    - name: Block unallowed push user
+      if: github.event_name == 'push' && github.actor != 'go-while'
+      run: |
+        echo "Push not allowed for user ${{ github.actor }}"
+        exit 1
 
-      # Block unallowed PR users
-      - name: Block unallowed PR user
-        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
-        run: |
-          echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
-          exit 1
+    # Block unallowed PR users
+    - name: Block unallowed PR user
+      if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
+      run: |
+        echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
+        exit 1
 
-      - name: "Checkout code"
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: "Set up Go"
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.1'
-          cache: false
+    - name: Install build dependencies
+      if: matrix.language == 'c-cpp'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake ca-certificates curl git dpkg-dev wget
 
-      # Install system dependencies based on runner OS
-      - name: "Install build dependencies (Ubuntu)"
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ca-certificates curl git dpkg-dev wget
-          # For cross-compilation
-          if [ "${{ matrix.cross_compile }}" = "true" ]; then
-            case "${{ matrix.os }}-${{ matrix.arch }}" in
-              linux-arm64)
-                sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu g++-aarch64-linux-gnu
-                ;;
-              windows-amd64)
-                sudo apt-get install -y mingw-w64 gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
-                ;;
-              linux-amd64)
-                # For Alpine/musl builds
-                if [ "${{ matrix.libc }}" = "musl" ]; then
-                  sudo apt-get install -y musl-tools musl-dev
-                fi
-                ;;
-            esac
-          fi
+    - name: Set up Go
+      if: matrix.language == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+        cache: ${{ matrix.cache }}
 
-      - name: "Install build dependencies (macOS)"
-        if: runner.os == 'macOS'
-        run: |
-          brew install cmake
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        queries: ${{ matrix.language == 'c-cpp' && 'security-extended' || 'security-extended,security-and-quality' }}
+        ram: ${{ matrix.ram }}
 
-      - name: "Clone rapidyenc"
-        run: |
-          cd rapidyenc
-          if [ ! -e rapidyenc ]; then
-            ./clone_rapidyenc.sh
-            if [ ! -e rapidyenc/.git ]; then
-              echo "rapidyenc/ src not found, exiting"
-              exit 1
-            fi
-          else
-            echo "rapidyenc/ src exists, skipping clone"
-          fi
+    - name: Autobuild
+      if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
+      # Run the autobuild step only for Go jobs
+      uses: github/codeql-action/autobuild@v3
 
-      # Build rapidyenc for different platforms
-      - name: "Build rapidyenc (Linux amd64)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
-        timeout-minutes: 5
-        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-
-      - name: "Build rapidyenc (Linux arm64 cross-compile)"
-        if: matrix.os == 'linux' && matrix.arch == 'arm64' && matrix.cross_compile
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./build_rapidyenc_linux-arm64.sh
-          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "GOARCH=arm64" >> $GITHUB_ENV
-
-      - name: "Build rapidyenc (Windows amd64 cross-compile)"
-        if: matrix.os == 'windows' && matrix.arch == 'amd64'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
-          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "GOOS=windows" >> $GITHUB_ENV
-
-      - name: "Build rapidyenc (macOS)"
-        if: matrix.os == 'darwin'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
-          else
-            # For arm64, we might need to build natively or cross-compile
-            ./build_rapidyenc_linux-amd64.sh
-          fi
-
-      - name: "Build rapidyenc (Alpine/musl)"
-        if: matrix.libc == 'musl'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-          # Note: May need Alpine-specific build script
-
-      # Run tests with race detector for supported platforms
-      - name: "Run race detector tests (amd64/linux only)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
-        timeout-minutes: 5
-        run: go test -race ./rapidyenc/
-
-      - name: "Run normal tests (non-cross-compile platforms)"
-        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
-        timeout-minutes: 5
-        run: go test ./rapidyenc/
-
-      - name: "Skip tests for cross-compiled platforms"
-        if: matrix.cross_compile
-        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
-
-      - name: "Test rapidyenc integration"
-        if: ${{ !(matrix.cross_compile) }}
-        timeout-minutes: 2
-        run: |
-          # Build first if not cross-compiling
-          go build -o NZBreX -tags other .
-          ./NZBreX -testrapidyenc
-#      - name: Clean Go module cache
-#        run: |
-#          rm -rf ~/.cache/go-build ~/go/pkg/mod
-#      - name: Restore Go modules cache
-#        # your cache restore step here
-
-      - name: "Set up Go"
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.3'
-          cache: true
-
-      #- name: Cache Go modules
-      #  uses: actions/cache@v4
-      #  with:
-      #    path: |
-      #      ~/.cache/go-build
-      #      ~/go/pkg/mod
-      #    key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-      #    restore-keys: |
-      #      ${{ runner.os }}-go-
-
-      - name: "clone rapidyenc"
-        run: |
-          cd rapidyenc
-          if [ ! -e rapidyenc ]; then
-            ./clone_rapidyenc.sh
-            if [ ! -e rapidyenc/.git ]; then
-              echo "rapidyenc/ src not found, exiting"
-              exit 1
-            fi
-          else
-            echo "rapidyenc/ src exists, skipping clone"
-          fi
-
-      # Build rapidyenc for different platforms
-      - name: "Build rapidyenc (Linux amd64)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
-        timeout-minutes: 5
-        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-
-      - name: "Build rapidyenc (Linux arm64 cross-compile)"
-        if: matrix.os == 'linux' && matrix.arch == 'arm64' && matrix.cross_compile
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./build_rapidyenc_linux-arm64.sh
-          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "GOARCH=arm64" >> $GITHUB_ENV
-
-      - name: "Build rapidyenc (Windows amd64 cross-compile)"
-        if: matrix.os == 'windows' && matrix.arch == 'amd64'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
-          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "GOOS=windows" >> $GITHUB_ENV
-
-      - name: "Build rapidyenc (macOS)"
-        if: matrix.os == 'darwin'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
-          else
-            # For arm64, we might need to build natively or cross-compile
-            ./build_rapidyenc_linux-amd64.sh
-          fi
-
-      - name: "Build rapidyenc (Alpine/musl)"
-        if: matrix.libc == 'musl'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-          # Note: May need Alpine-specific build script
-
-      # Run tests with race detector for supported platforms
-      - name: "Run race detector tests (amd64/linux only)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
-        timeout-minutes: 5
-        run: go test -race ./rapidyenc/
-
-      - name: "Run normal tests (non-cross-compile platforms)"
-        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
-        timeout-minutes: 5
-        run: go test ./rapidyenc/
-
-      - name: "Skip tests for cross-compiled platforms"
-        if: matrix.cross_compile
-        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
-
-      - name: "Test rapidyenc integration"
-        if: ${{ !(matrix.cross_compile) }}
-        timeout-minutes: 2
-        run: |
-          # Build first if not cross-compiling
-          go build -o NZBreX -tags other .
-          ./NZBreX -testrapidyenc
-
-      - name: "Set GaRuS Variables"
-        id: vars
-        env:
-          XLIBC: ${{ matrix.libc }}
-          GITHUB_REF_TYPE: ${{ github.ref_type }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          echo "COMPILER=GHR" >> "$GITHUB_ENV"  # Changed from SHR to GHR (GitHub Runners)
-          # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
-          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            VERSION="${SAFE_VERSION}"
-          else
-            VERSION="${SAFE_VERSION}-SNAPSHOT"
-          fi
-          # Strip leading 'v' if present
-          VERSION="${VERSION#v}"
-          SHA7="${GITHUB_SHA::7}"
-          if [ -n "$XLIBC" ]; then
-            LIBC="-$XLIBC"  # libc or musl is set. prepend a - and use as final string
-          else
-            LIBC="-purego"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "SHA7=$SHA7" >> $GITHUB_ENV
-          echo "LIBC=$LIBC" >> $GITHUB_ENV
-
-      - name: Build ${{ matrix.name }}
-        run: |
-          set -euo pipefail
-          mkdir -p builds/${{ matrix.name }}/usr/bin
-          if [ "${{ matrix.os }}" == "windows" ]; then
-            binary_name=NZBreX.exe
-          else
-            binary_name=NZBreX
-          fi
-          echo "BINARY=$binary_name" >> $GITHUB_ENV
-          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
-          if [ ! -f cleanHeaders.txt ]; then
-            echo "cleanHeaders.txt not found! Build cannot continue." >&2
+    - name: Build (manual, for C/C++)
+      if: matrix.language == 'c-cpp' && matrix.build-mode != 'autobuild'
+      # Run the build step only for C/C++ jobs
+      timeout-minutes: 10
+      run: |
+        cd rapidyenc
+        if [ ! -e rapidyenc ]; then
+          ./clone_rapidyenc.sh
+          if [ ! -e rapidyenc/.git ]; then
+            echo "rapidyenc/ src not found, exiting"
             exit 1
           fi
-          if [ ! -f provider.sample.json ]; then
-            echo "provider.sample.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          if [ ! -f provider.ygg.json ]; then
-            echo "provider.ygg.json not found! Build cannot continue." >&2
-            exit 1
-          fi
-          # Use appropriate checksum commands based on OS
-          if [ "${{ runner.os }}" == "macOS" ]; then
-            shasum -a 256 builds/${{ matrix.name }}/usr/bin/$binary_name | awk '{print $1"  "$2}' > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-            shasum -a 512 builds/${{ matrix.name }}/usr/bin/$binary_name | awk '{print $1"  "$2}' > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-          else
-            sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-            sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-          fi
-          #
-          # packing the build
-          #
-          # .zip
-          pwd && ls -lha && echo ".zip Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
-          zip "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip" builds/${{ matrix.name }}/usr/bin/$binary_name builds/${{ matrix.name }}/usr/bin/$binary_name.sha* \
-              cleanHeaders.txt provider.sample.json provider.ygg.json \
-              LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
-          #
-          # .tgz (tar + gzip)
-          pwd && ls -lha && echo ".tgz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
-          tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
-            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
-            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
-            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
-          #
-          # .xz (tar + xz)
-          pwd && ls -lha && echo ".xz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
-          tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
-            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
-            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
-            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
-          #
-          # done packing
-          #
-          # Only make .deb packages for Linux with glibc
-          matrix_libc="${{ matrix.libc }}"
-          matrix_distro="${{ matrix.distro }}"
-          if [ "${{ matrix.os }}" == "linux" ] && [ "${{ matrix.libc }}" = "glibc" -o -z "${{ matrix.libc }}" ]; then
-            mkdir -p builds/${{ matrix.name }}/DEBIAN
-            VERSION=$(echo "${{ env.VERSION }}" | sed 's/^v//')
-            if [[ ! $VERSION =~ ^[0-9] ]]; then
-              VERSION="0.0.$(date +%s)-$VERSION"
-            fi
-            ARCH=${{ matrix.arch }}
-            echo "Package: NZBreX" > builds/${{ matrix.name }}/DEBIAN/control
-            echo "Version: ${VERSION}" >> builds/${{ matrix.name }}/DEBIAN/control
-            echo "Maintainer: ${{ github.repository_owner }} <nzbrex@usenet-server.com>" >> builds/${{ matrix.name }}/DEBIAN/control
-            echo "Architecture: ${ARCH}" >> builds/${{ matrix.name }}/DEBIAN/control
-            echo "Description: NZBreX - a cmd line tool to re-upload articles missing from providers" >> builds/${{ matrix.name }}/DEBIAN/control
-            dpkg-deb --root-owner-group --build builds/${{ matrix.name }} NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
-          fi
+        else
+          echo "rapidyenc/ src exists, skipping clone"
+        fi
+        ./build_rapidyenc_linux-amd64.sh
 
-      # Private GaRuS upload commented out - only accessible from self-hosted runners
-      # The following upload section is commented out because it's only accessible from self-hosted runners
-      # Uncomment when using self-hosted runners with access to the private upload server
-      #- name: "Upload binary to private GaRuS (Git-actions-Runner-upload-Server)"
-      #  run: |
-      #    upload_with_retry() {
-      #      local file="$1"
-      #      local filename="$2"
-      #      local attempt=1
-      #      local delay=30
-      #      local max_attempts=30
-      #      local FNstr=""
-      #      if [ -n "$filename" ]; then
-      #        # filename to use has been supplied in $2
-      #        FNstr=";filename=$filename"
-      #      fi
-      #      size=$(du -b $file|cut -f1)
-      #      human=$(du -h $file)
-      #      while [ $attempt -le $max_attempts ]; do
-      #        test $attempt -gt 1 && echo "Upload attempt $attempt for $file..."
-      #        if curl --silent -f -F "file=@$file$FNstr" \
-      #             -H "X-Git-Repo: ${{ github.repository }}" \
-      #             -H "X-Git-Ref: ${{ env.VERSION }}" \
-      #             -H "X-Git-SHA7: ${{ env.SHA7 }}" \
-      #             -H "X-Git-Comp: ${{ env.COMPILER }}" \
-      #             -H "X-Git-MATRIX: ${{ matrix.name }}" \
-      #             -H "X-Auth-Token: ${{ secrets.BUILD_TEST_UPLOAD_TOKEN }}" \
-      #             http://10.20.0.1:58080/upload.php; then
-      #          echo "Upload succeeded for $file size=$size [$human]"
-      #          return 0
-      #        else
-      #          echo "Upload failed for $file. Retrying in $delay seconds..."
-      #          sleep $delay
-      #          attempt=$(( attempt + 1 ))
-      #        fi
-      #      done
-      #      echo "Upload failed for $file after $max_attempts attempts."
-      #      return 1
-      #    }
-      #    set -e
-      #    for ext in zip deb tgz xz; do
-      #      file="NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.${ext}"
-      #      if [ -e "$file" ]; then
-      #        for algo in 256 512; do
-      #          sha="sha${algo}sum"
-      #          $sha "$file" > "$file.$sha"
-      #          echo -e "\n$file.$sha"
-      #          cat "$file.$sha" | cut -d" " -f1
-      #          upload_with_retry "$file.$sha"
-      #        done
-      #        upload_with_retry "$file"
-      #      fi
-      #    done
-      #    # catch the hash sums of the binary files for uploading
-      #    sha256file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha256sum"
-      #    sha512file="builds/${{ matrix.name }}/usr/bin/${{ env.BINARY }}.sha512sum"
-      #    # finally rename the sha sums to good filenames
-      #    cp -v "$sha256file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
-      #    cp -v "$sha512file" "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
-      #    upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum"
-      #    upload_with_retry "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum"
-      #    #
-      #    DIST="dist.${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.$(hostname).tar.gz"
-      #    if [ -e "$DIST" ]; then
-      #      echo "$DIST already exists. Skipping tar."
-      #    else
-      #      ls -lha
-      #      tar -czvf "$DIST" builds/
-      #      echo "Created $DIST from builds/"
-      #      du -b "$DIST"; du -hs "$DIST";
-      #      sha256sum "$DIST" > "${DIST}.sha256sum"
-      #      sha512sum "$DIST" > "${DIST}.sha512sum"
-      #      upload_with_retry "${DIST}.sha512sum"
-      #      upload_with_retry "${DIST}.sha256sum"
-      #      upload_with_retry "${DIST}"
-      #    fi
-
-      # GitHub Artifacts upload for builds (optional - can be enabled if needed)
-      - name: "Upload Binary to GitHub Artifacts"
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.name }}
-          path: |
-            builds/${{ matrix.name }}/usr/bin/*
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.*
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: "Upload Release Assets to github"
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
-        with:
-          files: |
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
