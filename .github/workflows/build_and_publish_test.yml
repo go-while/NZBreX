@@ -174,6 +174,7 @@ jobs:
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOARCH=arm64" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (Windows amd64 cross-compile)"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
@@ -182,6 +183,7 @@ jobs:
           cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
           echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOOS=windows" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (macOS)"
         if: matrix.os == 'darwin'
@@ -208,10 +210,14 @@ jobs:
         timeout-minutes: 5
         run: go test -race ./rapidyenc/
 
-      - name: "Run normal tests (other platforms)"
-        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile) }}
+      - name: "Run normal tests (non-cross-compile platforms)"
+        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         timeout-minutes: 5
         run: go test ./rapidyenc/
+
+      - name: "Skip tests for cross-compiled platforms"
+        if: matrix.cross_compile
+        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
 
       - name: "Test rapidyenc integration"
         if: ${{ !(matrix.cross_compile) }}
@@ -269,6 +275,7 @@ jobs:
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOARCH=arm64" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (Windows amd64 cross-compile)"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
@@ -277,6 +284,7 @@ jobs:
           cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
           echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOOS=windows" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (macOS)"
         if: matrix.os == 'darwin'
@@ -303,10 +311,14 @@ jobs:
         timeout-minutes: 5
         run: go test -race ./rapidyenc/
 
-      - name: "Run normal tests (other platforms)"
-        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile) }}
+      - name: "Run normal tests (non-cross-compile platforms)"
+        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         timeout-minutes: 5
         run: go test ./rapidyenc/
+
+      - name: "Skip tests for cross-compiled platforms"
+        if: matrix.cross_compile
+        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
 
       - name: "Test rapidyenc integration"
         if: ${{ !(matrix.cross_compile) }}
