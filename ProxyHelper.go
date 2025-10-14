@@ -314,7 +314,11 @@ func (ps *ProxySession) Close() {
 	ps.Username = ""  // Clear username to avoid dangling pointer
 	ps.Password = ""  // Clear username to avoid dangling pointer
 	ps.ExpireAt = 0   // Clear expiration time
-	log.Printf("Closed session for user '%s'", ps.Username)
+	username := ps.Username // Store username for logging
+	ps.Username = ""  // Clear username to avoid dangling pointer
+	ps.Password = ""  // Clear username to avoid dangling pointer
+	ps.ExpireAt = 0   // Clear expiration time
+	log.Printf("Closed session for user '%s'", username)
 }
 
 func (ps *ProxySession) IsExpired() (isExpired bool) {

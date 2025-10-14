@@ -179,7 +179,7 @@ func ParseFlags() {
 		if err := addUserToProxyPasswdFile(userData, newPasswdFile); err != nil {
 			log.Fatalf("Failed to add user to %s: %v", newPasswdFile, err)
 		}
-		log.Printf("User '%s':\n %#v \n added to new passwd file: '%s'. Next reload in <60s", username, userData, newPasswdFile)
+		// Redact password before logging
 		os.Exit(0)
 	}
 	// test rapidyenc decoder

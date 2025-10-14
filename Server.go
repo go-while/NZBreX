@@ -42,7 +42,9 @@ func handleConnection(conn net.Conn) {
 				CountConns[s.Username]--
 				log.Printf("Decremented connection count for user '%s'. Active connections: %d", currentUser, CountConns[currentUser])
 			} else {
-				log.Printf("Connection count for user '%s' was already 0 or less, not decrementing. This might indicate an issue.", currentUser)
+				log.Printf("Decremented connection count for user '%s'. Active connections: %d", s.Username, CountConns[s.Username])
+			} else {
+				log.Printf("Connection count for user '%s' was already 0 or less, not decrementing. This might indicate an issue.", s.Username)
 			}
 			// ProxySessions is used to track this specific session, remove it here.
 			delete(ProxySessions, s.Username)
@@ -64,7 +66,6 @@ func handleConnection(conn net.Conn) {
 		ps.Username = ""             // Clear username to avoid dangling pointer
 		ps.ConnectedAt = time.Time{} // Clear timestamp to avoid dangling pointer
 		ps.LastCmd = time.Time{}     // Clear last command time to avoid dangling pointer
-		ps = nil                     // Clear session to avoid dangling pointer
 	}(ps)
 
 	// Send initial welcome message (RFC 3977: 200 or 201)
