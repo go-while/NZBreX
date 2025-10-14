@@ -66,7 +66,6 @@ func handleConnection(conn net.Conn) {
 		ps.Username = ""             // Clear username to avoid dangling pointer
 		ps.ConnectedAt = time.Time{} // Clear timestamp to avoid dangling pointer
 		ps.LastCmd = time.Time{}     // Clear last command time to avoid dangling pointer
-		ps = nil                     // Clear session to avoid dangling pointer
 	}(ps)
 
 	// Send initial welcome message (RFC 3977: 200 or 201)
