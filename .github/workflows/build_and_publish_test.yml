@@ -3,18 +3,24 @@ name: "Build and Publish (GitHub Runners)"
 on:
   push:
     branches:
-      - main
-      - 'testing'
+    #  - main
+      - testing
     tags:
-      - "testing"
+      - testing
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
   repository_dispatch:
-  pull_request:
-    branches:
-      - main
-      - "test*"
+    types: [build]
+  #pull_request:
+  #  branches:
+  #    - main
+  #    - "test*"
 
 permissions:
   contents: write
@@ -31,27 +37,19 @@ jobs:
       matrix:
         include:
           # Linux builds using GitHub runners
-          # Ubuntu 20.04 amd64 (glibc)
-          - runner: ubuntu-20.04
+          # Ubuntu 24.04 amd64 (glibc) - Latest GA
+          - runner: ubuntu-24.04
             os: linux
             arch: amd64
-            name: ubuntu-20.04-amd64
+            name: ubuntu-24.04-amd64
             libc: glibc
             cross_compile: false
 
-          # Ubuntu 22.04 amd64 (glibc)
+          # Ubuntu 22.04 amd64 (glibc) - Stable LTS
           - runner: ubuntu-22.04
             os: linux
             arch: amd64
             name: ubuntu-22.04-amd64
-            libc: glibc
-            cross_compile: false
-
-          # Ubuntu latest amd64 (glibc)
-          - runner: ubuntu-latest
-            os: linux
-            arch: amd64
-            name: ubuntu-latest-amd64
             libc: glibc
             cross_compile: false
 
@@ -72,23 +70,38 @@ jobs:
             cross_compile: true
 
           # Windows cross-compilation from Ubuntu
+          # Windows amd64 (64-bit x86) - Covers vast majority of Windows users
           - runner: ubuntu-latest
             os: windows
             arch: amd64
             name: windows-amd64
             cross_compile: true
 
-          # macOS builds
-          - runner: macos-13
+          # Note: Windows 386 (32-bit) and ARM64 removed due to:
+          # - No rapidyenc cross-compilation scripts for these architectures
+          # - Windows 32-bit is legacy/deprecated
+          # - Windows ARM64 has minimal market share
+          # - Windows amd64 covers 95%+ of users
+
+          # macOS 15 ARM64 - Latest GA
+          - runner: macos-15
             os: darwin
-            arch: amd64
-            name: macos-amd64
+            arch: arm64
+            name: macos-15-arm64
             cross_compile: false
 
+          # macOS 14 ARM64 - Stable
           - runner: macos-14
             os: darwin
             arch: arm64
-            name: macos-arm64
+            name: macos-14-arm64
+            cross_compile: false
+
+          # macOS 26 ARM64 - Public Preview (Beta) - For early compatibility testing
+          - runner: macos-26
+            os: darwin
+            arch: arm64
+            name: macos-26-arm64-beta
             cross_compile: false
 
     steps:
@@ -115,8 +128,8 @@ jobs:
       - name: "Set up Go"
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          go-version: '1.25.1'
+          cache: false
 
       # Install system dependencies based on runner OS
       - name: "Install build dependencies (Ubuntu)"
@@ -174,6 +187,7 @@ jobs:
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOARCH=arm64" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (Windows amd64 cross-compile)"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
@@ -182,6 +196,7 @@ jobs:
           cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
           echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOOS=windows" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (macOS)"
         if: matrix.os == 'darwin'
@@ -208,10 +223,14 @@ jobs:
         timeout-minutes: 5
         run: go test -race ./rapidyenc/
 
-      - name: "Run normal tests (other platforms)"
-        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile) }}
+      - name: "Run normal tests (non-cross-compile platforms)"
+        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         timeout-minutes: 5
         run: go test ./rapidyenc/
+
+      - name: "Skip tests for cross-compiled platforms"
+        if: matrix.cross_compile
+        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
 
       - name: "Test rapidyenc integration"
         if: ${{ !(matrix.cross_compile) }}
@@ -229,18 +248,18 @@ jobs:
       - name: "Set up Go"
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version: '1.24.3'
           cache: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+      #- name: Cache Go modules
+      #  uses: actions/cache@v4
+      #  with:
+      #    path: |
+      #      ~/.cache/go-build
+      #      ~/go/pkg/mod
+      #    key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      #    restore-keys: |
+      #      ${{ runner.os }}-go-
 
       - name: "clone rapidyenc"
         run: |
@@ -269,6 +288,7 @@ jobs:
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOARCH=arm64" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (Windows amd64 cross-compile)"
         if: matrix.os == 'windows' && matrix.arch == 'amd64'
@@ -277,6 +297,7 @@ jobs:
           cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
           echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "GOOS=windows" >> $GITHUB_ENV
 
       - name: "Build rapidyenc (macOS)"
         if: matrix.os == 'darwin'
@@ -303,10 +324,14 @@ jobs:
         timeout-minutes: 5
         run: go test -race ./rapidyenc/
 
-      - name: "Run normal tests (other platforms)"
-        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile) }}
+      - name: "Run normal tests (non-cross-compile platforms)"
+        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
         timeout-minutes: 5
         run: go test ./rapidyenc/
+
+      - name: "Skip tests for cross-compiled platforms"
+        if: matrix.cross_compile
+        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
 
       - name: "Test rapidyenc integration"
         if: ${{ !(matrix.cross_compile) }}
@@ -368,10 +393,18 @@ jobs:
             echo "provider.ygg.json not found! Build cannot continue." >&2
             exit 1
           fi
-          sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-          cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
-          sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
-          cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+          # Use appropriate checksum commands based on OS
+          if [ "${{ runner.os }}" == "macOS" ]; then
+            shasum -a 256 builds/${{ matrix.name }}/usr/bin/$binary_name | awk '{print $1"  "$2}' > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
+            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
+            shasum -a 512 builds/${{ matrix.name }}/usr/bin/$binary_name | awk '{print $1"  "$2}' > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+          else
+            sha256sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
+            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha256sum
+            sha512sum builds/${{ matrix.name }}/usr/bin/$binary_name > builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+            cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
+          fi
           #
           # packing the build
           #
