@@ -151,9 +151,28 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
-		// item has been read from cache
-		//DecreaseDLQueueCnt() // decrease when read from cache // DISABLED
-		//memlim.MemReturn(who+":cacheRead", item)
+		// item has been read from cache - set flags as if downloaded
+		// Mark all providers in this group as having the article
+	flagProviderCache:
+		for pid, prov := range s.providerList {
+			if prov.Group != provider.Group {
+				continue flagProviderCache
+			}
+			item.mux.Lock()
+			item.availableOn[pid] = true
+			delete(item.missingOn, pid)
+			item.mux.Unlock()
+		}
+
+		item.mux.Lock()
+		item.flagisDL = true
+		item.flaginDL = false
+		item.flaginDLMEM = false
+		item.mux.Unlock()
+
+		// Free memory slot immediately since no actual download happens
+		who := fmt.Sprintf("DR=%d@'%s'#'%s' seg.Id='%s'", wid, provider.Name, provider.Group, item.segment.Id)
+		memlim.MemReturn(who+":cacheRead", item)
 		return 920, nil
 	}
 	start := time.Now() // start time for this routine
@@ -242,6 +261,11 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 		// pass item to cache.
 		dlog(cfg.opt.DebugWorker, "DEBUG GoDownsRoutine CMD_ARTICLE: reached cache.Add2Cache seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
+
+		// Release memory BEFORE adding to cache to prevent deadlock
+		// Cache writer will not release memory since we already did it here
+		memlim.MemReturn("GoDownsRoutine:beforeCache", item)
+
 		cache.Add2Cache(item)
 		// pass to ParkConn
 

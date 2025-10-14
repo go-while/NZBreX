@@ -876,8 +876,14 @@ readlines:
 				dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc yenc.Part.Validate OK seg.Id='%s' @ '%s' part.Body=%d Number=%d crc32=%x", item.segment.Id, connitem.c.provider.Name, len(part.Body), part.Number, part.Crc32)
 			} // end if cfg.opt.DoubleCheckRapidYencCRC
 
-			// Now write to cache
-			cache.WriteYenc(item, part)
+			// Now write to cache (only if yencout flag is enabled)
+			if cfg.opt.YencWrite && cacheON {
+				cache.WriteYenc(item, part)
+			} else {
+				// Free memory if not writing to cache
+				part.Body = nil
+				part = nil
+			}
 		} // end switch yencTest
 		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d brokenYenc=%t seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, brokenYenc, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
 		if isBadCrc || brokenYenc {

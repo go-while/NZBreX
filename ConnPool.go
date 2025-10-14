@@ -266,7 +266,7 @@ func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (
 			conn.Close()
 		}
 		dlog(always, "ERROR AUTH#1 Cmd(AUTHINFO USER ...) '%s' retry in %.0fs err='%v' ", c.provider.Name, DefaultConnectErrSleep.Seconds(), err)
-		//time.Sleep(DefaultConnectErrSleep)
+		time.Sleep(DefaultConnectErrSleep)
 		return nil, err
 	}
 	time2 := time.Now()
@@ -290,7 +290,7 @@ func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (
 			conn.Close()
 		}
 		dlog(always, "ERROR AUTH#3 Cmd(AUTHINFO PASS ...) '%s' retry in %.0fs err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), err)
-		//time.Sleep(DefaultConnectErrSleep)
+		time.Sleep(DefaultConnectErrSleep)
 		return nil, err
 	}
 	time4 := time.Now()
@@ -303,7 +303,7 @@ func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (
 			conn.Close()
 		}
 		dlog(always, "ERROR AUTH#4 ReadCodeLine(281) '%s' retry in %.0fs code=%d msg='%s' err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, msg, err)
-		//time.Sleep(DefaultConnectErrSleep)
+		time.Sleep(DefaultConnectErrSleep)
 		return nil, err
 	}
 	time5 := time.Now()
@@ -320,13 +320,12 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 		// another routine was faster...
 		dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: another routine was faster! openConns=%d provider.MaxConns=%d '%s'", c.openConns, c.provider.MaxConns, c.provider.Name)
 		c.mux.Unlock() // mutex c459a
-		err = fmt.Errorf("retry getConn, not newConn! all conns are already established")
-		return
+		return nil, fmt.Errorf("retry getConn, not newConn! all conns are already established")
 	}
 	if c.openConns < c.provider.MaxConns {
 		dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: connect to '%s' openConns=%d provider.MaxConns=%d", c.provider.Name, c.openConns, c.provider.MaxConns)
-		c.openConns++
 		openConnsBefore := c.openConns
+		c.openConns++
 		c.mux.Unlock() // mutex c459a
 		start := time.Now()
 		// connect to the provider
@@ -336,11 +335,9 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 				if err != nil || connitem == nil || connitem.conn == nil {
 					continue // retry connect
 				}
-				if cfg.opt.DebugConnPool {
-					c.mux.RLock() // mutex c461
-					dlog(always, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
-					c.mux.RUnlock() // mutex c461
-				}
+				c.mux.RLock() // mutex c461
+				dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
+				c.mux.RUnlock() // mutex c461
 				// we have a new connection!
 				GCounter.Incr("TOTAL_NewConns")
 				return // established new connection and returns connitem
@@ -351,24 +348,22 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 				if err != nil || connitem == nil || connitem.conn == nil {
 					continue // retry connect
 				}
-				if cfg.opt.DebugConnPool {
-					c.mux.RLock() // mutex c461
-					dlog(always, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
-					c.mux.RUnlock() // mutex c461
-				}
+				c.mux.RLock() // mutex c461
+				dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
+				c.mux.RUnlock() // mutex c461
 				// we have a new connection!
 				GCounter.Incr("TOTAL_NewConns")
-				return // established new connection and returns connitem
+				return connitem, nil // established new connection and returns connitem
 			}
 		}
 		c.mux.Lock() // mutex c460
 		c.openConns--
 		dlog(always, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
 		c.mux.Unlock() // mutex c460
-		return
+		return nil, fmt.Errorf("error in ConnPool NewConn: connect failed '%s' err='%v'", c.provider.Name, err)
 	}
 	c.mux.Unlock() // mutex c459a
-	return
+	return nil, fmt.Errorf("error in ConnPool NewConn: openConns=%d > provider.MaxConns", c.openConns)
 } // end func NewConn
 
 func (c *ConnPool) GetConn() (connitem *ConnItem, err error) {

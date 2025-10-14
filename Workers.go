@@ -270,6 +270,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 			case 920: // 920 is a special code for GoDownsRoutine to indicate that the item has been read from cache
 				mode = "cache read"
+				// Memory was already returned in GoDownsRoutine for cache reads
 			}
 
 			dlog(cfg.opt.DebugWorker && cfg.opt.BUG, "GoDownsRoutine: %s (wid=%d) seg.Id='%s' @ '%s' took='%v' speedInKBytes=%.2f", mode, wid, item.segment.Id, provider.Name, time.Since(StartDowns), speedInKBytes)
@@ -459,7 +460,7 @@ providerDl:
 			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] pushed to dlchan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			return // return after 1st push!
 		default:
-			dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full @ #'%s'", s.providerList[pid].Group)
+			dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full @ #'%s', retry next", s.providerList[pid].Group)
 			// chan is full means we cannot push the item to the download queue to this provider group
 			// either app is blocked or we're just checking faster than we can download at all...
 			//err = fmt.Errorf(" | [DV-pushDL] chans full @ '%s'#'%s'", s.providerList[pid].Name, s.providerList[pid].Group)
@@ -594,61 +595,7 @@ func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sy
 
 	// strings
 	var logstring, log00, log01, log02, log03, log04, log05, log06, log07, log08, log09, log10, log11, log99 string
-	/*
-		go func(s *SESSION) {
-			if !testing {
-				return
-			}
-			//var funcmux sync.Mutex
-			//inup, indl, nodl, noup, inretry := uint64(0), uint64(0), uint64(0), uint64(0), uint64(0)
-			//replychan := make(chan bool, 1) // internal replychan for the worker loop
-			for {
-				wrappedItem := <-s.WorkDividerChan
-				item := wrappedItem.wItem // unwrap the item from the channel
-				item.mux.RLock()
-				if item.checkedOn != providersCnt {
-					//dlog( " | [DV] WorkDividerChan debug#1 received item seg.Id='%s' checkedOn=%d", item.segment.Id, item.checkedOn)
-					item.mux.RUnlock()
-					continue // ignore item, will retry next run
-				}
-				item.mux.RUnlock()
-				if wrappedItem.src != "CR" {
-					dlog( " | [DV] WorkDividerChan debug#2 received item seg.Id='%s' checkedOn=%d src=%s", item.segment.Id, item.checkedOn, wrappedItem.src)
-				}
 
-				switch wrappedItem.src {
-
-				case "DR":
-					go func(item *segmentChanItem) {
-						for {
-							pushedUp, nNoUp, nInRetry := s.pushUP(allowUp, item)
-							if pushedUp {
-								dlog( " | [DV] PUSHED to Up seg.Id='%s' pushedUp=%t nNoUp=%d nInRetry=%d", item.segment.Id, pushedUp, nNoUp, nInRetry)
-								break
-							}
-							dlog( " | [DV] WorkDividerChan retrying pushUP seg.Id='%s'", item.segment.Id)
-							time.Sleep(1000 * time.Millisecond) // wait a bit before retrying
-						}
-					}(item)
-
-				case "CR":
-					go func(item *segmentChanItem) {
-						for {
-							pushedDl, nNoDl := s.pushDL(allowDl, item)
-							if pushedDl {
-								if cfg.opt.BUG {
-									dlog( " | [DV] PUSHED to DL seg.Id='%s' pushedDl=%t nNoDl=%d", item.segment.Id, pushedDl, nNoDl)
-								}
-								break
-							}
-							dlog( " | [DV] WorkDividerChan retrying pushDL seg.Id='%s'", item.segment.Id)
-							time.Sleep(1000 * time.Millisecond) // wait a bit before retrying
-						}
-					}(item)
-				} // end switch wrappedItem.src
-			}
-		}(s)
-	*/
 	// loops forever over the s.segmentList and checks if there is anything to do for an item
 	var minsleep int64 = 10 // 0.01 second in milliseconds
 	var baseline int64 = 1000
