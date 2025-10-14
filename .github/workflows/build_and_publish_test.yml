@@ -349,15 +349,27 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SHA: ${{ github.sha }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           echo "COMPILER=GHR" >> "$GITHUB_ENV"  # Changed from SHR to GHR (GitHub Runners)
-          # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
-          SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
+
+          # Determine version based on event type and inputs
+          if [[ -n "$INPUT_VERSION" ]]; then
+            # Use version from workflow_dispatch or repository_dispatch input
+            VERSION="$INPUT_VERSION"
+            echo "SHOULD_RELEASE=true" >> $GITHUB_ENV
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            # Use tag name for tagged releases
+            SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
             VERSION="${SAFE_VERSION}"
+            echo "SHOULD_RELEASE=true" >> $GITHUB_ENV
           else
+            # Default to branch name with SNAPSHOT suffix
+            SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
             VERSION="${SAFE_VERSION}-SNAPSHOT"
+            echo "SHOULD_RELEASE=false" >> $GITHUB_ENV
           fi
+
           # Strip leading 'v' if present
           VERSION="${VERSION#v}"
           SHA7="${GITHUB_SHA::7}"
@@ -537,13 +549,17 @@ jobs:
           if-no-files-found: warn
 
       - name: "Upload Release Assets to github"
-        if: github.event_name == 'release'
+        if: env.SHOULD_RELEASE == 'true'
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
+          tag_name: v${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: ${{ contains(env.VERSION, 'test') || contains(env.VERSION, 'beta') || contains(env.VERSION, 'alpha') }}
           files: |
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.xz
+            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
