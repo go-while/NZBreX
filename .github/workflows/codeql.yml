@@ -1,20 +1,22 @@
 name: "Build and Publish (GitHub Runners)"
 
 on:
-  push:
-    branches:
-    #  - main
-      - testing
-    tags:
-      - testing
-  release:
-    types: [published]
+  #push:
+  #  branches:
+  #    - main
+  #    - testing
+  #  tags:
+  #    - testing
+  #release:
+  #  types: [published]
   workflow_dispatch:
-  repository_dispatch:
+  #repository_dispatch:
   #pull_request:
   #  branches:
   #    - main
-  #    - "test*"
+  #    - testing
+  #schedule:
+  #  - cron: '30 05 * * 1'
 
 permissions:
   contents: write
