@@ -31,6 +31,14 @@ jobs:
       matrix:
         include:
           # Linux builds using GitHub runners
+          # Ubuntu 20.04 amd64 (glibc)
+          - runner: ubuntu-20.04
+            os: linux
+            arch: amd64
+            name: ubuntu-20.04-amd64
+            libc: glibc
+            cross_compile: false
+
           # Ubuntu 22.04 amd64 (glibc)
           - runner: ubuntu-22.04
             os: linux
@@ -221,29 +229,17 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-          cache: false
-          # if your self-hosted runners are not reset (i.e., they persist their workspace and their Go module cache between jobs),
-          # using the GitHub Actions dependency cache provides little to no benefit.
-          # In fact, it can sometimes cause issues (like stale or conflicting cache states)
-          # and may slow down your pipeline due to unnecessary cache save/restore steps.
-          # On self-hosted runners where the module cache persists between jobs,
-          # letting Go’s native cache do its job is almost always faster and more reliable.
-          # Results with 44 jobs:
-          #  Before (with Actions cache): ~8 minutes
-          #  After (cache: false): ~2m 27s
+          cache: true
 
-#      - name: Cache Go modules
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            ~/.cache/go-build
-#            ~/go/pkg/mod
-#          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-#          restore-keys: |
-#            ${{ runner.os }}-go-
-
-#      - name: "Restore go cache"
-#        run: runner/go-cache-restore.sh
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: "clone rapidyenc"
         run: |
@@ -258,45 +254,66 @@ jobs:
             echo "rapidyenc/ src exists, skipping clone"
           fi
 
-      - name: "compile rapidyenc linux-amd64"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64'
+      # Build rapidyenc for different platforms
+      - name: "Build rapidyenc (Linux amd64)"
+        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
+        timeout-minutes: 5
         run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
 
-      #- name: "compile rapidyenc linux-386"
-      #  if: matrix.os == 'linux' && matrix.arch == '386'
-      #  run: cd rapidyenc && ./build_rapidyenc_linux-386.sh
-
-      - name: "compile rapidyenc windows-amd64"
-        if: matrix.os == 'windows' && matrix.arch == 'amd64'
-        run: |
-          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
-          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-
-      - name: "compile rapidyenc linux-arm64"
-        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+      - name: "Build rapidyenc (Linux arm64 cross-compile)"
+        if: matrix.os == 'linux' && matrix.arch == 'arm64' && matrix.cross_compile
+        timeout-minutes: 5
         run: |
           cd rapidyenc && ./build_rapidyenc_linux-arm64.sh
           echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
 
-      #- name: "Set up Win386 cross-compiler"
-      #  if: matrix.goarch == '386' && matrix.os == 'windows'
-      #  run: |
-      #    cd rapidyenc && ./build_rapidyenc_win_386.sh
-      #    echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-      #    echo "CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
-      #    echo "CGO_ENABLED=1" >> $GITHUB_ENV
+      - name: "Build rapidyenc (Windows amd64 cross-compile)"
+        if: matrix.os == 'windows' && matrix.arch == 'amd64'
+        timeout-minutes: 5
+        run: |
+          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
+          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+
+      - name: "Build rapidyenc (macOS)"
+        if: matrix.os == 'darwin'
+        timeout-minutes: 5
+        run: |
+          cd rapidyenc
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
+          else
+            # For arm64, we might need to build natively or cross-compile
+            ./build_rapidyenc_linux-amd64.sh
+          fi
+
+      - name: "Build rapidyenc (Alpine/musl)"
+        if: matrix.libc == 'musl'
+        timeout-minutes: 5
+        run: |
+          cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
+          # Note: May need Alpine-specific build script
 
       # Run tests with race detector for supported platforms
-      #- name: "Run race detector tests (amd64/linux only)"
-      #  if: matrix.os == 'linux' && matrix.arch == 'amd64'
-      #  run: go test -race ./...
+      - name: "Run race detector tests (amd64/linux only)"
+        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
+        timeout-minutes: 5
+        run: go test -race ./rapidyenc/
 
-      #- name: "Run normal tests (other platforms)"
-      #  if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
-      #  run: go test ./...
+      - name: "Run normal tests (other platforms)"
+        if: ${{ !(matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile) }}
+        timeout-minutes: 5
+        run: go test ./rapidyenc/
+
+      - name: "Test rapidyenc integration"
+        if: ${{ !(matrix.cross_compile) }}
+        timeout-minutes: 2
+        run: |
+          # Build first if not cross-compiling
+          go build -o NZBreX -tags other .
+          ./NZBreX -testrapidyenc
 
       - name: "Set GaRuS Variables"
         id: vars
@@ -307,6 +324,7 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
+          echo "COMPILER=GHR" >> "$GITHUB_ENV"  # Changed from SHR to GHR (GitHub Runners)
           # If event is tag or release, use the tag; otherwise, use 0.0.0-SNAPSHOT
           SAFE_VERSION="$(echo "${GITHUB_REF_NAME}" | sed 's|/|-|g')"
           if [[ "${GITHUB_REF_TYPE}" == "tag" || "${GITHUB_EVENT_NAME}" == "release" ]]; then
