@@ -64,26 +64,18 @@ jobs:
             cross_compile: true
 
           # Windows cross-compilation from Ubuntu
-          # Windows amd64 (64-bit x86)
+          # Windows amd64 (64-bit x86) - Covers vast majority of Windows users
           - runner: ubuntu-latest
             os: windows
             arch: amd64
             name: windows-amd64
             cross_compile: true
 
-          # Windows 386 (32-bit x86)
-          - runner: ubuntu-latest
-            os: windows
-            arch: 386
-            name: windows-386
-            cross_compile: true
-
-          # Windows ARM64
-          - runner: ubuntu-latest
-            os: windows
-            arch: arm64
-            name: windows-arm64
-            cross_compile: true
+          # Note: Windows 386 (32-bit) and ARM64 removed due to:
+          # - No rapidyenc cross-compilation scripts for these architectures
+          # - Windows 32-bit is legacy/deprecated
+          # - Windows ARM64 has minimal market share
+          # - Windows amd64 covers 95%+ of users
 
           # macOS 15 ARM64 - Latest GA
           - runner: macos-15
