@@ -212,7 +212,8 @@ jobs:
           cd rapidyenc
           if [ "${{ matrix.arch }}" = "amd64" ]; then
             ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh darwin
-          else if [ "${{ matrix.arch }}" = "arm64" ]; then
+          fi
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
             ./build_rapidyenc_linux-arm64.sh darwin
           fi
 

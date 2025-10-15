@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+echo "run: $0 $1"
 cd rapidyenc || exit 2
 rm -rf build
 mkdir -p build
