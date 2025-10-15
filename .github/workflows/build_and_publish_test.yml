@@ -302,7 +302,7 @@ jobs:
             ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
           else
             # For arm64, we might need to build natively or cross-compile
-            ./build_rapidyenc_linux-arm64.sh
+            ./build_rapidyenc_linux-arm64.sh darwin
           fi
 
       - name: "Build rapidyenc (Alpine/musl)"
