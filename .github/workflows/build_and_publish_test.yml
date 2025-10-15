@@ -227,93 +227,6 @@ jobs:
           # Build first if not cross-compiling
           go build -o NZBreX -tags other .
           ./NZBreX -testrapidyenc
-#      - name: Clean Go module cache
-#        run: |
-#          rm -rf ~/.cache/go-build ~/go/pkg/mod
-#      - name: Restore Go modules cache
-#        # your cache restore step here
-
-      #- name: Cache Go modules
-      #  uses: actions/cache@v4
-      #  with:
-      #    path: |
-      #      ~/.cache/go-build
-      #      ~/go/pkg/mod
-      #    key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-      #    restore-keys: |
-      #      ${{ runner.os }}-go-
-
-      - name: "clone rapidyenc"
-        run: |
-          cd rapidyenc
-          if [ ! -e rapidyenc ]; then
-            ./clone_rapidyenc.sh
-            if [ ! -e rapidyenc/.git ]; then
-              echo "rapidyenc/ src not found, exiting"
-              exit 1
-            fi
-          else
-            echo "rapidyenc/ src exists, skipping clone"
-          fi
-
-      # Build rapidyenc for different platforms
-      - name: "Build rapidyenc (Linux amd64)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
-        timeout-minutes: 5
-        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-
-      - name: "Build rapidyenc (Linux arm64 cross-compile)"
-        if: matrix.os == 'linux' && matrix.arch == 'arm64' && matrix.cross_compile
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./build_rapidyenc_linux-arm64.sh
-          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "GOARCH=arm64" >> $GITHUB_ENV
-
-      - name: "Build rapidyenc (Windows amd64 cross-compile)"
-        if: matrix.os == 'windows' && matrix.arch == 'amd64'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./crossbuild_rapidyenc_windows-amd64.sh
-          echo "CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-          echo "CGO_ENABLED=1" >> $GITHUB_ENV
-          echo "GOOS=windows" >> $GITHUB_ENV
-
-      - name: "Build rapidyenc (macOS)"
-        if: matrix.os == 'darwin'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh darwin
-          else if [ "${{ matrix.arch }}" = "arm64" ]; then
-            ./build_rapidyenc_linux-arm64.sh darwin
-          fi
-
-      # Run tests with race detector for supported platforms
-      - name: "Run race detector tests (amd64/linux only)"
-        if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
-        timeout-minutes: 5
-        run: go test -race ./rapidyenc/
-
-      - name: "Run normal tests (non-cross-compile platforms)"
-        if: ${{ !(matrix.cross_compile) && !(matrix.os == 'linux' && matrix.arch == 'amd64') }}
-        timeout-minutes: 5
-        run: go test ./rapidyenc/
-
-      - name: "Skip tests for cross-compiled platforms"
-        if: matrix.cross_compile
-        run: echo "Skipping tests for cross-compiled platform ${{ matrix.name }} (requires emulation or native hardware)"
-
-      - name: "Test rapidyenc integration"
-        if: ${{ !(matrix.cross_compile) }}
-        timeout-minutes: 2
-        run: |
-          # Build first if not cross-compiling
-          go build -o NZBreX -tags other .
-          ./NZBreX -testrapidyenc
 
       - name: "Set GaRuS Variables"
         id: vars
@@ -392,7 +305,7 @@ jobs:
             cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           fi
           #
-          # packing the build
+          # packing the build (only create zip and deb)
           #
           # .zip
           pwd && ls -lha && echo ".zip Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
@@ -532,8 +445,8 @@ jobs:
           prerelease: ${{ contains(env.VERSION, 'test') || contains(env.VERSION, 'beta') || contains(env.VERSION, 'alpha') }}
           files: |
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.deb
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
-            NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz
+            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz
+            #NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.zip
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha256sum
             NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.sha512sum
