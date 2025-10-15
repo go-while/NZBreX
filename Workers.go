@@ -198,10 +198,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 				if err != nil { // re-queue?
 					dlog(always, "ERROR in GoCheckRoutine err='%v' flag retry item", err)
-					item.mux.Lock()
-					item.retryIn = time.Now().Unix() + 9 // retry in 9s
-					item.retryOn[provider.id] = true
-					item.mux.Unlock()
+					go func(item *segmentChanItem) {
+						segCC <- item // re-queue the item for checking
+					}(item)
 				}
 			case true:
 				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
@@ -253,16 +252,14 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			StartDowns := time.Now()
 			code, err := s.GoDownsRoutine(wid, provider, item, sharedCC)
 			item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
+
 			DecreaseDLQueueCnt()
 			if err != nil || (code != 220 && code != 920) {
 				if code != 430 {
 					// 430 is a normal error code for GoDownsRoutine, so we don't log it as an error
-					errStr = fmt.Sprintf("ERROR in GoDownsRoutine code='%d' err='%v' flag retry item", code, err)
+					errStr = fmt.Sprintf("ERROR in GoDownsRoutine code='%d' err='%v'. no retry", code, err)
 					dlog(always, "%s", errStr)
-					item.mux.Lock()
-					item.retryIn = time.Now().Unix() + 9 // retry in 9s
-					item.retryOn[provider.id] = true
-					item.mux.Unlock()
+					item.FlagError(provider.id) // mark item with error for this provider
 				}
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoDownsRoutine on error
 				continue forGoDownsRoutine
@@ -325,13 +322,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 			DecreaseUPQueueCnt()
 			if err != nil {
-				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' flag retry item", code, err)
+				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' no retry", code, err)
 				dlog(always, "%s", errStr)
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
-				item.mux.Lock()
-				item.retryIn = time.Now().Unix() + 9 // retry in 9s
-				item.retryOn[provider.id] = true
-				item.mux.Unlock()
+				item.FlagError(provider.id)                    // mark item with error for this provider
 				continue forGoReupsRoutine
 			}
 			speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())
@@ -385,6 +379,25 @@ func matchThisDL(item *segmentChanItem) bool {
 
 	return (!item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
 } // end func matchThisDL
+
+func (item *segmentChanItem) FlagError(providerId int) {
+	item.mux.Lock()
+	defer item.mux.Unlock()
+	item.errorOn[providerId] = true
+}
+
+func (item *segmentChanItem) FlagDLFailed(providerList []*Provider, providerGroup string) {
+	item.mux.Lock()
+	defer item.mux.Unlock()
+	for id, prov := range providerList {
+		if prov.Group != providerGroup {
+			continue
+		}
+		item.ignoreDlOn[id] = true
+		item.missingOn[id] = true
+		item.errorOn[id] = true
+	}
+}
 
 // matchThisUP checks if the item is a candidate for upload
 // it returns true if the item is a candidate for upload
@@ -543,10 +556,10 @@ providerUp:
 		if item.retryOn[pid] {
 			if item.retryIn > time.Now().Unix() {
 				inretry++
-				dlog(always, " | [DV-pushUP] (noup) retryOn seg.Id='%s' @ #'%s' retryIn=%d > now=%d", item.segment.Id, s.providerList[pid].Group, item.retryIn, time.Now().Unix())
+				dlog(always, " | [DV-pushUP] (noup) retryOn seg.Id='%s' @ #'%s' retryIn=%d > now=%d, continue", item.segment.Id, s.providerList[pid].Group, item.retryIn, time.Now().Unix())
 				continue providerUp
 			} else {
-				dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) retryOn seg.Id='%s' @ #'%s' retryIn=%d <= now=%d", item.segment.Id, s.providerList[pid].Group, item.retryIn, time.Now().Unix())
+				dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) retryOn seg.Id='%s' @ #'%s' retryIn=%d <= now=%d, pass", item.segment.Id, s.providerList[pid].Group, item.retryIn, time.Now().Unix())
 				delete(item.retryOn, pid) // remove retryOn flag for this provider
 				// pass
 			}
