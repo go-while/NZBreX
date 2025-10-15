@@ -197,10 +197,8 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				code, err := s.GoCheckRoutine(wid, provider, item, sharedCC)
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 				if err != nil { // re-queue?
-					dlog(always, "ERROR in GoCheckRoutine err='%v' flag retry item", err)
-					go func(item *segmentChanItem) {
-						segCC <- item // re-queue the item for checking
-					}(item)
+					dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
+					item.FlagError(provider.id)
 				}
 			case true:
 				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
