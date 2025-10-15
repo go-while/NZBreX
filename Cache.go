@@ -168,14 +168,14 @@ func (c *Cache) GoYencWriter(cid int) {
 		dlog(cfg.opt.DebugCache, "GoYencWriter %d waiting for item...", cid)
 		yitem := <-c.yenc_writer_chan
 		if yitem == nil {
-			log.Printf("YencWriter %d received nil item. closing. wrote total %d bytes", cid, wrote_bytes)
+			dlog(always, "YencWriter %d received nil item. closing. wrote total %d bytes", cid, wrote_bytes)
 			c.yenc_writer_chan <- nil
 			return
 		}
-		dlog(always, "GoYencWriter %d processing seg.Id='%s'", cid, yitem.item.segment.Id)
+		dlog(c.debug, "GoYencWriter %d processing seg.Id='%s'", cid, yitem.item.segment.Id)
 		n := c.YencWriter(yitem)
 		wrote_bytes += uint64(n)
-		dlog(always, "GoYencWriter %d finished seg.Id='%s' wrote=%d bytes", cid, yitem.item.segment.Id, n)
+		dlog(c.debug, "GoYencWriter %d finished seg.Id='%s' wrote=%d bytes", cid, yitem.item.segment.Id, n)
 	}
 } // end func c.GoCacheWriter
 
