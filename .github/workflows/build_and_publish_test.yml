@@ -128,7 +128,7 @@ jobs:
       - name: "Set up Go"
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.1'
+          go-version: '1.25.3'
           cache: false
 
       # Install system dependencies based on runner OS
@@ -245,12 +245,6 @@ jobs:
 #      - name: Restore Go modules cache
 #        # your cache restore step here
 
-      - name: "Set up Go"
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.24.3'
-          cache: true
-
       #- name: Cache Go modules
       #  uses: actions/cache@v4
       #  with:
@@ -308,7 +302,7 @@ jobs:
             ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
           else
             # For arm64, we might need to build natively or cross-compile
-            ./build_rapidyenc_linux-amd64.sh
+            ./build_rapidyenc_linux-arm64.sh darwin
           fi
 
       - name: "Build rapidyenc (Alpine/musl)"
@@ -392,7 +386,7 @@ jobs:
             binary_name=NZBreX
           fi
           echo "BINARY=$binary_name" >> $GITHUB_ENV
-          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
+          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
             exit 1
@@ -427,18 +421,18 @@ jobs:
               LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
           #
           # .tgz (tar + gzip)
-          pwd && ls -lha && echo ".tgz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
-          tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
-            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
-            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
-            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
+          #pwd && ls -lha && echo ".tgz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
+          #tar -czf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tgz" \
+          #  -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
+          #  -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
+          #  -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
           #
           # .xz (tar + xz)
-          pwd && ls -lha && echo ".xz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
-          tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
-            -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
-            -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
-            -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
+          #pwd && ls -lha && echo ".xz Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
+          #tar -cJf "NZBreX_${{ env.VERSION }}-${{ env.SHA7 }}-${{ matrix.name }}${{ env.LIBC }}.tar.xz" \
+          #  -C builds/${{ matrix.name }}/usr/bin $binary_name $binary_name.sha256sum $binary_name.sha512sum \
+          #  -C ${{ github.workspace }} cleanHeaders.txt provider.sample.json provider.ygg.json \
+          #  -C ${{ github.workspace }} LICENSE README.md rapidyenc/LICENSE rapidyenc/rapidyenc/README.md rapidyenc/rapidyenc/crcutil-1.0/LICENSE rapidyenc/rapidyenc/build/rapidyenc_* rapidyenc/rapidyenc/build/librapidyenc.*
           #
           # done packing
           #
