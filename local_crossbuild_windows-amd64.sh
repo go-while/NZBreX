@@ -34,8 +34,8 @@ fi
 cd ../
 
 # Check if rapidyenc library was built successfully
-if [ ! -f "rapidyenc/librapidyenc.a" ]; then
-    echo "ERROR: rapidyenc static library not found at rapidyenc/librapidyenc.a"
+if [ ! -f "rapidyenc/librapidyenc_windows_amd64.a" ]; then
+    echo "ERROR: rapidyenc static library not found at rapidyenc/librapidyenc_windows_amd64.a"
     exit 1
 fi
 

@@ -3,9 +3,7 @@ package rapidyenc
 /*
 #cgo CFLAGS: -I${SRCDIR}/src
 #cgo darwin LDFLAGS: ${SRCDIR}/librapidyenc_darwin.a -lstdc++
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc.a -static-libstdc++ -static-libgcc
-#cgo windows,386   LDFLAGS: ${SRCDIR}/librapidyenc.a -static-libstdc++ -static-libgcc
-#cgo windows,arm   LDFLAGS: ${SRCDIR}/librapidyenc.a -static-libstdc++ -static-libgcc
+#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_windows_amd64.a -lstdc++ -static-libstdc++ -static-libgcc
 #cgo linux,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_amd64.a -lstdc++
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_arm64.a -lstdc++
 #include "rapidyenc.h"
@@ -257,7 +255,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 // It then incrementally decodes chunks of yEnc encoded data before returning to line-by-line processing
 // for the footer and EOF pattern (.\r\n)
 func (d *Decoder) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
-transform:
+loop:
 	if d.body && d.format == FormatYenc {
 		nd, ns, end, _ := DecodeIncremental(dst[nDst:], src[nSrc:], &d.State)
 		if nd > 0 {
@@ -311,7 +309,7 @@ transform:
 				}
 			} else if d.format == FormatYenc && ((!d.part && d.m.Size != d.endSize) || (d.endSize != d.actualSize)) {
 				err = fmt.Errorf("[rapidyenc] expected size %d but got %d: %w", d.m.Size, d.actualSize, ErrDataCorruption)
-			} else if d.crc && d.expectedCrc != d.m.Hash {
+			} else if d.format == FormatYenc && d.crc && d.expectedCrc != d.m.Hash {
 				// If we have a segment ID, use it for debugging otherwise use an empty string.
 				err = fmt.Errorf("[rapidyenc] ERROR CRC32 expected hash '%#08x' but got '%#08x'! seg.Id='%s' err: %w", d.expectedCrc, d.m.Hash, *d.segId, ErrCrcMismatch)
 			} else {
@@ -335,7 +333,7 @@ transform:
 		switch d.format {
 		case FormatYenc:
 			d.processYenc(line)
-			goto transform
+			goto loop
 		case FormatUU:
 			d.processYenc(line) // Process UU headers (begin/end)
 			if d.body && !bytes.HasPrefix(line, []byte("begin ")) && !bytes.HasPrefix(line, []byte("end")) {
