@@ -198,18 +198,6 @@ jobs:
           echo "CGO_ENABLED=1" >> $GITHUB_ENV
           echo "GOOS=windows" >> $GITHUB_ENV
 
-      - name: "Build rapidyenc (macOS)"
-        if: matrix.os == 'darwin'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
-          else
-            # For arm64, we might need to build natively or cross-compile
-            ./build_rapidyenc_linux-amd64.sh
-          fi
-
       - name: "Build rapidyenc (Alpine/musl)"
         if: matrix.libc == 'musl'
         timeout-minutes: 5
@@ -299,18 +287,10 @@ jobs:
         run: |
           cd rapidyenc
           if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh
-          else
-            # For arm64, we might need to build natively or cross-compile
+            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh darwin
+          else if [ "${{ matrix.arch }}" = "arm64" ]; then
             ./build_rapidyenc_linux-arm64.sh darwin
           fi
-
-      - name: "Build rapidyenc (Alpine/musl)"
-        if: matrix.libc == 'musl'
-        timeout-minutes: 5
-        run: |
-          cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
-          # Note: May need Alpine-specific build script
 
       # Run tests with race detector for supported platforms
       - name: "Run race detector tests (amd64/linux only)"
