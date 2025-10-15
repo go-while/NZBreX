@@ -214,7 +214,7 @@ jobs:
             ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh darwin
           fi
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            ./build_rapidyenc_linux-arm64.sh darwin
+            ./build_rapidyenc_linux-arm64.sh darwin || ./build_rapidyenc_linux-amd64.sh darwin
           fi
 
       # Run tests with race detector for supported platforms
