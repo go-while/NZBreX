@@ -726,7 +726,7 @@ func isNetworkUnreachable(err error) bool {
 } // end func isNetworkUnreachable (written by AI! GPT-4o)
 
 // GetNewSharedConnChannel creates a new shared connection channel.
-// The sharedCC channel is used to share connections between (anonymous) goroutines which will work on the same item.
+// The sharedCC channel is used to share connections between (anonymous) goroutines
 // which will work on the same item.
 func GetNewSharedConnChannel(wid int, provider *Provider) (sharedCC chan *ConnItem, err error) {
 	sharedCC = make(chan *ConnItem, 1)           // buffered channel with size 1
