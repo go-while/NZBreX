@@ -64,28 +64,28 @@ type UserData struct {
 
 // ProxySession represents an active user session (currently a placeholder, expand as needed)
 type ProxySession struct {
-	id               uint64            // Unique session ID, can be used for tracking
-	mux              sync.RWMutex      // Mutex for session data access
-	cmdmux           sync.RWMutex      // Mutex for command handling
-	Authed           bool              // Indicates if the user is authenticated
-	Username         string            // Username of the authenticated user
-	Password         string            // password for the session, can be used for re-authentication
-	ExpireAt         int64             // session expiration time (Unix timestamp)
-	Conn             net.Conn          // The user's network connection
-	Writer           *bufio.Writer     // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
-	tpReader         *textproto.Reader // textproto reader for easier command handling
-	tpWriter         *textproto.Writer // textproto writer for easier command handling
-	CliTp            *textproto.Conn   // textproto connection for easier command handling
-	tmpRXBytes       uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
-	RXBytes          uint64            // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
-	tmpTXBytes       uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
-	TXBytes          uint64            // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in total this session
-	ConnectedAt      time.Time         // Timestamp when the session was created
-	LastCmd          time.Time         // Timestamp of the last command received
-	Group            string            // current group the user is in (used by GROUP command)
-	MsgNum           int64             // current message number in the group (used by STAT, ARTICLE, etc. commands)
-	Cron             time.Time         // last run of periodic tasks, e.g., checking session expiration
-	selectedProvider *Provider         // The provider selected for this session, used for routing commands
+	id       uint64        // Unique session ID, can be used for tracking
+	mux      sync.RWMutex  // Mutex for session data access
+	cmdmux   sync.RWMutex  // Mutex for command handling
+	Authed   bool          // Indicates if the user is authenticated
+	Username string        // Username of the authenticated user
+	Password string        // password for the session, can be used for re-authentication
+	ExpireAt int64         // session expiration time (Unix timestamp)
+	Conn     net.Conn      // The user's network connection
+	Writer   *bufio.Writer // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
+	//tpReader         *textproto.Reader // textproto reader for easier command handling
+	//tpWriter         *textproto.Writer // textproto writer for easier command handling
+	CliTp            *textproto.Conn // textproto connection for easier command handling
+	tmpRXBytes       uint64          // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
+	RXBytes          uint64          // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
+	tmpTXBytes       uint64          // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
+	TXBytes          uint64          // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in total this session
+	ConnectedAt      time.Time       // Timestamp when the session was created
+	LastCmd          time.Time       // Timestamp of the last command received
+	Group            string          // current group the user is in (used by GROUP command)
+	MsgNum           int64           // current message number in the group (used by STAT, ARTICLE, etc. commands)
+	Cron             time.Time       // last run of periodic tasks, e.g., checking session expiration
+	selectedProvider *Provider       // The provider selected for this session, used for routing commands
 	// Add other session-specific data here, e.g., current group, article pointer, etc.
 }
 
@@ -225,7 +225,7 @@ type ArticleOverview struct {
 // handleGroupCommand processes the GROUP command by selecting a newsgroup
 func (ps *ProxySession) handleGroupCommand(args []string) error {
 	if len(args) < 1 {
-		ps.tpWriter.PrintfLine("501 Syntax error: GROUP <group>")
+		ps.CliTp.PrintfLine("501 Syntax error: GROUP <group>")
 		return nil
 	}
 	groupName := args[0]
@@ -280,7 +280,7 @@ func (ps *ProxySession) handleGroupCommand(args []string) error {
 
 	if group == nil {
 		ps.selectedProvider = nil // Reset selected provider if no group found
-		ps.tpWriter.PrintfLine("411 No such newsgroup")
+		ps.CliTp.PrintfLine("411 No such newsgroup")
 		return nil
 	}
 
@@ -289,7 +289,7 @@ func (ps *ProxySession) handleGroupCommand(args []string) error {
 	ps.MsgNum = group.High // Set to the high water mark as default
 
 	// Return a successful GROUP response: 211 count low high group_name
-	ps.tpWriter.PrintfLine("211 %d %d %d %s",
+	ps.CliTp.PrintfLine("211 %d %d %d %s",
 		group.Count, group.Low, group.High, group.Name)
 
 	dlog(always, "%s | Selected group: %s (articles: %d, range: %d-%d)",
@@ -357,8 +357,8 @@ func (ps *ProxySession) handleListCommand(args []string) error {
 		}
 
 		// Start our response to the client
-		ps.tpWriter.PrintfLine("215 List of newsgroups follows")
-		dw := ps.tpWriter.DotWriter()
+		ps.CliTp.PrintfLine("215 List of newsgroups follows")
+		dw := ps.CliTp.DotWriter()
 
 		// Pass through the lines
 		for _, line := range lines {
@@ -374,7 +374,7 @@ func (ps *ProxySession) handleListCommand(args []string) error {
 		if ps.selectedProvider != nil {
 			ps.selectedProvider = nil
 		}
-		ps.tpWriter.PrintfLine("503 No providers available for LIST command")
+		ps.CliTp.PrintfLine("503 No providers available for LIST command")
 		return nil
 	}
 	return nil
@@ -384,7 +384,7 @@ func (ps *ProxySession) handleListCommand(args []string) error {
 func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 	// Must have a selected group first
 	if ps.Group == "" {
-		ps.tpWriter.PrintfLine("412 No newsgroup selected")
+		ps.CliTp.PrintfLine("412 No newsgroup selected")
 		return nil
 	}
 
@@ -394,7 +394,7 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 	} else {
 		// If no range specified, use current article number
 		if ps.MsgNum <= 0 {
-			ps.tpWriter.PrintfLine("420 No current article selected")
+			ps.CliTp.PrintfLine("420 No current article selected")
 			return nil
 		}
 		rangeArg = fmt.Sprintf("%d", ps.MsgNum)
@@ -409,7 +409,7 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 			var err error
 			startNum, err = strconv.ParseInt(parts[0], 10, 64)
 			if err != nil {
-				ps.tpWriter.PrintfLine("501 Invalid article range")
+				ps.CliTp.PrintfLine("501 Invalid article range")
 				return nil
 			}
 
@@ -419,7 +419,7 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 			} else {
 				endNum, err = strconv.ParseInt(parts[1], 10, 64)
 				if err != nil {
-					ps.tpWriter.PrintfLine("501 Invalid article range")
+					ps.CliTp.PrintfLine("501 Invalid article range")
 					return nil
 				}
 			}
@@ -428,7 +428,7 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 		var err error
 		startNum, err = strconv.ParseInt(rangeArg, 10, 64)
 		if err != nil {
-			ps.tpWriter.PrintfLine("501 Invalid article number")
+			ps.CliTp.PrintfLine("501 Invalid article number")
 			return nil
 		}
 		endNum = startNum // Just one article
@@ -505,8 +505,8 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 		}
 		selected = true // We found a provider that can handle this command
 		// Start our response to the client
-		ps.tpWriter.PrintfLine("224 Overview information follows")
-		dw := ps.tpWriter.DotWriter()
+		ps.CliTp.PrintfLine("224 Overview information follows")
+		dw := ps.CliTp.DotWriter()
 
 		// Pass through the lines
 		for _, line := range lines {
@@ -521,7 +521,7 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 		if ps.selectedProvider != nil {
 			ps.selectedProvider = nil
 		}
-		ps.tpWriter.PrintfLine("503 No providers have the selected group")
+		ps.CliTp.PrintfLine("503 No providers have the selected group")
 		return nil
 	}
 	return nil
@@ -530,13 +530,13 @@ func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
 // handleXHdrCommand processes the XHDR/HDR command
 func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 	if len(args) < 1 {
-		ps.tpWriter.PrintfLine("501 Syntax error: XHDR <header> [range|<message-id>]")
+		ps.CliTp.PrintfLine("501 Syntax error: XHDR <header> [range|<message-id>]")
 		return nil
 	}
 
 	// Must have a selected group first, unless message-id is specified
 	if ps.Group == "" && !strings.HasPrefix(args[len(args)-1], "<") {
-		ps.tpWriter.PrintfLine("412 No newsgroup selected")
+		ps.CliTp.PrintfLine("412 No newsgroup selected")
 		return nil
 	}
 
@@ -557,7 +557,7 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 	} else {
 		// If no range/msgid specified, use current article number
 		if ps.MsgNum <= 0 {
-			ps.tpWriter.PrintfLine("420 No current article selected")
+			ps.CliTp.PrintfLine("420 No current article selected")
 			return nil
 		}
 		rangeSpec = fmt.Sprintf("%d", ps.MsgNum)
@@ -635,8 +635,8 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 		}
 		selected = true
 		// Start our response to the client
-		ps.tpWriter.PrintfLine("221 Header follows")
-		dw := ps.tpWriter.DotWriter()
+		ps.CliTp.PrintfLine("221 Header follows")
+		dw := ps.CliTp.DotWriter()
 
 		// Pass through the lines
 		for _, line := range lines {
@@ -651,7 +651,7 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 		if ps.selectedProvider != nil {
 			ps.selectedProvider = nil
 		}
-		ps.tpWriter.PrintfLine("503 No providers have the selected group or article")
+		ps.CliTp.PrintfLine("503 No providers have the selected group or article")
 		return nil
 	}
 	// If we couldn't find any provider or all failed
@@ -662,13 +662,13 @@ func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
 func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 	// Must have a selected group first
 	if ps.Group == "" {
-		ps.tpWriter.PrintfLine("412 No newsgroup selected")
+		ps.CliTp.PrintfLine("412 No newsgroup selected")
 		return nil
 	}
 
 	// Must have a current article selected
 	if ps.MsgNum <= 0 {
-		ps.tpWriter.PrintfLine("420 No current article selected")
+		ps.CliTp.PrintfLine("420 No current article selected")
 		return nil
 	}
 
@@ -760,7 +760,7 @@ func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 				} else {
 					which = "previous"
 				}
-				ps.tpWriter.PrintfLine("421 No %s article to retrieve", which)
+				ps.CliTp.PrintfLine("421 No %s article to retrieve", which)
 				return nil
 			}
 		} else {
@@ -774,9 +774,9 @@ func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 				ps.MsgNum = newNum
 
 				// Return successful response
-				ps.tpWriter.PrintfLine("223 %d %s", newNum, messageID)
+				ps.CliTp.PrintfLine("223 %d %s", newNum, messageID)
 			} else {
-				ps.tpWriter.PrintfLine("503 Invalid response from server")
+				ps.CliTp.PrintfLine("503 Invalid response from server")
 			}
 		}
 		return nil
@@ -785,7 +785,7 @@ func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
 		if ps.selectedProvider != nil {
 			ps.selectedProvider = nil
 		}
-		ps.tpWriter.PrintfLine("503 No providers have the selected group")
+		ps.CliTp.PrintfLine("503 No providers have the selected group")
 		return nil
 	}
 	return nil

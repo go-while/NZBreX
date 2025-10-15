@@ -20,11 +20,7 @@ import (
 // handleConnection manages a single NNTP proxy client connection.
 func handleConnection(conn net.Conn) {
 	//log.Printf("Handling connection from %s", conn.RemoteAddr())
-
-	// Use textproto.Reader and textproto.Writer
-	tpReader := textproto.NewReader(bufio.NewReader(conn))
-	tpWriter := textproto.NewWriter(bufio.NewWriter(conn))
-
+	cliTp := textproto.NewConn(conn)
 	var currentUser string // Stores username after successful AUTHINFO USER
 	authenticated := false
 	now := time.Now() // Get the current time for session initialization
@@ -70,14 +66,14 @@ func handleConnection(conn net.Conn) {
 	// 200 service available, posting allowed
 	// 201 service available, posting prohibited
 	time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay to simulate server startup
-	tpWriter.PrintfLine("%d %s", welcomeCode, nntpWelcomeMessage)
+	cliTp.PrintfLine("%d %s", welcomeCode, nntpWelcomeMessage)
 	// incoming client connection is captured in this for loop until QUIT command or error occurs
-	tpWriter.W.Flush() // Ensure the welcome message is sent immediately
+	//cliTp.W.Flush() // Ensure the welcome message is sent immediately
 
 forever:
 	for {
 		// Read commands from the client in a loop
-		line, err := tpReader.ReadLine() // Use ReadLine from textproto
+		line, err := cliTp.ReadLine() // Use ReadLine from textproto
 		if err != nil {
 			if err != io.EOF {
 				// Check for common textproto errors, like malformed lines or read errors
@@ -97,7 +93,7 @@ forever:
 		if len(line) > 128 { // only command lines are captured here
 			// reading a line longer than 128 characters is not allowed by RFC 3977
 			// Line is too long, send error response
-			tpWriter.PrintfLine("501 Syntax error: cmd line too long")
+			cliTp.PrintfLine("501 Syntax error: cmd line too long")
 			return
 		}
 		line = strings.TrimSpace(line) // TrimSpace is still useful
@@ -130,48 +126,46 @@ forever:
 		switch command {
 
 		case "CAPABILITIES":
-			printCapabilities(tpWriter)
+			ps.printCapabilities()
 
 		case "AUTHINFO":
 			if authenticated {
-				tpWriter.PrintfLine("502 Already authenticated")
+				cliTp.PrintfLine("502 Already authenticated")
 				return
 			}
 			if len(parts) < 2 {
-				tpWriter.PrintfLine("501 Syntax error in AUTHINFO command")
+				cliTp.PrintfLine("501 Syntax error in AUTHINFO command")
 				return
 			}
 			authCmd := strings.ToUpper(parts[1])
 			switch authCmd {
 
 			case "USER":
-
 				if len(parts) < 3 {
-					tpWriter.PrintfLine("501 Syntax error: AUTHINFO USER <username>")
+					cliTp.PrintfLine("501 Syntax error: AUTHINFO USER <username>")
 					return
 				}
 				currentUser = parts[2]
 				// RFC 3977 suggests 381 if user is valid, otherwise 481/502 or proceed and fail at PASS.
 				// To avoid user enumeration, some servers always respond 381.
 				time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay
-				tpWriter.PrintfLine("381 Password required")
+				cliTp.PrintfLine("381 Password required")
 				continue forever // Continue to handle further commands after AUTHINFO USER
 
 			case "PASS":
-
 				if currentUser == "" {
-					tpWriter.PrintfLine("482 Authentication commands out of sequence (AUTHINFO USER first)")
+					cliTp.PrintfLine("482 Authentication commands out of sequence (AUTHINFO USER first)")
 					return
 				}
 				if len(parts) < 3 {
-					tpWriter.PrintfLine("501 Syntax error: AUTHINFO PASS <password>")
+					cliTp.PrintfLine("501 Syntax error: AUTHINFO PASS <password>")
 					return
 				}
 				time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay
 				passwordToVerify := parts[2]
 
 				if !verifyPassword(currentUser, passwordToVerify) {
-					tpWriter.PrintfLine("481 Authentication failed")
+					cliTp.PrintfLine("481 Authentication failed")
 					log.Printf("Failed authentication attempt for user '%s' from %s", currentUser, conn.RemoteAddr())
 					return
 				}
@@ -188,7 +182,7 @@ forever:
 						// Unlock before sleeping
 						time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
 						log.Printf("Failed to reload passwd file: %v", err)
-						tpWriter.PrintfLine("481 Authentication failed (passwd file reload error)")
+						cliTp.PrintfLine("481 Authentication failed (passwd file reload error)")
 						return
 					}
 				}
@@ -200,7 +194,7 @@ forever:
 					// This case should ideally not be reached if verifyPassword relies on passwdMap
 					proxyMutex.RUnlock()
 					time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-					tpWriter.PrintfLine("481 Authentication failed (user data inconsistency)")
+					cliTp.PrintfLine("481 Authentication failed (user data inconsistency)")
 					log.Printf("User data not found for '%s' in passwdMap after successful verifyPassword. Potential data inconsistency.", currentUser)
 					return
 				}
@@ -209,7 +203,7 @@ forever:
 				if userData.ExpireAt > 0 && time.Now().Unix() > userData.ExpireAt {
 					proxyMutex.RUnlock()
 					time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-					tpWriter.PrintfLine("481 Authentication failed (account expired)")
+					cliTp.PrintfLine("481 Authentication failed (account expired)")
 					log.Printf("Authentication failed for user '%s' from %s: account expired (ExpireAt: %d, Current: %d)", currentUser, conn.RemoteAddr(), userData.ExpireAt, time.Now().Unix())
 					return
 				}
@@ -220,7 +214,7 @@ forever:
 				if userData.MaxConns > 0 && CountConns[currentUser] >= userData.MaxConns {
 					proxyMutex.Unlock()
 					time.Sleep(time.Duration(mrand.Intn(1000)) * time.Millisecond) // Random delay
-					tpWriter.PrintfLine("452 Too many connections for this user. Please try again later.")
+					cliTp.PrintfLine("452 Too many connections for this user. Please try again later.")
 					log.Printf("Connection denied for user '%s' from %s: too many connections (current: %d, max: %d)", currentUser, conn.RemoteAddr(), CountConns[currentUser], userData.MaxConns)
 					// Do not set authenticated to true, connection is rejected before full authentication.
 					return
@@ -235,19 +229,17 @@ forever:
 				ps.id = CID // Assign a unique session ID
 				ps.Authed = true
 				ps.Username = currentUser
-				ps.Password = passwordToVerify     // Store the hashed password in the session so we can check every now and then if password has changed and close the session
-				ps.ExpireAt = userData.ExpireAt    // Set session expiration time from user data
-				ps.Conn = conn                     // Store the connection in the session
-				ps.CliTp = textproto.NewConn(conn) // Create a textproto connection for easier command handling
-				ps.Writer = bufio.NewWriter(conn)  // Create a bufio writer for the client connection
-				ps.tpReader = tpReader             // Store the textproto reader in the session
-				ps.tpWriter = tpWriter             // Store the textproto writer in the session
-				ps.Cron = ps.ConnectedAt           // Initialize cron time for periodic tasks
+				ps.Password = passwordToVerify    // Store the hashed password in the session so we can check every now and then if password has changed and close the session
+				ps.ExpireAt = userData.ExpireAt   // Set session expiration time from user data
+				ps.Conn = conn                    // Store the connection in the session
+				ps.CliTp = cliTp                  // Create a textproto connection for easier command handling
+				ps.Writer = bufio.NewWriter(conn) // Create a bufio writer for the client connection
+				ps.Cron = ps.ConnectedAt          // Initialize cron time for periodic tasks
 
 				// Store the session in the global ProxySessions map
 				ProxySessions[currentUser] = ps
 
-				tpWriter.PrintfLine("281 Welcome to NZBreX Proxy! Your conns: %d/%d. Exp: '%v'",
+				cliTp.PrintfLine("281 Welcome to NZBreX Proxy! Your conns: %d/%d. Exp: '%v'",
 					CountConns[currentUser], userData.MaxConns, time.Unix(userData.ExpireAt, 0).Format(time.RFC1123Z))
 
 				dlog(cfg.opt.Debug, "User '%s' authenticated. Active connections for user: %d/%d", currentUser, CountConns[currentUser], userData.MaxConns)
@@ -257,34 +249,33 @@ forever:
 				continue forever // Continue to handle further commands after successful authentication
 
 			default:
-				tpWriter.PrintfLine("501 Unknown AUTHINFO subcommand: %s", authCmd)
+				cliTp.PrintfLine("501 Unknown AUTHINFO subcommand: %s", authCmd)
 				return
 			}
 
 		case "MODE":
 			if len(parts) < 2 {
-				tpWriter.PrintfLine("501 Syntax error in MODE command")
+				cliTp.PrintfLine("501 Syntax error in MODE command")
 				return
 			}
 			switch strings.ToUpper(parts[1]) {
 			case "READER":
-				tpWriter.PrintfLine("201 Posting prohibited")
+				cliTp.PrintfLine("201 Posting prohibited")
 
 			case "STREAM":
 				if !authenticated {
-					tpWriter.PrintfLine("480 Authentication required for MODE STREAM")
+					cliTp.PrintfLine("480 Authentication required for MODE STREAM")
 					return
 				}
-				tpWriter.PrintfLine("200 Switching to STREAM mode")
+				cliTp.PrintfLine("200 Switching to STREAM mode")
 			default:
-				tpWriter.PrintfLine("501 Unknown mode")
+				cliTp.PrintfLine("501 Unknown mode")
 				return
 			}
 			continue forever // Continue to handle further commands after MODE command
 
 		case "QUIT":
-
-			tpWriter.PrintfLine("205 Closing connection - goodbye.")
+			cliTp.PrintfLine("205 Closing connection - goodbye.")
 			log.Printf("Client %s issued QUIT.", conn.RemoteAddr())
 			return
 
@@ -292,10 +283,10 @@ forever:
 			if authenticated {
 				// Handle other NNTP commands for authenticated users here
 				// e.g., GROUP, ARTICLE, LIST, NEXT, LAST, DATE, etc.
-				tpWriter.PrintfLine("500 Unknown command: %s (authenticated)", command)
+				cliTp.PrintfLine("500 Unknown command: %s (authenticated)", command)
 			} else {
 				// RFC 3977: "480 Authentication required" for most commands if not authenticated
-				tpWriter.PrintfLine("480 Authentication required")
+				cliTp.PrintfLine("480 Authentication required")
 			}
 		} // end switch command
 	} // end for forever
@@ -349,7 +340,7 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 
 		} else if num > 0 && ps.Group == "" {
 			// TODO select newsgroup
-			ps.tpWriter.PrintfLine("412 No newsgroup selected to read messageid: %d", num)
+			ps.CliTp.PrintfLine("412 No newsgroup selected to read messageid: %d", num)
 			return retry
 
 		} else if isvalid {
@@ -373,11 +364,11 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 		}
 
 	case "CAPABILITIES":
-		printCapabilities(ps.tpWriter)
+		ps.printCapabilities()
 		return nil // No error, capabilities printed
 
 	case "DATE":
-		ps.tpWriter.PrintfLine("111 %s", time.Now().Format(time.RFC1123Z))
+		ps.CliTp.PrintfLine("111 %s", time.Now().Format(time.RFC1123Z))
 		return nil // No error, date printed
 
 	case "LIST":
@@ -399,17 +390,17 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 		return ps.handleNextOrLastCommand(false)
 
 	case "QUIT":
-		ps.tpWriter.PrintfLine("205 Closing connection - goodbye. uploaded=%d downloaded=%d connected='%v'", ps.RXBytes, ps.TXBytes, time.Since(ps.ConnectedAt))
+		ps.CliTp.PrintfLine("205 Closing connection - goodbye. uploaded=%d downloaded=%d connected='%v'", ps.RXBytes, ps.TXBytes, time.Since(ps.ConnectedAt))
 		log.Printf(" %s | quit", ps.Username)
 		return fmt.Errorf("client quit")
 
 	default:
-		ps.tpWriter.PrintfLine("502 Unknown command")
+		ps.CliTp.PrintfLine("502 Unknown command")
 		return fmt.Errorf("unknown command: %s", command)
 	} // end switch command1
 
 	if !pass {
-		ps.tpWriter.PrintfLine("501 Syntax error: command %s requires a valid message ID", command)
+		ps.CliTp.PrintfLine("501 Syntax error: command %s requires a valid message ID", command)
 		return fmt.Errorf("syntax error: command %s requires a valid message ID", command)
 	}
 	// Now we have a valid command and messageId (if applicable), proceed to handle the request
@@ -537,10 +528,10 @@ loopProvider:
 	} // end for loopProvider
 	if response != "0" {
 		if response != "" {
-			ps.tpWriter.PrintfLine("%s", response)
+			ps.CliTp.PrintfLine("%s", response)
 		} else {
 			dlog(always, " %s | ERROR response to client empty", ps.Username)
-			ps.tpWriter.PrintfLine("500 Unknown error occurred while processing command %s", command)
+			ps.CliTp.PrintfLine("500 Unknown error occurred while processing command %s", command)
 		}
 	}
 	return nil // Return nil to indicate the command was handled successfully. an error will disconnect the user

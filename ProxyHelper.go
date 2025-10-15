@@ -8,8 +8,8 @@ import (
 	"log"
 	mrand "math/rand"
 	"net"
-	"net/textproto"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -64,10 +64,10 @@ func LinesWriter(cliwriter *bufio.Writer, conn net.Conn, code int, item *segment
 	return txb, nil
 } // end func LinesWriter
 
-func printCapabilities(tpWriter *textproto.Writer) {
+func (ps *ProxySession) printCapabilities() {
 	// Respond with server capabilities (RFC 3977 Section 5.3)
-	tpWriter.PrintfLine("101 Capability list:")
-	dw := tpWriter.DotWriter()
+	ps.CliTp.PrintfLine("101 Capability list:")
+	dw := ps.CliTp.DotWriter()
 	fmt.Fprintln(dw, "VERSION 2")          // Indicates RFC 3977 support
 	fmt.Fprintln(dw, "READER")             // Indicates MODE READER support
 	fmt.Fprintln(dw, "AUTHINFO USER PASS") // Supports AUTHINFO USER and AUTHINFO PASS
@@ -79,13 +79,10 @@ func printCapabilities(tpWriter *textproto.Writer) {
 // File format: username:bcrypt_hash:maxconns:ExpireAt_unix_timestamp
 func loadPasswdFile(filename string) error {
 	// Before loading, merge any .new.* files into the main passwd file
-	base := filename
-	if idx := strings.LastIndex(filename, "/"); idx != -1 {
-		base = filename[idx+1:]
-	}
-	dir := "."
-	if idx := strings.LastIndex(filename, "/"); idx != -1 {
-		dir = filename[:idx]
+	dir := filepath.Dir(filename)
+	base := filepath.Base(filename)
+	if dir == "" {
+		dir = "."
 	}
 	pattern := fmt.Sprintf("%s.new.", base)
 	entries, err := os.ReadDir(dir)
@@ -96,7 +93,7 @@ func loadPasswdFile(filename string) error {
 			}
 			name := entry.Name()
 			if strings.HasPrefix(name, pattern) {
-				newfile := dir + "/" + name
+				newfile := filepath.Join(dir, name)
 				// Append contents to main passwd file
 				func() {
 					mainf, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
@@ -281,13 +278,14 @@ func addUserToProxyPasswdFile(userData *UserData, filename string) error {
 	return nil
 }
 
-// generateRandomHexCredentials generates a random username and password, each 10 bytes, output as hex strings.
+const DefaultPasswordLength = 8 // 8 bytes will give us 16 hex characters, which is a common length for usernames/passwords
+
+// generateRandomHexCredentials generates a random username and password, each 8 bytes, output as hex strings.
 func generateRandomHexCredentials() (username string, password string, err error) {
-	const length = 8 // 8 bytes will give us 16 hex characters, which is a common length for usernames/passwords
 	// Use crypto/rand for cryptographically secure random bytes
 	// If you want longer usernames/passwords, adjust the length accordingly.
 	// For example, 10 bytes would give 20 hex characters.
-	buf := make([]byte, length)
+	buf := make([]byte, DefaultPasswordLength)
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", fmt.Errorf("failed to generate random username: %w", err)
 	}
@@ -310,14 +308,14 @@ func (ps *ProxySession) Close() {
 		ps.Conn.Close() // Close the network connection
 		ps.Conn = nil   // Clear the connection to avoid dangling pointer
 	}
-	ps.Authed = false // Mark session as unauthenticated
-	ps.Username = ""  // Clear username to avoid dangling pointer
-	ps.Password = ""  // Clear username to avoid dangling pointer
-	ps.ExpireAt = 0   // Clear expiration time
+	ps.Authed = false       // Mark session as unauthenticated
+	ps.Username = ""        // Clear username to avoid dangling pointer
+	ps.Password = ""        // Clear username to avoid dangling pointer
+	ps.ExpireAt = 0         // Clear expiration time
 	username := ps.Username // Store username for logging
-	ps.Username = ""  // Clear username to avoid dangling pointer
-	ps.Password = ""  // Clear username to avoid dangling pointer
-	ps.ExpireAt = 0   // Clear expiration time
+	ps.Username = ""        // Clear username to avoid dangling pointer
+	ps.Password = ""        // Clear username to avoid dangling pointer
+	ps.ExpireAt = 0         // Clear expiration time
 	log.Printf("Closed session for user '%s'", username)
 }
 
