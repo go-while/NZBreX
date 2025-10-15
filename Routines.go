@@ -49,6 +49,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 	code, msg, err := CMD_STAT(connitem, item)
 	if code == 0 && err != nil {
 		// connection problem, closed?
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
 		dlog(always, "WARN checking seg.Id='%s' failed @ '%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, code, msg, err)
 		return code, err
@@ -173,10 +174,10 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	startArticle := time.Now()
 	code, msg, rxb, err := CMD(connitem, item, cmdARTICLE)
-
 	if err != nil {
 		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		// handle connection problem / closed connection
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
 		return 0, fmt.Errorf("error in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 	}
@@ -366,6 +367,12 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	switch cmd {
 	case 1:
 		code, msg, txb, err = CMD_POST(connitem, item)
+		if code == 0 && err != nil {
+			// connection problem, closed?
+			item.FlagError(provider.id)
+			provider.ConnPool.CloseConn(connitem, sharedCC)
+			return 0, fmt.Errorf("error in GoReupsRoutine: CMD_POST seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+		}
 		switch code {
 		case 240:
 			uploaded = true
@@ -377,6 +384,12 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	case 2:
 		code, msg, txb, err = CMD_IHAVE(connitem, item)
+		if code == 0 && err != nil {
+			// connection problem, closed?
+			item.FlagError(provider.id)
+			provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+			return 0, fmt.Errorf("error in GoReupsRoutine: CMD_IHAVE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+		}
 		switch code {
 		case 235:
 			uploaded = true
