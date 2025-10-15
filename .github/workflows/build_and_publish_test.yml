@@ -210,11 +210,9 @@ jobs:
         timeout-minutes: 5
         run: |
           cd rapidyenc
-          if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh darwin
-          else if [ "${{ matrix.arch }}" = "arm64" ]; then
-            ./build_rapidyenc_linux-arm64.sh darwin
-          fi
+          # macOS builds natively - the build_rapidyenc_linux-amd64.sh script
+          # is actually a native build script (despite the misleading name)
+          ./build_rapidyenc_linux-amd64.sh darwin
 
       # Run tests with race detector for supported platforms
       - name: "Run race detector tests (amd64/linux only)"
