@@ -26,6 +26,8 @@ import (
 	"golang.org/x/text/transform"
 )
 
+/* compile test ... github actions is using cached files... */
+
 const constBufSize = 4096 // const buffer size for Decoder instances
 
 var (
