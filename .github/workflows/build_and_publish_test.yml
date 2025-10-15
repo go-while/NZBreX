@@ -386,7 +386,7 @@ jobs:
             binary_name=NZBreX
           fi
           echo "BINARY=$binary_name" >> $GITHUB_ENV
-          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
+          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
             exit 1
