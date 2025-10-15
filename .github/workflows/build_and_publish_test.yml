@@ -205,6 +205,17 @@ jobs:
           cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
           # Note: May need Alpine-specific build script
 
+      - name: "Build rapidyenc (macOS)"
+        if: matrix.os == 'darwin'
+        timeout-minutes: 5
+        run: |
+          cd rapidyenc
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            ./crossbuild_rapidyenc_darwin-amd64.sh || ./build_rapidyenc_linux-amd64.sh darwin
+          else if [ "${{ matrix.arch }}" = "arm64" ]; then
+            ./build_rapidyenc_linux-arm64.sh darwin
+          fi
+
       # Run tests with race detector for supported platforms
       - name: "Run race detector tests (amd64/linux only)"
         if: matrix.os == 'linux' && matrix.arch == 'amd64' && !matrix.cross_compile
@@ -305,7 +316,7 @@ jobs:
             cat builds/${{ matrix.name }}/usr/bin/$binary_name.sha512sum
           fi
           #
-          # packing the build (only create zip and deb)
+          # packing the build (only create zip and deb for now)
           #
           # .zip
           pwd && ls -lha && echo ".zip Packing builds/${{ matrix.name }}/usr/bin/$binary_name"
