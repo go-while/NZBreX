@@ -284,11 +284,14 @@ jobs:
           mkdir -p builds/${{ matrix.name }}/usr/bin
           if [ "${{ matrix.os }}" == "windows" ]; then
             binary_name=NZBreX.exe
+            # For Windows: use static linking to avoid DLL dependencies
+            LDFLAGS="-X main.appVersion=${{ env.VERSION }} -linkmode external -extldflags '-static -static-libgcc -static-libstdc++'"
           else
             binary_name=NZBreX
+            LDFLAGS="-X main.appVersion=${{ env.VERSION }}"
           fi
           echo "BINARY=$binary_name" >> $GITHUB_ENV
-          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="-s -w -X main.appVersion=${{ env.VERSION }}" -o builds/${{ matrix.name }}/usr/bin/$binary_name
+          GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -ldflags="$LDFLAGS" -o builds/${{ matrix.name }}/usr/bin/$binary_name
           if [ ! -f cleanHeaders.txt ]; then
             echo "cleanHeaders.txt not found! Build cannot continue." >&2
             exit 1

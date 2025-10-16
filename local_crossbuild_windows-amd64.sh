@@ -49,7 +49,10 @@ export CC=x86_64-w64-mingw32-gcc
 
 echo "Cross-compiling Go application for Windows..."
 # Build with static linking to avoid dependency on MinGW runtime DLLs
-if ! go build -o NZBreX.exe -ldflags "-linkmode external -extldflags '-static'" -tags "windows rapidyenc" .; then
+# -static: Link all libraries statically (including libgcc, libstdc++, winpthread)
+# -static-libgcc: Static link libgcc only
+# -static-libstdc++: Static link libstdc++ only
+if ! go build -o NZBreX.exe -ldflags "-linkmode external -extldflags '-static -static-libgcc -static-libstdc++'" -tags "windows rapidyenc" .; then
     echo "ERROR: Failed to build Windows executable"
     exit 1
 fi
