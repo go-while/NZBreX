@@ -146,7 +146,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 					dlog(cfg.opt.Debug, "GoBootWorkers PreBoot Provider '%s' launch wid=%d/%d", provider.Name, wid, provider.MaxConns)
 				}
 				// GoWorker connecting....
-				go s.GoWorker(wid, provider, waitWorker, workerWGconnReady, waitPool)
+				go s.GoWorker(wid, provider, waitWorker, waitPool)
 				time.Sleep(time.Duration(rand.Intn(50*provider.MaxConns)) * time.Millisecond) // random sleep to avoid all workers connecting at the same time
 			}
 
@@ -158,7 +158,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 	dlog(cfg.opt.DebugWorker, "GoBootWorkers: all workers connected (or died if no conn could be established)")
 } // end func GoBootWorkers
 
-func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, workerWGconnReady *sync.WaitGroup, waitPool *sync.WaitGroup) {
+func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup) {
 	dlog(cfg.opt.DebugWorker, "GoWorker (%d) launching routines '%s'", wid, provider.Name)
 
 	// Obtain a connection for this worker and share it among the check, download, and reupload routines.
@@ -166,10 +166,17 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	var sharedCC chan *ConnItem = nil
 	var err error
 	if UseSharedCC {
-		// Get a shared connection channel for the provider}
+		dlog(cfg.opt.DebugWorker, "GoWorker (%d) trying to get shared connection channel for '%s'", wid, provider.Name)
+		// Get a shared connection channel for the provider pre filled with an established connection
 		sharedCC, err = GetNewSharedConnChannel(wid, provider)
 		if err != nil || len(sharedCC) == 0 {
-			dlog(always, "ERROR GoWorker (%d) failed to get shared connection channel for '%s' err='%v'", wid, provider.Name, err)
+			// release for the 3 routines we won't start
+			waitWorker.Done()
+			waitWorker.Done()
+			waitWorker.Done()
+			// release this GoWorker from the pool
+			waitPool.Done()
+			dlog(cfg.opt.DebugWorker, "ERROR GoWorker (%d) failed to get shared connection channel for '%s' err='%v'", wid, provider.Name, err)
 			return
 		}
 	}
@@ -185,9 +192,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				return // channel is closed, exit the routine
 			}
 			if item == nil {
-				if cfg.opt.DebugWorker {
-					log.Print("CheckRoutine received a nil pointer to quit")
-				}
+				dlog(cfg.opt.DebugWorker, "CheckRoutine received a nil pointer to quit")
 				segCC <- nil // refill the nil so others will die too
 				break forGoCheckRoutine
 			}
@@ -202,20 +207,6 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				}
 			case true:
 				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
-				/*
-					item.mux.Lock()
-					item.flaginDL = true
-
-					//if !item.pushedDL {
-					IncreaseDLQueueCnt() // cfg.opt.ByPassSTAT
-					//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT")       // cfg.opt.ByPassSTAT
-					//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "CheckRoutine:ByPassSTAT") //cfg.opt.ByPassSTAT
-					//}
-					item.pushedDL++ // mark as pushed to download queue ByPassSTAT
-					item.mux.Unlock()
-					// ! TODO FIXME : use s.WorkDividerChan ?
-					s.segmentChansDowns[provider.Group] <- item // bypass STAT: GoCheckRoutine push to download queue
-				*/
 			}
 			continue forGoCheckRoutine
 		} // end forGoCheckRoutine
@@ -234,9 +225,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				return // channel is closed, exit the routine
 			}
 			if item == nil {
-				if cfg.opt.DebugWorker {
-					log.Print("DownsRoutine received a nil pointer to quit")
-				}
+				dlog(cfg.opt.DebugWorker, "DownsRoutine received a nil pointer to quit")
 				segCD <- nil // refill the nil so others will die too
 				break forGoDownsRoutine
 			}
@@ -294,9 +283,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				return // channel is closed, exit the routine
 			}
 			if item == nil {
-				if cfg.opt.DebugWorker {
-					log.Print("ReupsRoutine received a nil pointer to quit")
-				}
+				dlog(cfg.opt.DebugWorker, "ReupsRoutine received a nil pointer to quit")
 				s.segmentChansReups[provider.Group] <- nil // refill the nil so others will die too
 				break forGoReupsRoutine
 			}
@@ -337,7 +324,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 	dlog(cfg.opt.DebugWorker, "GoWorker (%d) waitWorker.Wait for routines to complete '%s'", wid, provider.Name)
 	waitWorker.Wait() // wait for all 3 routines to finish
-	dlog(cfg.opt.BUG, "GoWorker (%d) closing @ '%s'", wid, provider.Name)
+	dlog(cfg.opt.DebugWorker, "GoWorker (%d) closing @ '%s'", wid, provider.Name)
 
 	if sharedCC != nil {
 		select {
@@ -353,8 +340,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		}
 	}
 
-	KillConnPool(provider) // close the connection pool for this provider
-	waitPool.Done()        // release this GoWorker from the pool
+	waitPool.Done() // release this GoWorker from the pool
 
 	dlog(cfg.opt.BUG, "GoWorker (%d) quit @ '%s'", wid, provider.Name)
 } // end func GoWorker
@@ -595,15 +581,10 @@ type WrappedItem struct {
 const testing = false // set to true to test the worker loop
 // GoWorkDivider is the main worker loop that processes segments
 func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup) {
-	if cfg.opt.DebugWorker {
-		log.Print("go GoWorkDivider() waitDivider.Wait()")
-	}
+	dlog(cfg.opt.DebugWorker, "go GoWorkDivider() waiting on waitDivider.Wait()")
 	waitDivider.Wait() // waits for all conns to establish
 	defer waitDividerDone.Done()
-
-	if cfg.opt.DebugWorker {
-		log.Print("go GoWorkDivider() Starting!")
-	}
+	dlog(cfg.opt.DebugWorker, "go GoWorkDivider() Starting!")
 
 	//segcheckdone := false
 	closeWait, closeCase := 1, ""
@@ -857,7 +838,7 @@ forever:
 			logstring = log00 + log01 + log02 + log03 + log04 + log05 + log06 + log07 + log08 + log09 + log10 + log11 + log99
 			if cfg.opt.Verbose && cfg.opt.PrintStats >= 0 && logstring != "" && nextLogPrint < time.Now().Unix() {
 				nextLogPrint = time.Now().Unix() + cfg.opt.PrintStats
-				log.Print(logstring)
+				dlog(always, "%s", logstring)
 			}
 		} // print some stats ends here
 
@@ -873,7 +854,7 @@ forever:
 			s.segmentCheckTook = took
 			s.segcheckdone = true
 			s.mux.Unlock()
-			dlog(cfg.opt.Verbose, " | [DV] | Segment Check Done: took='%.1f sec'", took.Seconds())
+			dlog(cfg.opt.Verbose, " | Segment Check Done: took='%.1f sec'", took.Seconds())
 		}
 
 		// continue as long as any of this triggers because stuff is still in queues and processing
@@ -905,35 +886,35 @@ forever:
 
 		if closeCase0 {
 			closeWait--
-			closeCase = closeCase + "|Debug#0@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#0"
 
 		} else if closeCase1 {
 			closeWait--
-			closeCase = closeCase + "|Debug#1@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#1"
 
 		} else if closeCase2 {
 			closeWait--
-			closeCase = closeCase + "|Debug#2@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#2"
 
 		} else if closeCase3 {
 			closeWait--
-			closeCase = closeCase + "|Debug#3@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#3"
 
 		} else if closeCase4 {
 			closeWait--
-			closeCase = closeCase + "|Debug#4@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#4"
 
 		} else if closeCase5 {
 			closeWait--
-			closeCase = closeCase + "|Debug#5@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#5"
 
 		} else if closeCase6 {
 			closeWait--
-			closeCase = closeCase + "|Debug#6@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#6"
 
 		} else if closeCase7 {
 			closeWait--
-			closeCase = closeCase + "|Debug#7@" + fmt.Sprintf("%d", time.Now().Unix())
+			closeCase = closeCase + "|Debug#7"
 
 		} else {
 			if closeWait >= 10 {
@@ -944,7 +925,7 @@ forever:
 			}
 			closeWait++
 			if closeWait >= 15 {
-				log.Print("... force quit ...")
+				dlog(always, "... force quit ...")
 				return
 			}
 			closeCase = ""

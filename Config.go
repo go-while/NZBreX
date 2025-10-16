@@ -7,7 +7,7 @@ import (
 	"github.com/go-while/go-loggedrwmutex"
 )
 
-const UseSharedCC = false     // experimental devel flag, to test sharedConn between routines
+const UseSharedCC = true      // experimental devel flag, to test sharedConn between routines
 const UseReadDeadConn = false // experimental devel flag, to test reading from dead connections
 const UseNoDeadline = true    // experimental devel flag, to test reading from dead connections
 
@@ -39,9 +39,9 @@ const (
 	// DefaultConnectTimeout defines the timeout for connecting to a server
 	DefaultConnectTimeout = 9 * time.Second
 	// DefaultConnectErrSleep defines the time to wait before retrying a connection after an error
-	DefaultConnectErrSleep = 9 * time.Second
+	DefaultConnectErrSleep = 3 * time.Second
 	// DefaultRequeueDelay defines the delay before requeuing an item in the segment channel
-	DefaultRequeueDelay = 9 * time.Second
+	//DefaultRequeueDelay = 9 * time.Second
 )
 
 type Config struct {

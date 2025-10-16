@@ -367,17 +367,20 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	s.segmentCheckStartTime = time.Now()
 	// booting work divider
 	go s.GoWorkDivider(&waitDivider, &waitDividerDone)
-	dlog(cfg.opt.Debug, "sess: waitDividerDone.Wait()")
+	dlog(always, "sess: waiting on waitDividerDone.Wait()")
 	waitDividerDone.Wait()
-	dlog(cfg.opt.Debug, "sess: waitDividerDone.Wait() released")
+	dlog(always, "sess: released waitDividerDone.Wait()")
 
 	s.StopRoutines()
 
-	dlog(cfg.opt.Debug, "sess: waitWorker.Wait()")
+	dlog(always, "sess: waiting on waitWorker.Wait()")
 	waitWorker.Wait()
-	dlog(cfg.opt.Debug, "sess: waitWorker.Wait() released, waiting on waitPool.Wait()")
+	dlog(always, "sess: released waitWorker.Wait(), waiting on waitPool.Wait()")
 	waitPool.Wait()
-	dlog(cfg.opt.Debug, "sess: waitPool.Wait() released")
+	dlog(always, "sess: released waitPool.Wait() closing all provider connections")
+	for _, provider := range s.providerList {
+		KillConnPool(provider) // close the connection pool for this provider
+	}
 
 	result, runtime_info := s.Results(s.preparationStartTime)
 
