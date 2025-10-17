@@ -186,7 +186,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	segCC := s.segmentChansCheck[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem, segCC chan *segmentChanItem) {
 		defer waitWorker.Done()
-		defer dlog(always, "CheckRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
+		defer dlog(always, "CheckRoutine exiting wid=%d provider='%s'", wid, provider.Name)
 	forGoCheckRoutine:
 		for {
 			item, ok := <-segCC
@@ -194,7 +194,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				return // channel is closed, exit the routine
 			}
 			if item == nil {
-				dlog(cfg.opt.DebugWorker, "CheckRoutine received a nil pointer to quit")
+				dlog(always, "CheckRoutine received a nil pointer to quit")
 				segCC <- nil // refill the nil so others will die too
 				break forGoCheckRoutine
 			}
@@ -218,7 +218,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	segCD := s.segmentChansDowns[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem, segCD chan *segmentChanItem) {
 		defer waitWorker.Done()
-		defer dlog(always, "GoDownsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
+		defer dlog(always, "GoDownsRoutine exiting wid=%d provider='%s'", wid, provider.Name)
 	forGoDownsRoutine:
 		for {
 			dlog(cfg.opt.DebugWorker, "GoDownsRoutine: wid=%d provider='%s' wait on segCD len=%d", wid, provider.Name, len(segCD))
@@ -270,14 +270,13 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 			// back to top
 		} // end forGoDownsRoutine
-		dlog(always, "GoDownsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	}(wid, provider, waitWorker, sharedCC, segCD) // end go func()
 
 	/* new worker code ReupsRoutine */
 	segCR := s.segmentChansReups[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem, segCR chan *segmentChanItem) {
 		defer waitWorker.Done()
-		defer dlog(always, "ReupsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
+		defer dlog(always, "ReupsRoutine exiting: wid=%d provider='%s'", wid, provider.Name)
 	forGoReupsRoutine:
 		for {
 			item, ok := <-segCR
@@ -302,7 +301,6 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					dlog(cfg.opt.DebugWorker && cfg.opt.BUG, "WorkerReup: unlocked (wid=%d) (waited=%d µs), process seg.Id='%s' @ '%s'", wid, time.Since(start).Microseconds(), item.segment.Id, provider.Name)
 				}
 			*/
-			// TODO handle memlim freemem here
 			StartReUps := time.Now()
 			code, err := s.GoReupsRoutine(wid, provider, item, sharedCC)
 			item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
@@ -320,7 +318,6 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			memlim.MemReturn("UR", item) // memfree GoReupsRoutine on success
 			// back to top
 		} // end forGoReupsRoutine
-		dlog(always, "ReupsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	}(wid, provider, waitWorker, sharedCC, segCR) // end go func()
 
 	dlog(cfg.opt.DebugWorker, "GoWorker (%d) waitWorker.Wait for routines to complete '%s'", wid, provider.Name)

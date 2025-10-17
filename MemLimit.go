@@ -128,6 +128,7 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	item.mux.RLock()
 	if item.memlocked == 0 {
 		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
+		item.mux.RUnlock()
 		return // not memlocked, nothing to do
 	}
 	item.mux.RUnlock()
