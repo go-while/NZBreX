@@ -124,7 +124,6 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
 // it is also called if no upload and is written to cache
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	//dlog(cfg.opt.DebugMemlim, "MemReturn free seg.Id='%s' who='%s'", item.segment.Id, who)
-	defer GCounter.Incr("TOTAL_MemReturned")
 	item.mux.RLock()
 	if item.memlocked == 0 {
 		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
@@ -132,6 +131,8 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 		return // not memlocked, nothing to do
 	}
 	item.mux.RUnlock()
+	defer GCounter.Incr("TOTAL_MemReturned")
+
 	// remove map entry from mem
 	m.mux.Lock()
 	delete(m.memdata, item)
