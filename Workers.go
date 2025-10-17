@@ -203,7 +203,6 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
 				if err != nil { // re-queue?
 					dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
-					item.FlagError(provider.id)
 				}
 			case true:
 				log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
@@ -246,7 +245,6 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					// 430 is a normal error code for GoDownsRoutine, so we don't log it as an error
 					errStr = fmt.Sprintf("ERROR in GoDownsRoutine code='%d' err='%v'. no retry", code, err)
 					dlog(always, "%s", errStr)
-					item.FlagError(provider.id) // mark item with error for this provider
 				}
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoDownsRoutine on error
 				continue forGoDownsRoutine
@@ -310,7 +308,6 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' no retry", code, err)
 				dlog(always, "%s", errStr)
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
-				item.FlagError(provider.id)                    // mark item with error for this provider
 				continue forGoReupsRoutine
 			}
 			speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())

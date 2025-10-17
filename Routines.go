@@ -175,10 +175,10 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	startArticle := time.Now()
 	code, msg, rxb, err := CMD(connitem, item, cmdARTICLE)
 	if err != nil {
-		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
-		// handle connection problem / closed connection
+		// connection problem, closed?
 		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		return 0, fmt.Errorf("error in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 	}
 
@@ -351,9 +351,10 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	} else if provider.capabilities.ihave {
 		cmd = 2
 	} else {
-		//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
+		// connection problem, closed?
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-		return 0, fmt.Errorf("WARN selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
+		return 0, fmt.Errorf("selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
 	}
 	//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
 
@@ -499,9 +500,10 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 
 	if err != nil {
-		dlog(always, "ERROR in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		// handle connection problem / closed connection
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		dlog(always, "ERROR in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		return 0, fmt.Errorf("error in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 	}
 
