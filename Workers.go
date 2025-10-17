@@ -271,7 +271,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			select {
 			case <-toChan:
 				s.mux.RLock()
-				segcheckdone := s.segcheckdone
+				segcheckdone := s.segcheckdone // get the segcheckdone state
 				s.mux.RUnlock()
 				if !segcheckdone {
 					timeOut = time.Now().Add(15 * time.Second)
@@ -357,6 +357,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		}()
 	forGoReupsRoutine:
 		for {
+			dlog(cfg.opt.DebugWorker, "ReupsRoutine: wid=%d provider='%s' wait on segCD len=%d", wid, provider.Name, len(segCD))
 			select {
 			case <-toChan:
 				s.mux.RLock()
@@ -751,7 +752,7 @@ forever:
 			closeCase = "noworkers"
 			break forever
 		}
-		s.mux.RLock()
+		s.mux.Lock()
 		dlog(always, "GoWorkDivider: booted workers: %d", s.bootedWorkers)
 
 		if s.bootedWorkers == 0 {
@@ -760,7 +761,7 @@ forever:
 		} else {
 			deadWorkersDeadline = 9 // reset
 		}
-		s.mux.RUnlock()
+		s.mux.Unlock()
 
 		// uint64
 		var segm, allOk, done, fails, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64
