@@ -156,6 +156,12 @@ type Provider struct {
 		refreshed  uint64 // number of articles refreshed
 		verified   uint64 // number of articles verified
 	}
+	// speed tracking (updated by Speedmeter every PrintStats seconds)
+	speed struct {
+		downloadSpeed float64 // bytes/sec (download)
+		uploadSpeed   float64 // bytes/sec (upload)
+		lastUpdated   int64   // unix timestamp of last update
+	}
 } // end Provider struct
 
 type segmentChanItem struct {
@@ -204,6 +210,7 @@ type segmentChanItem struct {
 	flaginYenc  bool                             // if true, item is in writing to yenc cache
 	flagisYenc  bool                             // if true, item has been written to yenc cache
 	flagCache   bool                             // if true, item is cached
+	memlocked   int                              // counts up if item is memlocked
 	checkedOn   int                              // counts up if item has been checked on a provider
 	pushedDL    int                              // a counter for debugging
 	pushedUP    int                              // a counter for debugging
