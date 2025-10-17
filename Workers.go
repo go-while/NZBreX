@@ -991,7 +991,7 @@ forever:
 		segcheckdone := s.segcheckdone   // read value of s.segcheckdone
 		s.mux.RUnlock()
 
-		if !segcheckdone && ((checked == todo || cached == todo) && checkFeedDone) {
+		if !segcheckdone && checked == todo && checkFeedDone {
 			s.mux.Lock()
 			s.segmentCheckEndTime = time.Now()
 			took := time.Since(s.segmentCheckStartTime)
