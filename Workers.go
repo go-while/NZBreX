@@ -104,6 +104,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 					// the check routine may still be activly checking!
 					s.checkFeedDone = true
 					s.mux.Unlock()
+					close(segmentChanCheck) // close the chan to signal no more items will come
 				}(s.segmentChansCheck[provider.Group])
 			}
 			globalmux.Unlock()
@@ -185,6 +186,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	segCC := s.segmentChansCheck[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem, segCC chan *segmentChanItem) {
 		defer waitWorker.Done()
+		defer dlog(always, "CheckRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	forGoCheckRoutine:
 		for {
 			item, ok := <-segCC
@@ -216,6 +218,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	segCD := s.segmentChansDowns[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem, segCD chan *segmentChanItem) {
 		defer waitWorker.Done()
+		defer dlog(always, "GoDownsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	forGoDownsRoutine:
 		for {
 			dlog(cfg.opt.DebugWorker, "GoDownsRoutine: wid=%d provider='%s' wait on segCD len=%d", wid, provider.Name, len(segCD))
@@ -232,7 +235,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 			start := time.Now()
 			who := fmt.Sprintf("DR=%d@'%s'#'%s' seg.Id='%s'", wid, provider.Name, provider.Group, item.segment.Id)
-			memlim.MemLockWait(item, who)
+			memlim.MemLockWait(item, who) // gets memlock here
 			dlog(cfg.opt.DebugWorker && cfg.opt.DebugMemlim, "GoDownsRoutine got MemCheckWait who='%s' waited=(%d ms)", who, time.Since(start).Milliseconds())
 			errStr := ""
 			StartDowns := time.Now()
@@ -274,6 +277,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	segCR := s.segmentChansReups[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, sharedCC chan *ConnItem, segCR chan *segmentChanItem) {
 		defer waitWorker.Done()
+		defer dlog(always, "ReupsRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	forGoReupsRoutine:
 		for {
 			item, ok := <-segCR
@@ -304,7 +308,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
 
 			DecreaseUPQueueCnt()
-			if err != nil {
+			if err != nil || code == 0 {
 				errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' no retry", code, err)
 				dlog(always, "%s", errStr)
 				memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
@@ -362,9 +366,17 @@ func matchThisDL(item *segmentChanItem) bool {
 } // end func matchThisDL
 
 func (item *segmentChanItem) FlagError(providerId int) {
+	log.Printf("FlagError called for providerId=%d on segment.Id='%s' waiting to lock item mutex", providerId, item.segment.Id)
 	item.mux.Lock()
 	defer item.mux.Unlock()
+	item.ignoreDlOn[providerId] = true
+	item.ignoreUlOn[providerId] = true
 	item.errorOn[providerId] = true
+	item.flaginUP = false
+	item.flaginDL = false
+	item.fails++
+	delete(item.availableOn, providerId)
+	dlog(always, "Flagged item error, will not retry '%s' on providerId=%d", item.segment.Id, providerId)
 }
 
 func (item *segmentChanItem) FlagDLFailed(providerList []*Provider, providerGroup string) {
@@ -377,6 +389,7 @@ func (item *segmentChanItem) FlagDLFailed(providerList []*Provider, providerGrou
 		item.ignoreDlOn[id] = true
 		item.missingOn[id] = true
 		item.errorOn[id] = true
+		delete(item.availableOn, id)
 	}
 }
 
@@ -418,7 +431,7 @@ func (s *SESSION) pushDL(allowDl bool, item *segmentChanItem) (pushed bool, nodl
 		return false, 1, nil // not a match, item is already in DL or UP or has article
 	}
 	if !memlim.MemAvail() {
-		return
+		return false, 1, nil // not enough memory available to download
 	}
 	// if we are here, we are allowed to push the item to download queue
 	// loop over the availableOn map and check if we can push the item to download
@@ -434,6 +447,10 @@ providerDl:
 		}
 		if item.missingOn[pid] {
 			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] (nodl) item missingOn but should be avail!? seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
+			continue providerDl
+		}
+		if item.errorOn[pid] {
+			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] (nodl) item errorOn seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			continue providerDl
 		}
 		if s.providerList[pid].NoDownload {
@@ -464,7 +481,7 @@ providerDl:
 			item.pushedDL++ // mark as pushed to download queue (in pushDL)
 			IncreaseDLQueueCnt()
 			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] pushed to dlchan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
-			return // return after 1st push!
+			return pushed, 0, nil // return after 1st push!
 		default:
 			dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full @ #'%s', retry next", s.providerList[pid].Group)
 			// chan is full means we cannot push the item to the download queue to this provider group
@@ -475,19 +492,19 @@ providerDl:
 		} // end select
 		//}
 	} // end for providerDl
-	return
+	return false, 1, nil
 } // end func pushDL
 
 func (s *SESSION) pushUP(allowUp bool, item *segmentChanItem) (pushed bool, noup uint64, inretry uint64, err error) {
 	if !allowUp {
-		return
+		return false, 1, 0, fmt.Errorf("pushUP not allowed")
 	}
 
 	s.mux.RLock()
 	segcheckdone := s.segcheckdone // get the segcheckdone state
 	s.mux.RUnlock()
 	if cfg.opt.CheckFirst && !segcheckdone {
-		return
+		return false, 1, 0, nil // still checking, do not push to upload yet
 	}
 
 	item.mux.Lock() // LOCK item for the duration of this function
@@ -514,6 +531,11 @@ providerUp:
 			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) flagNoUp seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			continue providerUp
 		}
+		if item.ignoreUlOn[pid] {
+			noup++
+			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) ignoreUlOn seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
+			continue providerUp
+		}
 		if item.uploadedTo[pid] {
 			noup++
 			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) uploadedTo seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
@@ -532,6 +554,11 @@ providerUp:
 		if item.dmcaOn[pid] {
 			noup++
 			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) dmcaOn seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
+			continue providerUp
+		}
+		if item.errorOn[pid] {
+			noup++
+			dlog(cfg.opt.DebugWorker, " | [DV-pushUP] (noup) errorOn seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			continue providerUp
 		}
 		if item.retryOn[pid] {
@@ -557,7 +584,7 @@ providerUp:
 			IncreaseUPQueueCnt() // increment upQueueCnt counter
 			//GCounter.IncrMax("upQueueCnt", uint64(len(s.segmentList)), "pushUP")
 			//GCounter.IncrMax("TOTAL_upQueueCnt", uint64(len(s.segmentList)), "pushUP")
-			dlog(cfg.opt.DebugWorker, " | pushUP: in chan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
+			dlog(always, " | pushUP: in chan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			return true, 0, 0, nil // return after 1st push to a group!
 		default:
 			//dlog(cfg.opt.BUG "DEBUG SPAM pushUP: chan is full @ '%s'", s.providerList[pid].Name)
@@ -692,36 +719,33 @@ forever:
 			}
 			item.mux.RUnlock() // RUNLOCKS HERE #824d
 
-			if !testing {
-				pushedUp, nNoUp, nInRetry, a1err := s.pushUP(allowUp, item)
-				if a1err != nil {
-					dlog(always, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.Id)
+			pushedUp, nNoUp, nInRetry, a1err := s.pushUP(allowUp, item)
+			if a1err != nil {
+				dlog(always, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.Id)
+				continue forsegmentList
+			}
+			if pushedUp {
+				inup++
+				dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDup seg.Id='%s' pushedUp=%t inup=%d", item.segment.Id, pushedUp, inup)
+			}
+			noup += nNoUp
+			inretry += nInRetry
+
+			if !pushedUp && allowDl {
+				pushedDl, nNoDl, b1err := s.pushDL(allowDl, item)
+				if b1err != nil {
+					dlog(always, "ERROR pushDL err='%v' (seg.Id='%s')", b1err, item.segment.Id)
 					continue forsegmentList
 				}
-				if pushedUp {
-					inup++
-					dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDup seg.Id='%s' pushedUp=%t inup=%d", item.segment.Id, pushedUp, inup)
+				nodl += nNoDl
+				Tnodl += uint64(len(item.ignoreDlOn))
+				if pushedDl {
+					indl++
+					//if cfg.opt.BUG {
+					dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDdl seg.Id='%s' pushedDl=%t indl=%d", item.segment.Id, pushedDl, indl)
+					//}
 				}
-				noup += nNoUp
-				//Tnoup += len(item.ignoreDlOn)
-				inretry += nInRetry
-
-				if !pushedUp && allowDl {
-					pushedDl, nNoDl, b1err := s.pushDL(allowDl, item)
-					if b1err != nil {
-						dlog(always, "ERROR pushDL err='%v' (seg.Id='%s')", b1err, item.segment.Id)
-						continue forsegmentList
-					}
-					nodl += nNoDl
-					Tnodl += uint64(len(item.ignoreDlOn))
-					if pushedDl {
-						indl++
-						//if cfg.opt.BUG {
-						dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDdl seg.Id='%s' pushedDl=%t indl=%d", item.segment.Id, pushedDl, indl)
-						//}
-					}
-				} // end pushDL
-			} // if !testing {
+			} // end pushDL
 
 		} // end for forsegmentList
 		//dlog(cfg.opt.DebugWorker, " | [DV] lastRunTook='%d ms' '%v", lastRunTook.Milliseconds(), lastRunTook)

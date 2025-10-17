@@ -71,6 +71,13 @@ func (m *MemLimiter) MemAvail() (retbool bool) {
 }
 
 func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
+	item.mux.Lock()
+	if item.memlocked > 0 {
+		item.mux.Unlock()
+		dlog(always, "MemLockWait called on already memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
+		return
+	}
+	item.mux.Unlock()
 
 	GCounter.Incr("MemLockWait")
 	defer GCounter.Decr("MemLockWait")
@@ -102,6 +109,9 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
 		} // end for waithere
 	*/
 	<-m.memchan // infinite wait to get a slot from chan
+	item.mux.Lock()
+	item.memlocked++
+	item.mux.Unlock()
 
 	m.mux.Lock()
 	m.waiting--
@@ -115,7 +125,12 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string) {
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	//dlog(cfg.opt.DebugMemlim, "MemReturn free seg.Id='%s' who='%s'", item.segment.Id, who)
 	defer GCounter.Incr("TOTAL_MemReturned")
-
+	item.mux.RLock()
+	if item.memlocked == 0 {
+		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
+		return // not memlocked, nothing to do
+	}
+	item.mux.RUnlock()
 	// remove map entry from mem
 	m.mux.Lock()
 	delete(m.memdata, item)
@@ -130,6 +145,8 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 		dlog(always, "ERROR on MemReturn chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
 		os.Exit(1) // this is a bug! we should never return a slot to a full chan!
 	}
-
+	item.mux.Lock()
+	item.memlocked--
+	item.mux.Unlock()
 	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.Id, who)
 } // end func memlim.MemReturn
