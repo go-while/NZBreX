@@ -15,6 +15,7 @@ package main
  */
 
 import (
+	"log"
 	"os"
 
 	"github.com/go-while/go-loggedrwmutex"
@@ -131,7 +132,6 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 		return // not memlocked, nothing to do
 	}
 	item.mux.RUnlock()
-	defer GCounter.Incr("TOTAL_MemReturned")
 
 	// remove map entry from mem
 	m.mux.Lock()
@@ -141,11 +141,11 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	// return the slot
 	select {
 	case m.memchan <- struct{}{}: // return mem slot into chan
-		//pass
+		GCounter.Incr("TOTAL_MemReturned")
 	default:
 		// wtf chan is full?? that's a bug!
-		dlog(always, "ERROR on MemReturn chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
-		os.Exit(1) // this is a bug! we should never return a slot to a full chan!
+		// this is a bug! we should never return a slot to a full chan!
+		log.Fatalf("ERROR on MemReturn chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
 	}
 	item.mux.Lock()
 	item.memlocked--

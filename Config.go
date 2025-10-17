@@ -132,6 +132,7 @@ type Provider struct {
 	Username      string    // username for authentication
 	Password      string    // password for authentication
 	MaxConns      int       // maximum number of connections to the provider
+	OpenConns     int       // current number of open connections
 	TCPMode       string    // TCP mode to use (tcp, tcp4, tcp6)
 	PreferIHAVE   bool      // if true, prefer IHAVE over POST method
 	MaxConnErrors int       // maximum number of errors before giving up on a connection
@@ -163,6 +164,18 @@ type Provider struct {
 		lastUpdated   int64   // unix timestamp of last update
 	}
 } // end Provider struct
+
+func (p *Provider) IncrementOpenConns() {
+	p.mux.Lock()
+	p.OpenConns++
+	p.mux.Unlock()
+}
+
+func (p *Provider) DecrementOpenConns() {
+	p.mux.Lock()
+	p.OpenConns--
+	p.mux.Unlock()
+}
 
 type segmentChanItem struct {
 	// segmentChanItem is used to store information about a segment/article

@@ -447,6 +447,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		}
 		item.flaginUP = false
 		item.flagisUP = true
+		item.fails = 0
 		item.mux.Unlock()
 		// update provider statistics
 		provider.mux.Lock() // mutex #87c9 articles.refreshed++

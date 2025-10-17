@@ -83,6 +83,7 @@ type SESSION struct {
 	checkFeedDone         bool              // checkDone is set to true when the segment feeder has finished feeding to channel, check may still be activly running!
 	segcheckdone          bool              // segcheckdone is set to true when the segment check is done
 	proxy                 bool              // flag to signal proxy is used in LaunchSession
+	bootedWorkers         int               // counts how many workers have been booted
 } // end type SESSION struct
 
 func (p *PROCESSOR) NewProcessor() error {
