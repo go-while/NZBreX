@@ -841,7 +841,7 @@ forever:
 
 			pushedUp, nNoUp, nInRetry, a1err := s.pushUP(allowUp, item)
 			if a1err != nil {
-				dlog(always, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.Id)
+				dlog(cfg.opt.DebugWorker, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.Id)
 				continue forsegmentList
 			}
 			if pushedUp {
