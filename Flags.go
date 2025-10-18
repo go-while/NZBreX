@@ -7,14 +7,19 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mrand "math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-while/NZBreX/rapidyenc"
 	prof "github.com/go-while/go-cpu-mem-profiler"
 )
+
+var AddUserDataToProxy string // AddUserToProxy is a flag to add user to proxy
 
 func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
@@ -80,6 +85,12 @@ func ParseFlags() {
 	flag.IntVar(&cfg.opt.MaxArtSize, "maxartsize", DefaultMaxArticleSize, "limits article size to 1M (mostly articles have ~700K only)")
 	flag.BoolVar(&testmode, "zzz-shr-testmode", false, "[true|false] only used to test compilation on self-hosted runners (default: false)")
 	flag.BoolVar(&testrapidyenc, "testrapidyenc", false, "[true|false] will test rapidyenc testfiles on boot and exit (default: false)")
+	flag.IntVar(&cfg.opt.ProxyTCP, "proxytcp", 0, "if set: use this port (e.g.: 1119) for TCP proxying (default: 0 = no proxy)")
+	flag.IntVar(&cfg.opt.ProxyTLS, "proxytls", 0, "if set: use this port (e.g.: 1563) for TLS proxying (default: 0 = no proxy)")
+	flag.StringVar(&cfg.opt.TLSCertPem, "tlscrt", "fullchain.pem", "path to TLS certificate file for proxy (default: fullchain.pem in current dir)")
+	flag.StringVar(&cfg.opt.TLSPrivKey, "tlskey", "privkey.pem", "path to TLS private key file for proxy (default: privkey.pem in current dir)")
+	flag.StringVar(&AddUserDataToProxy, "proxyadduser", "", "if set: adds this user to proxy ( \ne.g.: -proxyadduser='username1234|password4567|maxconns|expires|(no)post'\n ) \nPassword entered MUST be cleartext, hashing is done when writing to .passwd file!\n Expiration: you can use a 'number of days' with 'd' at the end (e.g. 7d, 30d, 365d) or 'h'  for hours (1h, 12h, ...) or 'm' minutes (1m, 30m, ...), it will be converted to a valid unixtimestamp expiring in the future from now on! (default: empty = no user added)\nExample -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d|nopost\" creates a user with 5 conns and 42 days to expiration")
+	flag.StringVar(&cfg.opt.ProxyPasswdFile, "proxypasswdfile", ".proxypasswd", "if set: use this file for proxy (default: .proxypasswd in current dir)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
 	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
@@ -93,6 +104,83 @@ func ParseFlags() {
 	if runProf {
 		Prof = prof.NewProf()
 		RunProf()
+	}
+	if cfg.opt.ProxyPasswdFile == "" {
+		cfg.opt.ProxyPasswdFile = ".proxypasswd" // default passwd file for proxy
+	}
+	if AddUserDataToProxy != "" {
+		// Format: 'user|password|maxconns|expires|(no)post' (expires is unix timestamp)
+		parts := strings.SplitN(AddUserDataToProxy, "|", 5)
+		if len(parts) != 5 {
+			log.Fatalf("-proxyadduser expects format: user|password|maxconns|expires|(no)post (got: %q)", AddUserDataToProxy)
+		}
+		var username, password string
+		Ausername := strings.TrimSpace(parts[0])
+		Apassword := strings.TrimSpace(parts[1])
+		if Ausername == "auto" && Apassword == "auto" {
+			// create auto user with random password
+			username, password, _ = generateRandomHexCredentials()
+		} else {
+			username = Ausername
+			password = Apassword
+		}
+		if len(username) < 10 {
+			log.Fatalf("-proxyadduser: username must be at least 10 characters long, got %d characters", len(username))
+		}
+		if len(password) < 10 {
+			log.Fatalf("-proxyadduser: password must be at least 10 characters long, got %d characters", len(password))
+		}
+		if Ausername == "auto" && Apassword == "auto" {
+			dlog(always, "-proxyadduser: auto generated credentials: username='%s' password='%s'", username, password)
+		}
+		maxconns, err1 := strconv.Atoi(parts[2])
+		expiresStr := strings.TrimSpace(parts[3])
+		var expires int64
+		if strings.HasSuffix(expiresStr, "d") {
+			days, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "d"), 10, 64)
+			if err != nil {
+				log.Fatalf("-proxyadduser: invalid expires (days): %s", expiresStr)
+			}
+			expires = time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
+		} else if strings.HasSuffix(expiresStr, "h") {
+			hours, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "h"), 10, 64)
+			if err != nil {
+				log.Fatalf("-proxyadduser: invalid expires (hours): %s", expiresStr)
+			}
+			expires = time.Now().Add(time.Duration(hours) * time.Hour).Unix()
+		} else if strings.HasSuffix(expiresStr, "m") {
+			minutes, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "m"), 10, 64)
+			if err != nil {
+				log.Fatalf("-proxyadduser: invalid expires (minutes): %s", expiresStr)
+			}
+			expires = time.Now().Add(time.Duration(minutes) * time.Minute).Unix()
+		} else {
+			expiresInt, err2 := strconv.ParseInt(parts[3], 10, 64)
+			if err1 != nil || err2 != nil {
+				log.Fatalf("-proxyadduser: invalid maxconns or expires: maxconns='%s' expires='%s'", parts[2], parts[3])
+			}
+			expires = expiresInt
+		}
+		if username == "" || password == "" {
+			log.Fatalf("-proxyadduser: username and password must not be empty")
+		}
+		if expires < time.Now().Unix() {
+			log.Fatalf("-proxyadduser: expires must be a future timestamp, got %d", expires)
+		}
+		// Compose new passwd file name
+		newPasswdFile := fmt.Sprintf("%s.new.%d.%d", cfg.opt.ProxyPasswdFile, time.Now().Unix(), mrand.Intn(65535))
+		userData := &UserData{
+			Username: username,
+			Password: password,
+			MaxConns: maxconns,
+			ExpireAt: expires,
+			Posting:  strings.HasPrefix(strings.ToLower(parts[4]), "post"),
+		}
+		if err := addUserToProxyPasswdFile(userData, newPasswdFile); err != nil {
+			log.Fatalf("Failed to add user to %s: %v", newPasswdFile, err)
+		}
+		// Redact password before logging
+		os.Exit(0)
 	}
 	// test rapidyenc decoder
 	if testrapidyenc {
@@ -216,6 +304,10 @@ func ParseFlags() {
 	} else if err != nil {
 		dlog(always, "ERROR loading headers failed file='%s' err='%v'", cfg.opt.CleanHeadersFile, err)
 		os.Exit(1)
+	}
+
+	if cfg.opt.ProxyTCP > 0 || cfg.opt.ProxyTLS > 0 {
+		proxy = true
 	}
 
 	dlog(cfg.opt.Verbose, "Settings: '%#v'", *cfg.opt)

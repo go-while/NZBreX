@@ -3,6 +3,7 @@ package main
 import (
 	//"bufio"
 	//"bytes"
+	"archive/zip"
 	"bufio"
 	"compress/gzip"
 	"crypto/sha256"
@@ -79,6 +80,38 @@ func loadNzbFile(path string) (*nzbparser.Nzb, error) {
 		}
 		defer gzReader.Close()
 		parsedReader = gzReader
+	} else if strings.HasSuffix(strings.ToLower(path), ".zip") {
+		// ZIP requires random access, can't stream directly
+		// Need to read file info first
+		fi, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		zipReader, err := zip.NewReader(f, fi.Size())
+		if err != nil {
+			return nil, err
+		}
+		// Find first .nzb file in ZIP
+		if len(zipReader.File) == 0 {
+			return nil, fmt.Errorf("zip file is empty")
+		}
+		var nzbFile *zip.File
+		for _, zf := range zipReader.File {
+			if strings.HasSuffix(strings.ToLower(zf.Name), ".nzb") {
+				nzbFile = zf
+				dlog(always, "loadNzbFile: found nzb file in zip: '%s'", zf.Name)
+				break
+			}
+		}
+		if nzbFile == nil {
+			return nil, fmt.Errorf("no .nzb file found in zip archive")
+		}
+		rc, err := nzbFile.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		parsedReader = rc
 	} else {
 		parsedReader = f
 	}
@@ -226,11 +259,10 @@ func LoadHeadersFromFile(path string) ([]string, error) {
 
 // AppendFileBytes appends null bytes to the end of a file.
 // It opens the file in append mode, creates it if it does not exist, and writes the specified number of null bytes.
-// If nullbytes is 0, it does nothing.
-// If nullbytes is negative, it returns an error.
+// If nullbytes is 0 or negative, it returns an error.
 // If the file does not exist, it creates a new file with the specified number of null bytes.
 // If the file exists, it appends the specified number of null bytes to the end of the file.
-func AppendFileBytes(nullbytes int, dstPath string) error {
+func AppendFileBytes(nullbytes int, dstPath string) (err error) {
 	if nullbytes <= 0 {
 		return fmt.Errorf("error AppendFileBytes nullbytes=%d must be greater than 0", nullbytes)
 	}
@@ -239,24 +271,38 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	}
 
 	// Open destination file in append mode, create if not exists
-	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		return err
+	dstFile, openErr := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if openErr != nil {
+		return openErr // Return opening error directly
 	}
+	// Defer Close and handle its error.
+	// If err is already set (e.g., from Write or Flush), this deferred Close error will not overwrite it.
+	// If err is nil, and Close fails, err will be set to the Close error.
 	defer func() {
-		cerr := dstFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
+		if closeErr := dstFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error closing file '%s': %v", dstPath, closeErr)
+			}
+			// Optional: Log closeErr if err was already set, e.g.:
+			// else { log.Printf("AppendFileBytes: additionally failed to close '%s' during error handling: %v", dstPath, closeErr) }
 		}
 	}()
-	nul := make([]byte, nullbytes)
+
+	writer := bufio.NewWriter(dstFile)
 	for i := 0; i < nullbytes; i++ {
-		nul = append(nul, 0x00)
+		if err = writer.WriteByte(0x00); err != nil {
+			// err is assigned (it's the named return), will be returned. Defer will run.
+			return err
+		}
 	}
-	if _, writeErr := dstFile.Write(nul); writeErr != nil {
-		return writeErr
+
+	// Ensure all buffered data is written to the file
+	if err = writer.Flush(); err != nil {
+		// err is assigned, will be returned. Defer will run.
+		return err
 	}
-	return nil
+
+	return nil // If everything is successful, err remains nil (or gets set by defer if Close fails)
 } // end func AppendFileBytes
 
 // AppendFile appends (merges) the file contents of srcPath to dstPath.
@@ -268,54 +314,64 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 // If the destination file does not exist, it creates a new file.
 // If the source file is empty, it does nothing.
 func AppendFile(srcPath string, dstPath string, delsrc bool) (err error) {
-	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("error AppendFile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
+	if srcPath == "" {
+		return fmt.Errorf("error AppendFile srcPath is empty")
+	}
+	if dstPath == "" {
+		return fmt.Errorf("error AppendFile dstPath is empty")
 	}
 
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		cerr := srcFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
-
-	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		return err
+	// Open source file for reading
+	srcFile, openSrcErr := os.Open(srcPath)
+	if openSrcErr != nil {
+		return fmt.Errorf("error AppendFile opening source file '%s': %w", srcPath, openSrcErr)
 	}
 	defer func() {
-		cerr := dstFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
-
-	buf := make([]byte, DefaultYencWriteBuffer)
-	for {
-		n, readErr := srcFile.Read(buf)
-		if n > 0 {
-			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
-				return writeErr
+		if closeErr := srcFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error AppendFile closing source file '%s': %w", srcPath, closeErr)
 			}
+			// Optional: Log closeErr if err was already set
+			// else { log.Printf("AppendFile: additionally failed to close source '%s' during error handling: %v", srcPath, closeErr) }
 		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return readErr
-		}
+	}()
+
+	// Open destination file in append mode, create if not exists
+	dstFile, openDstErr := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if openDstErr != nil {
+		return fmt.Errorf("error AppendFile opening destination file '%s': %w", dstPath, openDstErr)
 	}
+	defer func() {
+		if closeErr := dstFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error AppendFile closing destination file '%s': %w", dstPath, closeErr)
+			}
+			// Optional: Log closeErr if err was already set
+			// else { log.Printf("AppendFile: additionally failed to close destination '%s' during error handling: %v", dstPath, closeErr) }
+		}
+	}()
+
+	// Create a buffer and copy in chunks using io.CopyBuffer for efficiency
+	// DefaultYencWriteBuffer is assumed to be defined elsewhere, e.g., const DefaultYencWriteBuffer = 32 * 1024
+	buf := make([]byte, DefaultYencWriteBuffer) // Ensure DefaultYencWriteBuffer is a reasonable size
+	if _, copyErr := io.CopyBuffer(dstFile, srcFile, buf); copyErr != nil {
+		return fmt.Errorf("error AppendFile copying from '%s' to '%s': %w", srcPath, dstPath, copyErr)
+	}
+
+	// Ensure all buffered data for dstFile is written to disk before attempting to remove srcFile
+	if syncErr := dstFile.Sync(); syncErr != nil {
+		return fmt.Errorf("error AppendFile syncing destination file '%s': %w", dstPath, syncErr)
+	}
+
 	if delsrc {
-		if err := os.Remove(srcPath); err != nil {
-			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
+		if removeErr := os.Remove(srcPath); removeErr != nil {
+			// Assign to err, so it's returned by the named return, and defer for dstFile can still run.
+			err = fmt.Errorf("error AppendFile removing source file '%s': %w", srcPath, removeErr)
+			return err
 		}
 	}
-	return
-} // end func AppendFile (written by AI! GPT-4o, complaint and changed by GPT-4.1!)
+	return nil // If everything is successful, err remains nil (or gets set by defers if Close fails)
+} // end func AppendFile
 
 func SHA256SumFile(path string) (string, error) {
 	// Open the file for reading
@@ -341,79 +397,83 @@ func SHA256SumFile(path string) (string, error) {
 func (s *SESSION) writeCsvFile() (err error) {
 	// not tested since rewrite
 	if !cfg.opt.Csv {
-		return
+		return nil // Not an error, just not enabled
 	}
+	if s.nzbPath == "" {
+		return fmt.Errorf("writeCsvFile: nzbPath is empty, cannot determine CSV filename")
+	}
+
 	csvFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".csv"
-	f, err := os.Create(csvFileName)
-	if err != nil {
-		return fmt.Errorf("unable to open csv file: %v", err)
+	f, createErr := os.Create(csvFileName)
+	if createErr != nil {
+		return fmt.Errorf("writeCsvFile: unable to create csv file '%s': %w", csvFileName, createErr)
 	}
 	defer func() {
-		if cerr := f.Close(); cerr != nil {
-			log.Printf("ERROR closing file %s: %v", csvFileName, cerr)
+		if closeErr := f.Close(); closeErr != nil {
+			log.Printf("writeCsvFile: error closing csv file '%s': %v", csvFileName, closeErr) // Log the close error regardless
+			if err == nil {                                                                    // Only assign closeErr to the return if no other error has occurred
+				err = fmt.Errorf("writeCsvFile: error closing csv file '%s': %w", csvFileName, closeErr)
+			}
 		}
 	}()
-	log.Println("writing csv file...")
-	fmt.Print("Writing csv file... ")
+
+	log.Println("writing csv file...", csvFileName)      // Added filename to log
+	fmt.Printf("Writing csv file '%s'... ", csvFileName) // Added filename to print
+
 	csvWriter := csv.NewWriter(f)
-	firstLine := true
-	// make sorted provider name slice
+
+	// Prepare header
+	// Make sorted provider name slice
 	providers := make([]string, 0, len(s.providerList))
-	for n := range s.providerList {
-		providers = append(providers, s.providerList[n].Name)
+	for _, p := range s.providerList { // More idiomatic loop
+		providers = append(providers, p.Name)
 	}
-	sort.Strings(providers)
-	for fileName, file := range s.fileStat {
-		// write first line
-		if firstLine {
-			line := make([]string, len(providers)+2)
-			line[0] = "Filename"
-			line[1] = "Total segments"
-			for n, providerName := range providers {
-				line[n+2] = providerName
-			}
-			if err := csvWriter.Write(line); err != nil {
-				return fmt.Errorf("unable to write to the csv file: %v", err)
-			}
-			firstLine = false
-		}
-		// write line
+	sort.Strings(providers) // Ensure consistent column order
+
+	header := make([]string, len(providers)+2)
+	header[0] = "Filename"
+	header[1] = "TotalSegments"
+	copy(header[2:], providers)
+
+	if writeErr := csvWriter.Write(header); writeErr != nil {
+		return fmt.Errorf("writeCsvFile: unable to write header to csv file '%s': %w", csvFileName, writeErr)
+	}
+
+	// Write data rows
+	// To ensure consistent row order if fileStat is a map, consider sorting keys
+	fileNames := make([]string, 0, len(s.fileStat))
+	for fn := range s.fileStat {
+		fileNames = append(fileNames, fn)
+	}
+	sort.Strings(fileNames) // Sort filenames for consistent output order
+
+	for _, fileName := range fileNames {
+		file := s.fileStat[fileName]
 		line := make([]string, len(providers)+2)
 		line[0] = fileName
-		line[1] = fmt.Sprintf("%v", file.totalSegments)
-		for n, providerName := range providers {
+		line[1] = fmt.Sprintf("%d", file.totalSegments) // Use %d for integers
+		for i, providerName := range providers {
 			if value, ok := file.available[providerName]; ok {
-				line[n+2] = fmt.Sprintf("%v", value)
+				line[i+2] = fmt.Sprintf("%d", value) // Use %d for integers
 			} else {
-				line[n+2] = "0"
+				line[i+2] = "0"
 			}
 		}
-		if err := csvWriter.Write(line); err != nil {
-			return fmt.Errorf("unable to write to the csv file: %v", err)
+		if writeErr := csvWriter.Write(line); writeErr != nil {
+			return fmt.Errorf("writeCsvFile: unable to write line for '%s' to csv file '%s': %w", fileName, csvFileName, writeErr)
 		}
 	}
+
 	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		return fmt.Errorf("unable to write to the csv file: %v", err)
+	if flushErr := csvWriter.Error(); flushErr != nil {
+		return fmt.Errorf("writeCsvFile: error flushing csv writer for '%s': %w", csvFileName, flushErr)
 	}
-	dlog(cfg.opt.Csv, "writeCsv: done")
-	return
+
+	fmt.Println("Done.") // Indicate completion for the fmt.Print above
+	dlog(cfg.opt.Csv, "writeCsvFile: done for '%s'", csvFileName)
+	return nil // err is nil if execution reaches here successfully
 } // end func writeCsv
 
-/*
-	func setGlobalTimerNow(timer *time.Time) {
-		globalmux.Lock()
-		*timer = time.Now()
-		globalmux.Unlock()
-	}
-
-	func getGlobalTimerSince(timer time.Time) time.Duration {
-		globalmux.RLock()
-		duration := time.Since(timer)
-		globalmux.RUnlock()
-		return duration
-	}
-*/
 func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps float64) {
 	if durationSeconds <= 0 {
 		return 0, 0

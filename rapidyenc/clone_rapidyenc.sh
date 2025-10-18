@@ -1,1 +1,1 @@
-git clone https://github.com/animetosho/rapidyenc.git || exit 1
+# test ! -d rapidyenc && git clone https://github.com/animetosho/rapidyenc.git

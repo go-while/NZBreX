@@ -7,7 +7,7 @@ import (
 	"github.com/go-while/go-loggedrwmutex"
 )
 
-const UseSharedCC = false     // experimental devel flag, to test sharedConn between routines
+const UseSharedCC = true      // experimental devel flag, to test sharedConn between routines
 const UseReadDeadConn = false // experimental devel flag, to test reading from dead connections
 const UseNoDeadline = true    // experimental devel flag, to test reading from dead connections
 
@@ -39,9 +39,9 @@ const (
 	// DefaultConnectTimeout defines the timeout for connecting to a server
 	DefaultConnectTimeout = 9 * time.Second
 	// DefaultConnectErrSleep defines the time to wait before retrying a connection after an error
-	DefaultConnectErrSleep = 9 * time.Second
+	DefaultConnectErrSleep = 3 * time.Second
 	// DefaultRequeueDelay defines the delay before requeuing an item in the segment channel
-	DefaultRequeueDelay = 9 * time.Second
+	//DefaultRequeueDelay = 9 * time.Second
 )
 
 type Config struct {
@@ -101,14 +101,19 @@ type CFG struct {
 	DebugFlags              bool   `json:"DebugFlags"`              // if true, enable printing item flags
 	DebugRapidYenc          bool   `json:"DebugRapidYenc"`          // if true, enable rapidyenc debug output
 	//DebugSTREAM       bool   `json:"DebugSTREAM"`      // if true, enable STREAM debug output
-	Verbose       bool `json:"Verbose"`       // if true, enable verbose output
-	Bar           bool `json:"Bar"`           // if true, show progress bar
-	Colors        bool `json:"Colors"`        // if true, enable colored output
-	MaxArtSize    int  `json:"MaxArtSize"`    // maximum article size in bytes
-	SloMoC        int  `json:"SloMoC"`        // slow motion for checking articles
-	SloMoD        int  `json:"SloMoD"`        // slow motion for downloading articles
-	SloMoU        int  `json:"SloMoU"`        // slow motion for uploading articles
-	SessThreshold int  `json:"SessThreshold"` // max number of sessions a processor keeps open
+	Verbose         bool   `json:"Verbose"`         // if true, enable verbose output
+	Bar             bool   `json:"Bar"`             // if true, show progress bar
+	Colors          bool   `json:"Colors"`          // if true, enable colored output
+	MaxArtSize      int    `json:"MaxArtSize"`      // maximum article size in bytes
+	SloMoC          int    `json:"SloMoC"`          // slow motion for checking articles
+	SloMoD          int    `json:"SloMoD"`          // slow motion for downloading articles
+	SloMoU          int    `json:"SloMoU"`          // slow motion for uploading articles
+	SessThreshold   int    `json:"SessThreshold"`   // max number of sessions a processor keeps open
+	TLSCertPem      string `json:"TLSCertPem"`      // path to the TLS certificate in PEM format: /etc/letsencrypt/live/sub.domain.com/fullchain.pem
+	TLSPrivKey      string `json:"TLSPrivKey"`      // path to the TLS key in PEM format: /etc/letsencrypt/live/sub.domain.com/privkey.pem
+	ProxyTCP        int    `json:"ProxyTCP"`        // port for the TCP proxy, 0 = no proxy
+	ProxyTLS        int    `json:"ProxyTLS"`        // port for the TLS proxy, 0 = no proxy
+	ProxyPasswdFile string `json:"ProxyPasswdFile"` // path to the file with proxy passwords, format: "username|bcryptHash|MaxConns|ExpireAt(unix timestamp)|post" per line
 } // end CFG struct
 
 type Provider struct {
@@ -116,6 +121,7 @@ type Provider struct {
 	NoCheck       bool      // if true, no check will be done for this provider
 	NoDownload    bool      // if true, no download will be done for this provider
 	NoUpload      bool      // if true, no upload will be done for this provider
+	Newsreader    bool      // if true, provider allows newsreader commands (group, list, xhdr, xover,... etc.)
 	Group         string    // group name is used internally to divide providers accounts into groups
 	Name          string    // provider name, used for logging and identification
 	Host          string    // provider host, used for connecting to the server
@@ -126,6 +132,7 @@ type Provider struct {
 	Username      string    // username for authentication
 	Password      string    // password for authentication
 	MaxConns      int       // maximum number of connections to the provider
+	OpenConns     int       // current number of open connections
 	TCPMode       string    // TCP mode to use (tcp, tcp4, tcp6)
 	PreferIHAVE   bool      // if true, prefer IHAVE over POST method
 	MaxConnErrors int       // maximum number of errors before giving up on a connection
@@ -150,7 +157,25 @@ type Provider struct {
 		refreshed  uint64 // number of articles refreshed
 		verified   uint64 // number of articles verified
 	}
+	// speed tracking (updated by Speedmeter every PrintStats seconds)
+	speed struct {
+		downloadSpeed float64 // bytes/sec (download)
+		uploadSpeed   float64 // bytes/sec (upload)
+		lastUpdated   int64   // unix timestamp of last update
+	}
 } // end Provider struct
+
+func (p *Provider) IncrementOpenConns() {
+	p.mux.Lock()
+	p.OpenConns++
+	p.mux.Unlock()
+}
+
+func (p *Provider) DecrementOpenConns() {
+	p.mux.Lock()
+	p.OpenConns--
+	p.mux.Unlock()
+}
 
 type segmentChanItem struct {
 	// segmentChanItem is used to store information about a segment/article
@@ -198,6 +223,7 @@ type segmentChanItem struct {
 	flaginYenc  bool                             // if true, item is in writing to yenc cache
 	flagisYenc  bool                             // if true, item has been written to yenc cache
 	flagCache   bool                             // if true, item is cached
+	memlocked   int                              // counts up if item is memlocked
 	checkedOn   int                              // counts up if item has been checked on a provider
 	pushedDL    int                              // a counter for debugging
 	pushedUP    int                              // a counter for debugging
@@ -306,7 +332,7 @@ const (
 	cmdARTICLE = "ARTICLE"
 	cmdHEAD    = "HEAD"
 	cmdBODY    = "BODY"
-	cmdSTAT    = "STAT"
-	cmdIHAVE   = "IHAVE"
-	cmdPOST    = "POST"
+	//cmdSTAT    = "STAT"
+	//cmdIHAVE   = "IHAVE"
+	//cmdPOST    = "POST"
 )

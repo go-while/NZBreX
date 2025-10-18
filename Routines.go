@@ -40,17 +40,18 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		connitem, err = provider.ConnPool.GetConn()
 	}
 	if err != nil {
-		return 0, fmt.Errorf("ERROR in GoCheckRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoCheckRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	if connitem == nil || connitem.conn == nil {
-		return 0, fmt.Errorf("ERROR in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
-	code, err = CMD_STAT(connitem, item)
+	code, msg, err := CMD_STAT(connitem, item)
 	if code == 0 && err != nil {
 		// connection problem, closed?
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-		dlog(always, "WARN checking seg.Id='%s' failed @ '%s' err='%v'", item.segment.Id, provider.Name, err)
+		dlog(always, "WARN checking seg.Id='%s' failed @ '%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, code, msg, err)
 		return code, err
 	}
 
@@ -151,9 +152,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
-		// item has been read from cache
-		//DecreaseDLQueueCnt() // decrease when read from cache // DISABLED
-		//memlim.MemReturn(who+":cacheRead", item)
+		dlog(cfg.opt.DebugDR, "GoDownsRoutine: cache hit seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
 		return 920, nil
 	}
 	start := time.Now() // start time for this routine
@@ -166,20 +165,20 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		connitem, err = provider.ConnPool.GetConn()
 	}
 	if err != nil {
-		return 0, fmt.Errorf("ERROR in GoDownsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoDownsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	if connitem == nil || connitem.conn == nil {
-		return 0, fmt.Errorf("ERROR in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
 	startArticle := time.Now()
-	code, msg, rxb, err := CMD_ARTICLE(connitem, item)
-
+	code, msg, rxb, err := CMD(connitem, item, cmdARTICLE)
 	if err != nil {
-		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
-		// handle connection problem / closed connection
+		// connection problem, closed?
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		dlog(always, "ERROR in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		return 0, fmt.Errorf("error in GoDownsRoutine: CMD_ARTICLE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 	}
 
@@ -198,8 +197,8 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		s.counter.Add("TOTAL_RXbytes", uint64(item.size))
 
 		// to calulate total download speed of this provider
-		provider.ConnPool.counter.Add("TMP_RXbytes", uint64(item.size))
-		provider.ConnPool.counter.Add("TOTAL_RXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TMP_RXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TOTAL_RXbytes", uint64(item.size))
 
 		// to calulate global total download speed
 		GCounter.Add("TMP_RXbytes", uint64(item.size))
@@ -242,6 +241,7 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 
 		// pass item to cache.
 		dlog(cfg.opt.DebugWorker, "DEBUG GoDownsRoutine CMD_ARTICLE: reached cache.Add2Cache seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
+
 		cache.Add2Cache(item)
 		// pass to ParkConn
 
@@ -326,6 +326,15 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	defer GCounter.Decr("GoReupsRoutines")
 	//who := fmt.Sprintf("UR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)  // DISABLED MEMRETURN
 
+	item.mux.Lock()
+	memlocked := item.memlocked > 0
+	item.mux.Unlock()
+
+	if !memlocked {
+		dlog(cfg.opt.DebugWorker, "GoReupsRoutine: item not memlocked seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
+		memlim.MemLockWait(item, "GoUR") // gets memlock here
+	}
+
 	var err error
 	var connitem *ConnItem
 	if sharedCC != nil {
@@ -334,10 +343,10 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		connitem, err = provider.ConnPool.GetConn()
 	}
 	if err != nil {
-		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
-		return 0, fmt.Errorf("ERROR in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
 	}
 
 	var uploaded, unwanted, retry bool
@@ -351,9 +360,10 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	} else if provider.capabilities.ihave {
 		cmd = 2
 	} else {
-		//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
+		// connection problem, closed?
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
-		return 0, fmt.Errorf("WARN selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
+		return 0, fmt.Errorf("selecting upload mode failed '%s' caps='%#v'", provider.Name, provider.capabilities)
 	}
 	//provider.mux.RUnlock() // FIXME TODO #b8bd287b:
 
@@ -367,6 +377,12 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	switch cmd {
 	case 1:
 		code, msg, txb, err = CMD_POST(connitem, item)
+		if code == 0 && err != nil {
+			// connection problem, closed?
+			item.FlagError(provider.id)
+			provider.ConnPool.CloseConn(connitem, sharedCC)
+			return 0, fmt.Errorf("error in GoReupsRoutine: CMD_POST seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+		}
 		switch code {
 		case 240:
 			uploaded = true
@@ -378,15 +394,23 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	case 2:
 		code, msg, txb, err = CMD_IHAVE(connitem, item)
+		if code == 0 && err != nil {
+			// connection problem, closed?
+			item.FlagError(provider.id)
+			provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+			return 0, fmt.Errorf("error in GoReupsRoutine: CMD_IHAVE seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
+		}
 		switch code {
 		case 235:
 			uploaded = true
 			// pass
 		case 436:
 			retry = true
+			err = nil
 			// pass
 		case 437:
 			unwanted = true
+			err = nil
 			// pass
 		default:
 			dlog(always, "ERROR in GoReupsRoutine: CMD_IHAVE seg.Id='%s' @ '%s'#'%s' code=%d msg='%s' err='%v'", item.segment.Id, provider.Name, provider.Group, code, msg, err)
@@ -402,8 +426,8 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		s.counter.Add("TOTAL_TXbytes", uint64(item.size))
 
 		// to calulate total upload speed of this provider
-		provider.ConnPool.counter.Add("TMP_TXbytes", uint64(item.size))
-		provider.ConnPool.counter.Add("TOTAL_TXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TMP_TXbytes", uint64(item.size))
+		provider.ConnPool.Counter.Add("TOTAL_TXbytes", uint64(item.size))
 
 		// to calulate global total upload speed
 		GCounter.Add("TMP_TXbytes", uint64(item.size))
@@ -423,6 +447,7 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		}
 		item.flaginUP = false
 		item.flagisUP = true
+		item.fails = 0
 		item.mux.Unlock()
 		// update provider statistics
 		provider.mux.Lock() // mutex #87c9 articles.refreshed++
@@ -485,9 +510,10 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 
 	if err != nil {
-		dlog(always, "ERROR in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		// handle connection problem / closed connection
+		item.FlagError(provider.id)
 		provider.ConnPool.CloseConn(connitem, sharedCC) // close conn on error
+		dlog(always, "ERROR in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 		return 0, fmt.Errorf("error in GoReupsRoutine: seg.Id='%s' @ '%s'#'%s' err='%v'", item.segment.Id, provider.Name, provider.Group, err)
 	}
 
@@ -507,7 +533,7 @@ func (s *SESSION) StopRoutines() {
 	}
 	// pushing nil into the segment chans will stop the routines
 	for _, provider := range s.providerList {
-		closeSegmentChannel(s.segmentChansCheck[provider.Group])
+		//closeSegmentChannel(s.segmentChansCheck[provider.Group])
 		closeSegmentChannel(s.segmentChansDowns[provider.Group])
 		closeSegmentChannel(s.segmentChansReups[provider.Group])
 
