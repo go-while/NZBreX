@@ -218,7 +218,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					dlog(always, "CheckRoutine: wid=%d provider='%s' timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
 					return
 				}
-				dlog(always, "CheckRoutine: wid=%d provider='%s' still alive, waiting on segCC len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCC), time.Until(timeOut), time.Since(lastGood))
+				if time.Since(lastGood) > 9*time.Second {
+					dlog(always, "CheckRoutine: wid=%d provider='%s' waiting on segCC len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCC), time.Until(timeOut), time.Since(lastGood))
+				}
 			case item, ok := <-segCC:
 				if !ok {
 					dlog(always, "CheckRoutine: channel closed wid=%d provider='%s'", wid, provider.Name)
@@ -282,7 +284,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					dlog(always, "GoDownsRoutine: wid=%d provider='%s' timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
 					return
 				}
-				dlog(always && segcheckdone, "GoDownsRoutine: wid=%d provider='%s' still alive, waiting on segCD len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCD), time.Until(timeOut), time.Since(lastGood))
+				if time.Since(lastGood) > 9*time.Second {
+					dlog(always && segcheckdone, "GoDownsRoutine: wid=%d provider='%s' waiting on segCD len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCD), time.Until(timeOut), time.Since(lastGood))
+				}
 			case item, ok := <-segCD:
 				if !ok {
 					dlog(always, "GoDownsRoutine: channel closed wid=%d provider='%s'", wid, provider.Name)
@@ -372,7 +376,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					dlog(always, "ReupsRoutine: wid=%d provider='%s' timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
 					return
 				}
-				dlog(always, "ReupsRoutine: wid=%d provider='%s' still alive, waiting on segCR len=%d timeout in: %v (lastgood: %v)", wid, provider.Name, len(segCR), time.Until(timeOut), time.Since(lastGood))
+				if time.Since(lastGood) > 9*time.Second {
+					dlog(always, "ReupsRoutine: wid=%d provider='%s' waiting on segCR len=%d timeout in: %v (lastgood: %v)", wid, provider.Name, len(segCR), time.Until(timeOut), time.Since(lastGood))
+				}
 			case item, ok := <-segCR:
 				if !ok {
 					dlog(always, "ReupsRoutine: channel closed wid=%d provider='%s'", wid, provider.Name)
@@ -687,7 +693,7 @@ providerUp:
 			IncreaseUPQueueCnt() // increment upQueueCnt counter
 			//GCounter.IncrMax("upQueueCnt", uint64(len(s.segmentList)), "pushUP")
 			//GCounter.IncrMax("TOTAL_upQueueCnt", uint64(len(s.segmentList)), "pushUP")
-			dlog(always, " | pushUP: in chan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
+			dlog(cfg.opt.DebugWorker, " | pushUP: in chan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			return true, 0, 0, nil // return after 1st push to a group!
 		default:
 			//dlog(cfg.opt.BUG "DEBUG SPAM pushUP: chan is full @ '%s'", s.providerList[pid].Name)
@@ -735,6 +741,9 @@ func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sy
 	fetchedtoDL, fetchedtoUP, backlogDL, refillUP, pushedDL, pushedUP := uint64(0), uint64(0), uint64(0), uint64(0), uint64(0), uint64(0)
 	startLoop := time.Now()
 	deadWorkersDeadline := 9
+	deadcounter := 10
+	var capture_done, capture_segm, capture_isdl, capture_isup float64
+
 forever:
 	for {
 
@@ -775,6 +784,12 @@ forever:
 	forsegmentList:
 		for _, item := range s.segmentList {
 			item.mux.PrintStatus(false)
+
+			if deadcounter <= 0 {
+				dlog(always, "GoWorkDivider: counters not increasing for too long, exiting")
+				closeCase = "noProgress"
+				break forever
+			}
 
 			item.mux.RLock() // RLOCKS HERE #824d
 			if item.flagCache {
@@ -873,6 +888,10 @@ forever:
 
 		} // end for forsegmentList
 		//dlog(cfg.opt.DebugWorker, " | [DV] lastRunTook='%d ms' '%v", lastRunTook.Milliseconds(), lastRunTook)
+		s.mux.RLock()
+		checkFeedDone := s.checkFeedDone // read value of s.checkDone
+		segcheckdone := s.segcheckdone   // read value of s.segcheckdone
+		s.mux.RUnlock()
 
 		// part to print stats begins here
 		upQ = GCounter.GetValue("upQueueCnt")
@@ -893,8 +912,36 @@ forever:
 			isup_perc := float64(isup) / float64(todo) * 100
 			dmca_perc := float64(dmca) / float64(todo) * 100
 			yenc_perc := float64(isyenc) / float64(todo) * 100
-
 			used_slots, max_slots := memlim.Usage()
+
+			if segm_perc > capture_segm {
+				capture_segm = segm_perc
+				deadcounter = 10 // reset deadcounter
+			} else if segm_perc < 100 && segm_perc == capture_segm {
+				deadcounter--
+				dlog(always, "GoWorkDivider: segm_perc not increasing, deadcounter=%d", deadcounter)
+
+			} else if segcheckdone && done_perc > capture_done {
+				capture_done = done_perc
+				deadcounter = 10 // reset deadcounter
+			} else if segcheckdone && done_perc < 100 && done_perc == capture_done {
+				deadcounter--
+				dlog(always, "GoWorkDivider: done_perc not increasing, deadcounter=%d", deadcounter)
+
+			} else if segcheckdone && isdl_perc > capture_isdl {
+				capture_isdl = isdl_perc
+				deadcounter = 10 // reset deadcounter
+			} else if segcheckdone && isdl_perc < 100 && isdl_perc == capture_isdl {
+				deadcounter--
+				dlog(always, "GoWorkDivider: isdl_perc not increasing, deadcounter=%d", deadcounter)
+
+			} else if segcheckdone && isup_perc > capture_isup {
+				capture_isup = isup_perc
+				deadcounter = 10 // reset deadcounter
+			} else if segcheckdone && isup_perc < 100 && isup_perc == capture_isup {
+				deadcounter--
+				dlog(always, "GoWorkDivider: isup_perc not increasing, deadcounter=%d", deadcounter)
+			}
 
 			//log00 = fmt.Sprintf(" TODO: %d ", todo)
 
@@ -986,11 +1033,6 @@ forever:
 				dlog(always, "%s", logstring)
 			}
 		} // print some stats ends here
-
-		s.mux.RLock()
-		checkFeedDone := s.checkFeedDone // read value of s.checkDone
-		segcheckdone := s.segcheckdone   // read value of s.segcheckdone
-		s.mux.RUnlock()
 
 		if !segcheckdone && checked == todo && checkFeedDone {
 			s.mux.Lock()
