@@ -195,9 +195,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	/* new worker code CheckRoutine */
 	segCC := s.segmentChansCheck[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, thisWorkerWG *sync.WaitGroup, sharedCC chan *ConnItem, segCC chan *segmentChanItem) {
+		var processed uint64
 		defer waitWorker.Done()
 		defer thisWorkerWG.Done()
-		defer dlog(always, "CheckRoutine exiting wid=%d provider='%s'", wid, provider.Name)
+		defer dlog(always, "CheckRoutine exiting (%d@'%s') processed: %d", wid, provider.Name, processed)
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
 		toChan := make(chan struct{}, 1)
@@ -215,15 +216,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			select {
 			case <-toChan:
 				if time.Now().After(timeOut) {
-					dlog(always, "CheckRoutine: wid=%d provider='%s' timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
+					dlog(always, "CheckRoutine: (%d@'%s') timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
 					return
 				}
 				if time.Since(lastGood) > 9*time.Second {
-					dlog(always, "CheckRoutine: wid=%d provider='%s' waiting on segCC len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCC), time.Until(timeOut), time.Since(lastGood))
+					dlog(always, "CheckRoutine: (%d@'%s') waiting on segCC len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCC), time.Until(timeOut), time.Since(lastGood))
 				}
 			case item, ok := <-segCC:
 				if !ok {
-					dlog(always, "CheckRoutine: channel closed wid=%d provider='%s'", wid, provider.Name)
+					dlog(always, "CheckRoutine: channel closed (%d@'%s')", wid, provider.Name)
 					return // channel is closed, exit the routine
 				}
 				if item == nil {
@@ -243,10 +244,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				case true:
 					log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
 				}
+				processed++
 				continue forGoCheckRoutine
 			}
 		} // end forGoCheckRoutine
-		dlog(always, "CheckRoutine: wid=%d provider='%s' exiting", wid, provider.Name)
 	}(wid, provider, waitWorker, &thisWorkerWG, sharedCC, segCC) // end go func()
 
 	/* new worker code DownsRoutine */
@@ -254,7 +255,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, thisWorkerWG *sync.WaitGroup, sharedCC chan *ConnItem, segCD chan *segmentChanItem) {
 		defer waitWorker.Done()
 		defer thisWorkerWG.Done()
-		defer dlog(always, "GoDownsRoutine exiting wid=%d provider='%s'", wid, provider.Name)
+		defer dlog(always, "GoDownsRoutine exiting (%d@'%s')", wid, provider.Name)
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
 		toChan := make(chan struct{}, 1)
@@ -269,7 +270,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		}()
 	forGoDownsRoutine:
 		for {
-			dlog(cfg.opt.DebugWorker, "GoDownsRoutine: wid=%d provider='%s' wait on segCD len=%d", wid, provider.Name, len(segCD))
+			dlog(cfg.opt.DebugWorker, "GoDownsRoutine: (%d@'%s') wait on segCD len=%d", wid, provider.Name, len(segCD))
 			select {
 			case <-toChan:
 				s.mux.RLock()
@@ -281,15 +282,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					continue forGoDownsRoutine
 				}
 				if segcheckdone && time.Now().After(timeOut) {
-					dlog(always, "GoDownsRoutine: wid=%d provider='%s' timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
+					dlog(always, "GoDownsRoutine: (%d@'%s') timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
 					return
 				}
 				if time.Since(lastGood) > 9*time.Second {
-					dlog(always && segcheckdone, "GoDownsRoutine: wid=%d provider='%s' waiting on segCD len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCD), time.Until(timeOut), time.Since(lastGood))
+					dlog(always && segcheckdone, "GoDownsRoutine: (%d@'%s') waiting on segCD len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCD), time.Until(timeOut), time.Since(lastGood))
 				}
 			case item, ok := <-segCD:
 				if !ok {
-					dlog(always, "GoDownsRoutine: channel closed wid=%d provider='%s'", wid, provider.Name)
+					dlog(always, "GoDownsRoutine: channel closed (%d@'%s')", wid, provider.Name)
 					return // channel is closed, exit the routine
 				}
 				if item == nil {
@@ -299,7 +300,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				}
 				timeOut = time.Now().Add(15 * time.Second)
 				lastGood = time.Now()
-				dlog(cfg.opt.DebugWorker, "GoDownsRoutine: wid=%d provider='%s' start seg.Id='%s'", wid, provider.Name, item.segment.Id)
+				dlog(cfg.opt.DebugWorker, "GoDownsRoutine: (%d@'%s') start seg.Id='%s'", wid, provider.Name, item.segment.Id)
 
 				start := time.Now()
 				who := fmt.Sprintf("DR=%d@'%s'#'%s' seg.Id='%s'", wid, provider.Name, provider.Group, item.segment.Id)
@@ -346,7 +347,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, thisWorkerWG *sync.WaitGroup, sharedCC chan *ConnItem, segCR chan *segmentChanItem) {
 		defer waitWorker.Done()
 		defer thisWorkerWG.Done()
-		defer dlog(always, "ReupsRoutine exiting: wid=%d provider='%s'", wid, provider.Name)
+		defer dlog(always, "ReupsRoutine exiting: (%d@'%s')", wid, provider.Name)
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
 		toChan := make(chan struct{}, 1)
@@ -361,7 +362,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		}()
 	forGoReupsRoutine:
 		for {
-			dlog(cfg.opt.DebugWorker, "ReupsRoutine: wid=%d provider='%s' wait on segCD len=%d", wid, provider.Name, len(segCD))
+			dlog(cfg.opt.DebugWorker, "ReupsRoutine: (%d@'%s') wait on segCD len=%d", wid, provider.Name, len(segCD))
 			select {
 			case <-toChan:
 				s.mux.RLock()
@@ -373,15 +374,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					continue forGoReupsRoutine
 				}
 				if segcheckdone && time.Now().After(timeOut) {
-					dlog(always, "ReupsRoutine: wid=%d provider='%s' timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
+					dlog(always, "ReupsRoutine: (%d@'%s') timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
 					return
 				}
 				if time.Since(lastGood) > 9*time.Second {
-					dlog(always, "ReupsRoutine: wid=%d provider='%s' waiting on segCR len=%d timeout in: %v (lastgood: %v)", wid, provider.Name, len(segCR), time.Until(timeOut), time.Since(lastGood))
+					dlog(always, "ReupsRoutine: (%d@'%s') waiting on segCR len=%d timeout in: %v (lastgood: %v)", wid, provider.Name, len(segCR), time.Until(timeOut), time.Since(lastGood))
 				}
 			case item, ok := <-segCR:
 				if !ok {
-					dlog(always, "ReupsRoutine: channel closed wid=%d provider='%s'", wid, provider.Name)
+					dlog(always, "ReupsRoutine: channel closed (%d@'%s')", wid, provider.Name)
 					return // channel is closed, exit the routine
 				}
 				if item == nil {
