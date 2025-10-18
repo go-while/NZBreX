@@ -3,6 +3,7 @@ package main
 import (
 	//"bufio"
 	//"bytes"
+	"archive/zip"
 	"bufio"
 	"compress/gzip"
 	"crypto/sha256"
@@ -79,6 +80,38 @@ func loadNzbFile(path string) (*nzbparser.Nzb, error) {
 		}
 		defer gzReader.Close()
 		parsedReader = gzReader
+	} else if strings.HasSuffix(strings.ToLower(path), ".zip") {
+		// ZIP requires random access, can't stream directly
+		// Need to read file info first
+		fi, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		zipReader, err := zip.NewReader(f, fi.Size())
+		if err != nil {
+			return nil, err
+		}
+		// Find first .nzb file in ZIP
+		if len(zipReader.File) == 0 {
+			return nil, fmt.Errorf("zip file is empty")
+		}
+		var nzbFile *zip.File
+		for _, zf := range zipReader.File {
+			if strings.HasSuffix(strings.ToLower(zf.Name), ".nzb") {
+				nzbFile = zf
+				dlog(always, "loadNzbFile: found nzb file in zip: '%s'", zf.Name)
+				break
+			}
+		}
+		if nzbFile == nil {
+			return nil, fmt.Errorf("no .nzb file found in zip archive")
+		}
+		rc, err := nzbFile.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		parsedReader = rc
 	} else {
 		parsedReader = f
 	}
