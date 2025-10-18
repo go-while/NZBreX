@@ -208,7 +208,7 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 			if isNetworkUnreachable(err) {
 				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
 			}
-			dlog(always, "ERROR connect Dial '%s' no retry err='%v'", c.provider.Name, err)
+			dlog(cfg.opt.DebugConnPool, "ERROR connect Dial '%s' no retry err='%v'", c.provider.Name, err)
 			return nil, err
 		}
 	case true:
@@ -224,7 +224,7 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 			if isNetworkUnreachable(err) {
 				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
 			}
-			dlog(always, "ERROR connect Dial '%s' no-retry err='%v'", c.provider.Name, err)
+			dlog(cfg.opt.DebugConnPool, "ERROR connect Dial '%s' no-retry err='%v'", c.provider.Name, err)
 			return nil, err
 		}
 	} // end switch
@@ -326,7 +326,7 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 		if err != nil || connitem == nil || connitem.conn == nil {
 			c.mux.Lock() // mutex c460
 			c.openConns--
-			dlog(always, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
+			dlog(cfg.opt.DebugConnPool, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
 			c.mux.Unlock() // mutex c460
 			return nil, fmt.Errorf("error in ConnPool NewConn: connect failed '%s' err='%v'", c.provider.Name, err)
 		}
@@ -335,6 +335,7 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 		c.mux.RUnlock() // mutex c461
 		// we have a new connection!
 		GCounter.Incr("TOTAL_NewConns")
+		go c.provider.IncrementOpenConns()
 		return connitem, nil // established new connection and returns connitem
 	}
 	c.mux.Unlock() // mutex c459a
@@ -539,6 +540,7 @@ func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) 
 	c.openConns--
 	dlog(cfg.opt.DebugConnPool, "DisConn '%s' inPool=%d open=%d", c.provider.Name, len(c.pool), c.openConns)
 	c.mux.Unlock()
+	go c.provider.DecrementOpenConns()
 	// if a sharedConnChan is supplied we send a nil to the channel
 	// a nil as connitem signals the routines to get a new conn
 	// mostly because conn was closed by network, protocol error or timeout
@@ -737,9 +739,7 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	}
 	if !needNewConn && aconnitem != nil && aconnitem.conn != nil {
 		// we have a valid connection, use it
-		if cfg.opt.BUG {
-			dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
-		}
+		dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
 		provider.ConnPool.ExtendConn(connitem)
 		return aconnitem, nil
 	}
@@ -750,13 +750,13 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	newconnitem, err := provider.ConnPool.GetConn()
 	if err != nil || newconnitem == nil || newconnitem.conn == nil {
 		// unable to get a new connection, put nil back into sharedCC
-		dlog(always, "ERROR SharedConnGet connect failed Provider '%s' err='%v'", provider.Name, err)
+		dlog(cfg.opt.DebugConnPool, "ERROR SharedConnGet connect failed Provider '%s' err='%v'", provider.Name, err)
 		sharedCC <- nil // put nil back into sharedCC
-		return
+		return nil, err
 	}
 	connitem = newconnitem // use the new connection item
 	provider.ConnPool.ExtendConn(connitem)
-	return
+	return connitem, nil
 } // end func SharedConnGet
 
 // SharedConnReturn puts a connection back into the sharedCC channel.
@@ -836,6 +836,16 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 		txSpeed, txMbps := ConvertSpeed(int64(tmpTX), PrintStats)
 		dlPerc := int(float64(totalRX) / float64(byteSize) * 100)
 		upPerc := int(float64(totalTX) / float64(byteSize) * 100)
+
+		// Store speed values in provider struct for web UI (if this is a provider-specific speedmeter)
+		if cp != nil && cp.provider != nil {
+			cp.provider.mux.Lock()
+			cp.provider.speed.downloadSpeed = float64(rxSpeed) * 1024 // convert KiB/s to bytes/sec
+			cp.provider.speed.uploadSpeed = float64(txSpeed) * 1024   // convert KiB/s to bytes/sec
+			cp.provider.speed.lastUpdated = time.Now().Unix()
+			cp.provider.mux.Unlock()
+		}
+
 		printSpeedTable(dlPerc, upPerc, totalRX, totalTX, rxSpeed, txSpeed, rxMbps, txMbps, name, group)
 
 	}
