@@ -1,6 +1,6 @@
 module github.com/go-while/NZBreX
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/Tensai75/nzbparser v0.1.0
@@ -18,6 +18,6 @@ require (
 	github.com/go-while/go-loggedrwmutex v0.0.0-20250601032232-b0aa20cdcb2c
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/text v0.25.0
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/text v0.37.0
 )
