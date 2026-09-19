@@ -54,3 +54,5 @@ oryxBuildBinary
 # dont ignore gh action yml
 !.github/workflows/*.yml
 
+rapidyenc/librapidyenc_linux_amd64.a
+rapidyenc/librapidyenc_windows_amd64.a
