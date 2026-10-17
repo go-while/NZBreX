@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"time"
 )
@@ -527,43 +526,64 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	return code, err
 } // end func GoReupsRoutine
 
+// StopRoutines ends the session's work: it closes the download and re-upload
+// channels (the workers drain what is left and exit) and then the stopChan.
+// Called by LaunchSession after GoWorkDivider, the only sender on those channels, has quit.
+// Safe to call more than once.
 func (s *SESSION) StopRoutines() {
-	if cfg.opt.Debug {
-		log.Print("StopRoutines: pushing")
-	}
-	// pushing nil into the segment chans will stop the routines
-	for _, provider := range s.providerList {
-		//closeSegmentChannel(s.segmentChansCheck[provider.Group])
-		closeSegmentChannel(s.segmentChansDowns[provider.Group])
-		closeSegmentChannel(s.segmentChansReups[provider.Group])
-
-	}
-	close(s.stopChan)
-	if cfg.opt.Debug {
-		log.Print("StopRoutines: released")
-	}
+	dlog(cfg.opt.Debug, "StopRoutines: closing work channels sessId=%d", s.sessId)
+	s.closeWorkChans()
+	s.stop()
+	dlog(cfg.opt.Debug, "StopRoutines: released sessId=%d", s.sessId)
 } // end func StopRoutines
 
-func closeSegmentChannel(input chan *segmentChanItem) {
-	if input == nil {
-		log.Printf("closeChannel: input channel is nil")
-		return
+// stop closes s.stopChan exactly once. A nil stopChan is ignored.
+func (s *SESSION) stop() {
+	s.stopOnce.Do(func() {
+		if s.stopChan != nil {
+			close(s.stopChan)
+		}
+	})
+} // end func stop
+
+// stopped reports whether stop() has run.
+func (s *SESSION) stopped() bool {
+	if s.stopChan == nil {
+		return false
 	}
 	select {
-	case item, ok := <-input:
-		if item != nil {
-			log.Printf("ERROR in closeSegmentChannel: LOST item seg.Id='%s'", item.segment.Id)
-		}
-		if !ok {
-			if cfg.opt.Debug {
-				log.Printf("closeSegmentChannel: channel %p already closed", input)
-			}
-			return
-		}
+	case <-s.stopChan:
+		return true
 	default:
-		close(input) // close the channel if it is not already closed
-		if cfg.opt.Debug {
-			log.Printf("closeSegmentChannel: closed channel %p", input)
-		}
+		return false
 	}
+} // end func stopped
+
+// closeWorkChans closes the download and re-upload channel of every provider
+// group exactly once. The maps are keyed by group, so groups with several
+// providers are closed only once (looping over providers closed them twice).
+// The check channels belong to their feeder and are not touched here.
+func (s *SESSION) closeWorkChans() {
+	s.closeChansOnce.Do(func() {
+		for group, ch := range s.segmentChansDowns {
+			closeSegmentChannel("downs", group, ch)
+		}
+		for group, ch := range s.segmentChansReups {
+			closeSegmentChannel("reups", group, ch)
+		}
+	})
+} // end func closeWorkChans
+
+// closeSegmentChannel closes a segment channel. Must only be called by the
+// channel's owner, once. Items still buffered are not lost: receivers get them
+// before they see the close.
+func closeSegmentChannel(kind string, group string, ch chan *segmentChanItem) {
+	if ch == nil {
+		return
+	}
+	if n := len(ch); n > 0 {
+		dlog(always, "closeSegmentChannel: %s channel of group '%s' still holds %d items, workers will drain them", kind, group, n)
+	}
+	close(ch)
+	dlog(cfg.opt.Debug, "closeSegmentChannel: closed %s channel of group '%s'", kind, group)
 } // end func closeSegmentChannel

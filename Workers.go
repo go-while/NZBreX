@@ -41,6 +41,8 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 		cfg.opt.ChanSize = len(s.segmentList)
 	}
 
+	s.makeSegmentChans()
+
 	// loop over the providerList and boot up anonymous workers for each provider
 	for _, provider := range s.providerList {
 
@@ -57,54 +59,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 		go func(provider *Provider, workerWGconnReady *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup) {
 			// releases at end of func when provider capabilities have been checked and all GoWorker() booted
 			defer workerWGconnReady.Done() // release #1 for every provider in go func
-			if provider.Group == "" {
-				provider.Group = provider.Name
-			}
-
 			dlog(cfg.opt.Debug, "GoBootWorkers: Booting Provider '%s' group '%s'", provider.Name, provider.Group)
-
-			// create once if not exists
-			globalmux.Lock()
-			if s.segmentChansCheck == nil {
-				dlog(cfg.opt.Debug, "Creating chans for group '%s' cfg.opt.ChanSize=%d", provider.Group, cfg.opt.ChanSize)
-				if cfg.opt.Debug {
-					time.Sleep(2 * time.Second) // sleeps 2 sec to print a debug line about creating channels for group
-				}
-				// create maps which holds the channels for every provider group
-				s.segmentChansCheck = make(map[string]chan *segmentChanItem)
-				s.segmentChansDowns = make(map[string]chan *segmentChanItem)
-				s.segmentChansReups = make(map[string]chan *segmentChanItem)
-			}
-			if s.segmentChansCheck[provider.Group] == nil {
-				// create channels once if not exists
-				// since we run concurrently only the first worker hitting the lock will create the channels
-				s.segmentChansCheck[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				s.segmentChansDowns[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-				s.segmentChansReups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-
-				// launch anonymous go routine to feed the segmentChanCheck with pointers to segmentChanItem
-				go func(segmentChanCheck chan *segmentChanItem) {
-
-					start := time.Now()
-					for _, item := range s.segmentList {
-						segmentChanCheck <- item // is allowed to block inside feeder routine
-					}
-					for {
-						time.Sleep(time.Second) // wait for check routine to empty out the chan
-						if len(segmentChanCheck) == 0 {
-							break
-						}
-					}
-					dlog(cfg.opt.Verbose, " | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), provider.Group, time.Since(start).Seconds())
-					s.mux.Lock()
-					// set checkFeedDone only signals that feeding to the channel is done
-					// the check routine may still be activly checking!
-					s.checkFeedDone = true
-					s.mux.Unlock()
-					close(segmentChanCheck) // close the chan to signal no more items will come
-				}(s.segmentChansCheck[provider.Group])
-			}
-			globalmux.Unlock()
 
 			dlog(cfg.opt.Verbose, "Connecting to Provider '%s' MaxConns=%d SSL=%t", provider.Name, provider.MaxConns, provider.SSL)
 
@@ -162,6 +117,60 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 	// TODO this is not correct, we should check if all workers are connected
 	dlog(cfg.opt.DebugWorker, "GoBootWorkers: all workers connected (or died if no conn could be established)")
 } // end func GoBootWorkers
+
+// makeSegmentChans builds the check/downs/reups channel of every provider group
+// and starts one feeder per group. It runs before any GoWorker or the divider
+// starts, so the maps are complete before anyone reads them and stay read-only
+// afterwards (they used to be written by each provider's boot goroutine while
+// other groups' workers already read them: fatal concurrent map read and write).
+// provider.Group is defaulted to provider.Name in loadProviderList.
+func (s *SESSION) makeSegmentChans() {
+	check := make(map[string]chan *segmentChanItem)
+	downs := make(map[string]chan *segmentChanItem)
+	reups := make(map[string]chan *segmentChanItem)
+	for _, provider := range s.providerList {
+		if !provider.Enabled || provider.MaxConns <= 0 {
+			continue
+		}
+		if check[provider.Group] != nil {
+			continue
+		}
+		dlog(cfg.opt.Debug, "Creating chans for group '%s' cfg.opt.ChanSize=%d", provider.Group, cfg.opt.ChanSize)
+		check[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+		downs[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+		reups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+	}
+	s.mux.Lock()
+	s.segmentChansCheck = check
+	s.segmentChansDowns = downs
+	s.segmentChansReups = reups
+	s.mux.Unlock()
+	for group, ch := range check {
+		go s.feedCheckChan(group, ch) // the feeder owns ch and is the only one closing it
+	}
+} // end func makeSegmentChans
+
+// feedCheckChan pushes every segment of the session into the check channel of one group,
+// waits for the check routines to empty it, then closes it.
+func (s *SESSION) feedCheckChan(group string, segmentChanCheck chan *segmentChanItem) {
+	start := time.Now()
+	for _, item := range s.segmentList {
+		segmentChanCheck <- item // is allowed to block inside feeder routine
+	}
+	for {
+		time.Sleep(time.Second) // wait for check routine to empty out the chan
+		if len(segmentChanCheck) == 0 {
+			break
+		}
+	}
+	dlog(cfg.opt.Verbose, " | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), group, time.Since(start).Seconds())
+	s.mux.Lock()
+	// set checkFeedDone only signals that feeding to the channel is done
+	// the check routine may still be activly checking!
+	s.checkFeedDone = true
+	s.mux.Unlock()
+	close(segmentChanCheck) // close the chan to signal no more items will come
+} // end func feedCheckChan
 
 func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup) {
 	dlog(cfg.opt.DebugWorker, "GoWorker (%d) launching routines '%s'", wid, provider.Name)
@@ -380,7 +389,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				}
 				if item == nil {
 					dlog(cfg.opt.DebugWorker, "ReupsRoutine received a nil pointer to quit")
-					s.segmentChansReups[provider.Group] <- nil // refill the nil so others will die too
+					segCR <- nil // refill the nil so others will die too
 					break forGoReupsRoutine
 				}
 				timeOut = time.Now().Add(15 * time.Second)

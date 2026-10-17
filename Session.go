@@ -46,20 +46,27 @@ type PROCESSOR struct {
 // It is created by the PROCESSOR when a new NZB file is detected and processed.
 type SESSION struct {
 	//mux       sync.RWMutex
-	stopChan      chan struct{} // stopChan is used to stop the session/routines
-	mux           *loggedrwmutex.LoggedSyncRWMutex
-	counter       *Counter_uint64 // private counter for every session // TODO check all GCounter if they should be private
-	proc          *PROCESSOR      // the parent where we belong to
-	sessId        uint64          // session ID
-	nzbName       string          // test.nzb
-	nzbHashedname string          // the hashed name of the full filename with .extension
-	nzbPath       string          // /path/to/nzbDir/test.nzb(.gz)
-	nzbFile       *nzbparser.Nzb  // the parsed NZB file structure
-	nzbSize       int64           // the byte size of all the files in the nzb. will be > 0 if nzbFile is loaded or has been loaded before
-	nzbGroups     []string        // informative
+	// stopChan is closed exactly once, by stop(), when the session's work is over.
+	// It is created with the session and never replaced: readers may copy it into a local.
+	stopChan       chan struct{}
+	stopOnce       sync.Once // guards close(stopChan)
+	closeChansOnce sync.Once // guards closing segmentChansDowns/Reups (see closeWorkChans)
+	mux            *loggedrwmutex.LoggedSyncRWMutex
+	counter        *Counter_uint64 // private counter for every session // TODO check all GCounter if they should be private
+	proc           *PROCESSOR      // the parent where we belong to
+	sessId         uint64          // session ID
+	nzbName        string          // test.nzb
+	nzbHashedname  string          // the hashed name of the full filename with .extension
+	nzbPath        string          // /path/to/nzbDir/test.nzb(.gz)
+	nzbFile        *nzbparser.Nzb  // the parsed NZB file structure
+	nzbSize        int64           // the byte size of all the files in the nzb. will be > 0 if nzbFile is loaded or has been loaded before
+	nzbGroups      []string        // informative
 	//lastRun               time.Time                  	   // lastRun is the time when the session was last run
 	//nextRun               time.Time                      // nextRun is the time when the session is scheduled to run next
-	segmentList       []*segmentChanItem               // list holds the segments from parsed nzbFile
+	segmentList []*segmentChanItem // list holds the segments from parsed nzbFile
+	// One channel per provider group, built once by GoBootWorkers before any worker starts,
+	// read-only while the session runs. Close owners: the group's feeder closes its check
+	// channel, closeWorkChans closes the downs/reups channels after the divider has quit.
 	segmentChansCheck map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansDowns map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansReups map[string]chan *segmentChanItem // map[provider.Group]chan
@@ -166,6 +173,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 	if s == nil {
 		return fmt.Errorf("error LaunchSession: session is nil, can't start")
+	}
+	if s.stopped() {
+		// sessions are single-use: their stopChan and channels are closed for good
+		return fmt.Errorf("error LaunchSession: session %d has already run, create a new session", s.sessId)
 	}
 	s.mux.Lock()
 	if s.preBoot || s.active {
@@ -486,28 +497,10 @@ func (s *SESSION) closeSession() {
 
 	dlog(cfg.opt.Debug, "closeSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 
-	// close all channels in segmentChansCheck, segmentChansDowns, segmentChansReup
-	// app will panic if anybody still sends which should not be possible
-	for n, ch := range s.segmentChansCheck {
-		close(ch)
-		s.segmentChansCheck[n] = nil // remove from map
-	}
-	for n, ch := range s.segmentChansDowns {
-		close(ch)
-		s.segmentChansDowns[n] = nil // remove from map
-	}
-	for n, ch := range s.segmentChansReups {
-		close(ch)
-		s.segmentChansReups[n] = nil // remove from map
-	}
-
-	s.segmentChansCheck = nil
-	s.segmentChansDowns = nil
-	s.segmentChansReups = nil
-
-	s.segmentChansCheck = make(map[string]chan *segmentChanItem)
-	s.segmentChansDowns = make(map[string]chan *segmentChanItem)
-	s.segmentChansReups = make(map[string]chan *segmentChanItem)
+	// The segment channels are not closed here: each has a single close owner
+	// (the group's feeder, or closeWorkChans via StopRoutines), see the SESSION struct.
+	// Closing them again here panicked with "close of closed channel".
+	// The maps are dropped below under s.mux.
 
 	// todo cleanup memDL and memUP
 	/*
@@ -522,7 +515,7 @@ func (s *SESSION) closeSession() {
 		}
 	*/
 
-	dlog(cfg.opt.Debug, "cleanupSession: closed all segment channels for sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
+	dlog(cfg.opt.Debug, "closeSession: cleaning up sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 
 	s.mux.Lock()            // lock the session for cleanup
 	s.active = false        // set active to false, we are no longer processing

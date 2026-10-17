@@ -109,6 +109,10 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** build all three maps once before any `GoWorker` starts, and treat them as read-only. Move the `provider.Group = provider.Name` defaulting (`Workers.go:58-60`) ahead of that, or the keys won't match `s.providerGroups` (`Utils.go:191-193`, which holds the raw, possibly empty, groups). Keep exactly one feeder per group.
 
+**Result (2026-10-17):** fixed in the same change as 2.6/3.1. `makeSegmentChans()` builds all three maps and starts one `feedCheckChan` per group before the provider boot loop, then publishes them under `s.mux`. The group default (`Group = Name`) moved into `loadProviderList`.
+- **Side effect, a bug fixed (new):** before, all ungrouped providers shared the group `""` in `loadProviderList`'s ACL check. One ungrouped download-only provider plus one ungrouped upload provider made the old build exit at start ("set 'NoUpload' to same value in group ''"). Verified with the 3.13 build, which exits 1; the new build runs the session.
+- **Side effect in the proxy (new):** the proxy never ran `GoBootWorkers`, so its providers kept `Group == ""`. After the first provider answered 430, `checkedProviderGroups[""]` made the proxy skip every other ungrouped provider. Verified: with providers [B, A] and an article missing only on B, the 3.13 proxy returns `430 NOPG` to `STAT`, and the new one returns `223`.
+
 ### 2.6 `close of closed channel` on session teardown (corrected; do together with 3.1)
 
 - `StopRoutines` (`Routines.go:537-538`) closes `segmentChansDowns`/`Reups` via `closeSegmentChannel`, and `closeSession` (`Session.go:484-495`) closes them again. Only reached when `len(sessMap) <= SessThreshold`; `SessThreshold` is JSON-config only and defaults to 0, which takes the `removeSession` branch.
@@ -117,17 +121,30 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** one owner per channel, keyed by **group**, not provider. Guard with `sync.Once`. Create `stopChan` once in `LaunchSession` before any watcher starts. **Do not** recreate it inside `closeSession`: `WatchOpenConnsThread` re-reads the `c.s.stopChan` field every loop (`ConnPool.go:643`), so swapping it races, and a watcher that misses the close spins forever on its `default` branch.
 
+**Result (2026-10-17):** fixed together with 3.1 and 2.5.
+- `s.stop()` closes `stopChan` once (`sync.Once`), and ignores a nil channel. The proxy and web sessions in `main.go` now get a `stopChan`. Sessions are single-use: `LaunchSession` rejects one that has already been stopped (every caller creates a new session anyway).
+- `closeWorkChans()` closes the downs/reups channels once, iterating the per-group maps, not the providers. The check channel belongs to its feeder. `closeSession` no longer closes anything; it only drops the maps.
+- Tests: `TestSessionTeardownClosesEachChannelOnce` (two providers in one group, `StopRoutines` twice, then `closeSession`, then a relaunch is rejected) and `TestStopRoutinesWithoutChannels` (proxy-style session, nil channels).
+
 ---
 
 ## Phase 3: Hangs and resource exhaustion in the engine
 
-**Before starting 3.2, 3.6 or 3.7, settle the stop-channel design** (per pool or per session, captured once into a local, never swapped). Those three items and 2.6 all depend on it.
+**Stop-channel design (settled 2026-10-17).** 3.2, 3.6, 3.7 and 2.6 depend on it.
+- **Session lifetime** (workers, divider, feeders): `s.stopChan`. It is created with the session (`newSession`, and in `main.go` for proxy/web) and closed only by `s.stop()` (`sync.Once`). Nobody sends on it, and it is never replaced, so readers may copy it into a local once. Sessions are single-use.
+- **Pool lifetime** (`WatchOpenConnsThread`, `Speedmeter`): a stop channel per `ConnPool`, closed once by `KillConnPool`. Pools are built per session but the proxy's pools are never killed, so they must not hang off the session's channel (to do in 3.7).
+- **Global `memlim`**: `MemLockWait` takes the caller's session stop channel as a parameter and reports an abort (3.6). The limiter itself has no stop.
+- **Segment channels**: one close owner each. The feeder owns the check channel; `closeWorkChans` (via `StopRoutines`, after the divider has quit) owns downs/reups. Nobody else closes them.
 
 ### 3.1 `closeSegmentChannel` leaves the channel open (corrected)
 
 `Routines.go:547-569`: if the channel holds a buffered item, it is received, logged as "LOST", and the channel is not closed. Impact is smaller than the draft said. `StopRoutines` runs after the divider ends, which needs `dlQ`/`upQ` at 0, so the channel is normally empty. Download/re-upload routines also have 15 s timeouts once `segcheckdone` is set (`Workers.go:270-281`, `361-372`).
 
 **Fix:** drain, then close **once per group**. `StopRoutines` loops over providers, not groups, so with several providers per group a plain "close unconditionally" panics on the second call, and `closeSession` closes again. This must land in the same change as 2.6.
+
+**Result (2026-10-17):** fixed with 2.6. The owner closes the channel without draining it first: buffered items stay receivable, so the workers process them before they see the close, instead of the old code taking one item off and logging it as "LOST". A non-empty channel at close is logged.
+- Verified under `-race` against the local servers: A→B, two providers in one group (`local-b1`/`local-b2`, which split the 9 uploads 5/4), and ungrouped providers. In every run each group's channels closed once, with no races and no panics.
+- Web mode with two queued jobs: both complete. The 27 race reports are all in `webserver.go` job fields (4.2).
 
 ### 3.2 Check feeder busy-wait (corrected)
 

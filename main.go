@@ -96,9 +96,10 @@ func main() {
 			// to establish connections to the providers and have pools running
 			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: proxy server")
 			s := &SESSION{
-				proc:  thisProcessor,
-				mux:   &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYSESSION"},
-				proxy: true,
+				proc:     thisProcessor,
+				mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYSESSION"},
+				stopChan: make(chan struct{}), // closed only by s.stop()
+				proxy:    true,
 			}
 			ProxyParent = s // set global proxy session so proxy has access to provider list and pools
 			go GoCliRxTxCounter()
@@ -120,9 +121,10 @@ func main() {
 			// similar to proxy server setup
 			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: web server")
 			s := &SESSION{
-				proc:  thisProcessor,
-				mux:   &loggedrwmutex.LoggedSyncRWMutex{Name: "WEBSESSION"},
-				proxy: true, // Set proxy flag to initialize providers without processing NZB
+				proc:     thisProcessor,
+				mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "WEBSESSION"},
+				stopChan: make(chan struct{}), // closed only by s.stop()
+				proxy:    true,                // Set proxy flag to initialize providers without processing NZB
 			}
 			webProcessor = thisProcessor
 			webWg = wg

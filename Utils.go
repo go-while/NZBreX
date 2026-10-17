@@ -178,6 +178,12 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 			return fmt.Errorf("error in loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
 		}
 		providernames[Name] = true
+		if providers[n].Group == "" {
+			// a provider without a group is its own group. Set here, before anything reads it:
+			// GoBootWorkers used to do this per provider while other goroutines read Group,
+			// and providerGroups/providerACL here held "" for all of them.
+			providers[n].Group = Name
+		}
 		Group := providers[n].Group
 		if providerACL[Group] == nil {
 			providerACL[Group] = make(map[string]bool)
