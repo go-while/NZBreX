@@ -1,6 +1,6 @@
 module github.com/go-while/NZBreX
 
-go 1.25.3
+go 1.27.2
 
 require (
 	github.com/Tensai75/nzbparser v0.1.0
