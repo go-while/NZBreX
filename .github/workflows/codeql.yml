@@ -87,6 +87,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
+        submodules: true
 
     - name: Install build dependencies
       if: matrix.language == 'c-cpp'
