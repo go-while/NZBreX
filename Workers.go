@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -306,7 +307,15 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 				start := time.Now()
 				who := fmt.Sprintf("DR=%d@'%s'#'%s' seg.Id='%s'", wid, provider.Name, provider.Group, item.segment.Id)
-				memlim.MemLockWait(item, who) // gets memlock here
+				if !memlim.MemLockWait(item, who, s.stopChan) { // gets memlock here
+					// session is stopping: give the item back without downloading it
+					item.mux.Lock()
+					item.flaginDL = false
+					item.mux.Unlock()
+					DecreaseDLQueueCnt()
+					dlog(cfg.opt.DebugWorker, "GoDownsRoutine: (%d@'%s') stop while waiting for a mem slot, skip seg.Id='%s'", wid, provider.Name, item.segment.Id)
+					continue forGoDownsRoutine
+				}
 				dlog(cfg.opt.DebugWorker && cfg.opt.DebugMemlim, "GoDownsRoutine got MemCheckWait who='%s' waited=(%d ms)", who, time.Since(start).Milliseconds())
 				errStr := ""
 				StartDowns := time.Now()
@@ -402,7 +411,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				if err != nil || code == 0 {
 					errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' no retry", code, err)
 					dlog(always, "%s", errStr)
-					memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
+					if !errors.Is(err, errSessionStopped) { // a stopped wait took no slot
+						memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
+					}
 					continue forGoReupsRoutine
 				}
 				speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())
@@ -493,6 +504,58 @@ func (item *segmentChanItem) FlagDLFailed(providerList []*Provider, providerGrou
 		delete(item.availableOn, id)
 	}
 }
+
+// hasUploadTarget reports whether some provider the item is missing on could
+// still take an upload for it (same rules as pushUP; a pending retry counts).
+// The caller holds item.mux (read or write).
+func (s *SESSION) hasUploadTarget(item *segmentChanItem) bool {
+	for pid, miss := range item.missingOn {
+		if !miss {
+			continue
+		}
+		p := s.providerList[pid]
+		if p.NoUpload || (!p.capabilities.ihave && !p.capabilities.post) {
+			continue
+		}
+		if item.ignoreUlOn[pid] || item.uploadedTo[pid] || item.availableOn[pid] ||
+			item.unwantedOn[pid] || item.dmcaOn[pid] || item.errorOn[pid] {
+			continue
+		}
+		return true
+	}
+	return false
+} // end func hasUploadTarget
+
+// retireNoUploadTarget returns the mem slot of an item that will never be uploaded,
+// and drops its article when nothing else needs it (cache written or off, no yenc output).
+func (s *SESSION) retireNoUploadTarget(item *segmentChanItem) {
+	item.mux.Lock()
+	locked := item.memlocked > 0
+	if locked && !cfg.opt.YencWrite && !item.flaginYenc && (!cacheON || item.flagCache) {
+		item.article = nil // free memory
+	}
+	item.mux.Unlock()
+	if locked {
+		memlim.MemReturn("DV:noUploadTarget", item)
+	}
+} // end func retireNoUploadTarget
+
+// releaseMemSlots returns the mem slots still held by this session's items.
+// memlim is global: a slot leaked by one session would be lost for every later one.
+// Call only after all workers have exited.
+func (s *SESSION) releaseMemSlots() {
+	released := 0
+	for _, item := range s.segmentList {
+		item.mux.RLock()
+		locked := item.memlocked > 0
+		item.mux.RUnlock()
+		if locked {
+			memlim.MemReturn("session end", item)
+			released++
+		}
+	}
+	dlog(released > 0, "releaseMemSlots: returned %d mem slots still held at session end", released)
+} // end func releaseMemSlots
 
 // matchThisUP checks if the item is a candidate for upload
 // it returns true if the item is a candidate for upload
@@ -766,6 +829,7 @@ forever:
 
 		// uint64
 		var segm, allOk, done, fails, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64
+		var notarget uint64 // checked items no provider can take an upload for (retired)
 
 		// Tnodl, Tnoup counts segments that not have been downloaded
 		// or uploaded because provider has config flat NoDownload or NoUpload set
@@ -846,6 +910,15 @@ forever:
 
 			if doContinue {
 				item.mux.RUnlock() // RUNLOCKS HERE #824d
+				continue forsegmentList
+			}
+			if allowUp && !s.hasUploadTarget(item) && (item.flagisDL || item.flagCache || !(cacheON || cfg.opt.YencWrite)) {
+				// missing only where nothing can upload it (NoUpload, no IHAVE/POST, errors, ...):
+				// no upload will ever return its mem slot. Retire it: give the slot back,
+				// don't download it, and count it as finished.
+				notarget++
+				item.mux.RUnlock() // RUNLOCKS HERE #824d
+				s.retireNoUploadTarget(item)
 				continue forsegmentList
 			}
 			item.mux.RUnlock() // RUNLOCKS HERE #824d
@@ -1061,6 +1134,8 @@ forever:
 		closeCase5 := (dead+isup == todo || dead+isup+fails == todo)
 		closeCase6 := (dead+done == todo || dead+done+fails == todo)
 		closeCase7 := false // placeholder
+		// items that can't be uploaded anywhere are finished too
+		closeCase8 := notarget > 0 && (dead+done+notarget == todo || dead+done+fails+notarget == todo)
 		globalmux.RUnlock()
 
 		if closeCase0 {
@@ -1094,6 +1169,10 @@ forever:
 		} else if closeCase7 {
 			closeWait--
 			closeCase = closeCase + "|Debug#7"
+
+		} else if closeCase8 {
+			closeWait--
+			closeCase = closeCase + "|Debug#8"
 
 		} else {
 			if closeWait >= 10 {

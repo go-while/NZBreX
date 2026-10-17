@@ -82,7 +82,13 @@ type ConnPool struct {
 	// we cann call ConnPools[provider.id].CloseConn(connitem)
 	provider *Provider // pointer to the provider which created this ConnPool and holds the config
 	s        *SESSION  // session pointer to the session which created this ConnPool (access via c.s.%%SESSIONVARIABLES%% OR provider.ConnPool.s.%%SESSIONVARIABLES%%).
+	// sessStop is the owning session's stopChan (nil: never stops). Blocking waits
+	// for a connection give up when it is closed.
+	sessStop <-chan struct{}
 }
+
+// errSessionStopped is returned by waits that gave up because the session stopped.
+var errSessionStopped = errors.New("session stopped")
 
 func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGroup) {
 	provider.mux.Lock()         // NewConnPool mutex #d028
@@ -129,6 +135,7 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 		provider: provider,
 		mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: fmt.Sprintf("ConnPool-%s", provider.Name)},
 		s:        s, // session pointer to the session which created this ConnPool
+		sessStop: s.stopChan,
 	}
 	PoolsLock.Lock()
 	ConnPools[provider.id] = provider.ConnPool
@@ -432,7 +439,15 @@ getConnFromPool:
 				waiting = time.Now()
 				dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: infinite waiting for a conn '%s'", c.provider.Name)
 
-				connitem = <-c.pool
+				select {
+				case connitem = <-c.pool:
+				case <-c.sessStop:
+					return nil, fmt.Errorf("error in ConnPool GetConn '%s': %w", c.provider.Name, errSessionStopped)
+				}
+				if connitem == nil {
+					// ParkConn never parks nil, but don't hand out a nil item
+					continue getConnFromPool
+				}
 				GCounter.Incr("TOTAL_GetConns")
 				dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: released, got connid=%d age=(%v) %s: waited='%v'", connitem.connid, time.Since(connitem.parktime), c.provider.Name, time.Since(waiting))
 				return
@@ -724,7 +739,17 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	// if any routine in this worker gets a nil connitem from sharedCC:
 	//  - it will get a new connection from the provider
 	//  - and put the conn back into the sharedCC channel later
-	aconnitem := <-sharedCC
+	var aconnitem *ConnItem
+	select {
+	case aconnitem = <-sharedCC: // a waiting token wins over a closed stop
+	default:
+		select {
+		case aconnitem = <-sharedCC:
+		case <-provider.ConnPool.sessStop:
+			// we took no token, so there is nothing to put back
+			return nil, fmt.Errorf("error in SharedConnGet '%s': %w", provider.Name, errSessionStopped)
+		}
+	}
 	switch aconnitem {
 	case nil:
 		// no connection available
@@ -740,7 +765,7 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	if !needNewConn && aconnitem != nil && aconnitem.conn != nil {
 		// we have a valid connection, use it
 		dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
-		provider.ConnPool.ExtendConn(connitem)
+		provider.ConnPool.ExtendConn(aconnitem) // was ExtendConn(connitem), the still-nil named return
 		return aconnitem, nil
 	}
 	//provider.ConnPool.CloseConn(aconnitem, sharedCC) // close the nil connection item to reduce counter if needed and put nil back into sharedCC

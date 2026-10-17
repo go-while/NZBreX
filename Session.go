@@ -400,6 +400,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	waitWorker.Wait()
 	dlog(always, "sess: released waitWorker.Wait(), waiting on waitPool.Wait()")
 	waitPool.Wait()
+	s.releaseMemSlots() // no worker is left; don't let leaked slots shrink memlim for the next session
 	dlog(always, "sess: released waitPool.Wait() closing all provider connections")
 	for _, provider := range s.providerList {
 		KillConnPool(provider) // close the connection pool for this provider

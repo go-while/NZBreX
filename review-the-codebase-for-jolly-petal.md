@@ -101,6 +101,15 @@ This is by design: the slot is held from download until upload so that RAM betwe
 
 **Fix (corrected):** do **not** add a plain `MemReturn` on every 220/920 success; that removes the RAM limit for upload runs. Instead, release the slot on download success only when `!allowUp`, and release it wherever the divider retires an item without queueing an upload. For the blocking receive, see 3.6: `MemLockWait` needs a stop parameter and a rollback.
 
+**Result (2026-10-17):** fixed. **Trigger corrected again:** a run with no upload providers never downloads anything. When `!allowUp`, `pushUP` returns an error and the divider skips `pushDL`, so the `!allowUp` release isn't needed. The real trigger is an item the divider downloads although nothing can upload it: it is missing only on a `NoUpload` provider (or one with errors, no IHAVE/POST, ...).
+- Reproduced: B has all 90 articles, A (`NoUpload`) has every second one. The old build downloaded 16 of 45, hit `MEM:16/16`, and hung in `waitWorker.Wait()` until killed.
+- **Fix:**
+  - The divider now checks `hasUploadTarget(item)` (same rules as `pushUP`) for each checked item that isn't in flight. Items with no target are retired: their slot is returned, and the article is dropped when neither the cache nor `-yencout` needs it. They are not downloaded, and they count toward a new close case `#8` (`dead+done+notarget == todo`).
+  - `releaseMemSlots()` returns any slot still held at session end, because `memlim` is global and a leak would shrink it for every later web job.
+- **Result:** the run above finishes in 6 s with nothing downloaded.
+- **Side effect, a bug fixed (new):** every earlier "normal" A→B run ended through "hit impossible closeCase ... force quit" after about 20 s of waiting. Articles that only A (`NoUpload`) lacked never counted as done. With `#8` the same A→B run takes 10 s instead of 28 s, with identical results (9 downloaded, 9 uploaded).
+- **Not fixed (new, noted):** download-only runs (`-cd`/`-yencout` without any upload provider) never download, because `pushUP`'s error skips `pushDL`. The `MemLimit.go` header says that case was intended to work.
+
 ### 2.5 `fatal error: concurrent map read and map write` on `s.segmentChans*` (corrected)
 
 Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`). Read with no lock from `GoWorker` at `Workers.go:191/247/338` and `Routines.go:31`, which can overlap another group's boot write. That is a real, unrecoverable runtime throw.
@@ -178,6 +187,15 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 - `StopRoutines` closes `stopChan` *before* `waitWorker.Wait()`, so running workers will start getting errors from `GetConn`. That's acceptable, but expect the log noise.
 - Read `stopChan` once into a local (see the Phase 3 note).
 
+**Result (2026-10-17):** fixed.
+- `MemLockWait(item, who, stop) bool` takes a free slot first, otherwise it waits for a slot or `stop`. On abort it rolls back `waiting`/`memdata` and returns false. `TOTAL_MemLock` now only counts successful locks; aborts go to `TOTAL_MemLockAborted`.
+  - The download routine gives the item back (clears `flaginDL`, decreases the queue count) and skips `GoDownsRoutine`.
+  - `GoReupsRoutine` returns an error wrapping `errSessionStopped`, and its caller then skips `MemReturn`.
+- `GetConn`'s infinite wait and `SharedConnGet` select on the pool's `sessStop` (the owning session's `stopChan`, captured in `NewConnPool`). `SharedConnGet` prefers a waiting token over a closed stop. A nil item from the pool is no longer handed out.
+- **Bug fixed (new):** `SharedConnGet` called `ExtendConn(connitem)` on the still-nil named return, so reused shared connections never had their deadline extended. It now extends `aconnitem`.
+- Test: `TestMemLockWaitAbortsOnStopAndRollsBack`.
+- Verified by stopping server B mid-upload. The session returns after 63 s with no races: 4 re-upload waits aborted, 2 leaked slots were returned at session end. That needed 3.15 as well.
+
 ### 3.7 Goroutine leaks (corrected)
 
 | Site | Status |
@@ -239,6 +257,18 @@ Keyed by a per-session index (`Utils.go:200`, `ConnPool.go:134/181`), so session
 - `extractSessionStats` checks `segmentList` under the lock; `collectStats` copies `providerList` under `session.mux`.
 - Verified with `-race`, CLI download A → B: clean before and after.
 - Verified with `-race`, web mode (2 jobs, `/api/jobs` + `/api/stats` polled every 50 ms): the old build logged 29 races including `Session.go:272` vs `webserver.go:768`, then wedged (below). The new build completes both jobs. The remaining 20–26 races are all inside `webserver.go` job-field handling (4.2).
+
+### 3.15 (new) `CMD_IHAVE` leaves the textproto pipeline stuck: the connection hangs forever
+
+`NetConn.go` `CMD_IHAVE` returned on any `ReadCodeLine(335)` error **before** `EndResponse(id)`. `ReadCodeLine` returns an error for any reply other than 335, including normal `435`/`436`. The caller keeps the connection for `436` (retry) and `435`/unknown (unwanted). The next command on it then blocks forever in `StartResponse`, before any I/O, so no read deadline helps.
+
+**Found** by the 3.1/3.2 check "stop server B mid-run". nntp-server answers `436 Retry later` while shutting down, and the session hung in `waitWorker.Wait()`. The goroutine dump showed 4 re-upload routines in `textproto.(*sequencer).Start` via `NetConn.go:168`. A live provider answering 435/436 during a normal run wedges that connection the same way.
+
+**Fix:** `EndResponse` right after `ReadCodeLine`. A read error with no reply line still returns early; 435/436 now reach the existing switch. Every other `StartResponse` in the code already ends on all paths. **Note:** `textproto.Cmd` returns an `id` even when the write fails, so a conn whose `Cmd` failed must never be reused. The callers close it on `code == 0`.
+
+**Result (2026-10-17):** fixed. `TestIHAVEReplyNot335KeepsConnUsable` (fake server answers 436, then 435) blocks on the old code and passes now.
+
+**Also noted (not fixed):** `FlagError` (`Workers.go`) sets `retryIn = int64(time.Now().Add(5 * time.Second).Second())`. That is the seconds field of the current minute (0–59), not a Unix time, so `retryIn > now` is never true and the 5 s retry delay never applies. It should be `.Unix()`.
 
 ### 3.14 Remaining unsynchronised accesses (corrected)
 

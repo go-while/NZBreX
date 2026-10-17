@@ -331,7 +331,9 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 
 	if !memlocked {
 		dlog(cfg.opt.DebugWorker, "GoReupsRoutine: item not memlocked seg.Id='%s' @ '%s'#'%s'", item.segment.Id, provider.Name, provider.Group)
-		memlim.MemLockWait(item, "GoUR") // gets memlock here
+		if !memlim.MemLockWait(item, "GoUR", s.stopChan) { // gets memlock here
+			return 0, fmt.Errorf("error in GoReupsRoutine: waiting for a mem slot seg.Id='%s' @ '%s': %w", item.segment.Id, provider.Name, errSessionStopped)
+		}
 	}
 
 	var err error

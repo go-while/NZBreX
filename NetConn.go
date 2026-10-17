@@ -167,11 +167,16 @@ func CMD_IHAVE(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, 
 
 	connitem.srvtp.StartResponse(id)
 	code, msg, err := connitem.srvtp.ReadCodeLine(335)
-	if err != nil {
+	// EndResponse must run on every path: textproto serves responses in order,
+	// so a skipped EndResponse makes the next command on this conn block forever
+	// in StartResponse (seen when a server answers 436 while shutting down).
+	connitem.srvtp.EndResponse(id)
+	if err != nil && code == 0 {
+		// read error, no reply line
 		dlog(always, "ERROR CMD_IHAVE srvtp.ReadCodeLine @ '%s' err='%v'", connitem.c.provider.Name, err)
 		return code, msg, 0, err
 	}
-	connitem.srvtp.EndResponse(id)
+	// a reply other than 335 (435, 436, ...) also sets err; the switch below handles it
 
 	switch code {
 	case 335:
