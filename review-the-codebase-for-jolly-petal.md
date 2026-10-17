@@ -4,7 +4,11 @@
 
 The first draft was checked claim by claim against the working tree by four independent reviews. Almost every bug it lists is real and most line numbers are accurate to ±3. But several proposed fixes would have caused new hangs or panics, some cause-and-effect claims were wrong, and some bugs were missing. This revision fixes all of that. Items marked **(corrected)** changed in substance; **(new)** were missing; **(dropped)** turned out to be wrong.
 
-Done since the first draft: **Phase 0** (rapidyenc C library from upstream), commit `c136df9`.
+Done so far (branch `wip/web-job-queue-2025-10`):
+- **Phase 0:** rapidyenc C library from upstream, `c136df9`.
+- **Phase 1:** Go 1.27.2 bump, `dcce00e`.
+- **2.1, 2.2, 2.3:** fixed, with regression tests for 2.1/2.2 (`Session_test.go`); reproduced and verified against local nntp-server (see each item's *Result*).
+- **Test setup:** local nntp-server A/B and `tools/nntpseed` are working (see Verification).
 
 Decisions (answered 2026-10-17, see [Decisions](#decisions)): **D1** separate web passwd file; **D2** show per-job settings disabled; **D3** reject broken mode combinations at startup.
 
@@ -57,11 +61,15 @@ To bump later: `git -C rapidyenc/rapidyenc fetch && git -C rapidyenc/rapidyenc c
 
 **Fix:** read `p.refresh` into a local under a short RLock, release, then call `refreshDir()` with no lock held.
 
+**Result (2026-10-17):** fixed. **Correction:** not reachable from the command line today. `DirRefresh` has no flag, and the JSON config loader (`loadConfigFile`, `Utils.go:127-139`) is commented out, so `refresh` is always 0 and `refreshDir` never runs. The deadlock fires on the first tick as soon as the value can be set. `TestWatchDirThreadPicksUpFilesWithoutDeadlock` fails on the old code ("mutex not available") and passes now.
+
 **Note:** even after the fix, `refreshDir` only *registers* sessions. `processorThread` is a TODO stub, so directory NZBs are never processed. See D3.
 
 ### 2.2 `CAPABILITIES` before login kills the process
 
 `ps` is built at `Server.go:27-31` without `CliTp`. `CliTp` is only assigned at `:235`, after `AUTHINFO PASS`. The pre-auth switch calls `ps.printCapabilities()` at `:129`, and its `PrintfLine` at `ProxyHelper.go:69` dereferences nil. With no `recover()` in the repo, `printf 'CAPABILITIES\r\n' | nc host 1119` kills the process. `Server.go:302-303` also dereferences `ps.CliTp` inside its own nil guard.
+
+**Result (2026-10-17):** fixed. Reproduced first: `printf 'CAPABILITIES\r\n' | nc` against the unfixed proxy crashed it (panic at `ProxyHelper.go:69` via `Server.go:129`, exit 2). Now it returns the capability list and the proxy stays up. `TestProxyCapabilitiesBeforeAuth` panics on the old code and passes now.
 
 **Fix:** assign `ps.CliTp = cliTp` at construction (the cleanup defer at `:54-58` already handles a non-nil `CliTp`), and fix `:302-303`. Add a `recover()` in `handleConnection` that logs and closes the connection as a safety net, not as the fix. It only covers that goroutine, and a panic after `GetConn` or while `proxyMutex` is held (`:178-247`) would still leak the connection or leave the mutex locked.
 
@@ -72,6 +80,15 @@ The proxy allocates `segmentChanItem` with `mux == nil` at **two** sites: `Serve
 A third path also crashes: with `-crc32 -yencwrite` and a cache, `cache.WriteYenc` (`NetConn.go:726/816/881`) locks `item.mux` at `Cache.go:307`, and the yEnc writer goroutine then dereferences `item.s.D`, `item.file.Filename` and `*item.nzbhashname` (`Cache.go:288-290`), all nil for proxy items. That panic is in another goroutine, so no `recover()` in `handleConnection` can catch it.
 
 **Fix:** initialise `mux` at both proxy sites, make the `:889` guard match `:903`, and skip `cache.WriteYenc` when `proxy` is set.
+
+**Result (2026-10-17):** fixed (`WriteYenc` also returns early for items with no session, file or nzb name). Reproduced against server A with the unfixed proxy:
+- `-crc32 -yenctest=3`, bad-CRC article: panic at `NetConn.go:890`.
+- `-crc32 -yenctest=4 -yencout -cd=…`, good article: panic at `Cache.go:307` via `NetConn.go:881`.
+
+Both now leave the proxy running, and a good article still arrives intact. Findings for Phase 5.2:
+- **Mode 4 (default):** a CRC mismatch comes back from rapidyenc as a read error, so it takes the `brokenYenc` path. The client gets `220` with an **empty** article (43 bytes), confirming the silent-truncation bug.
+- **(new) Mode 2:** a bad-CRC article is passed to the client as a normal `220`.
+- **(new)** After the fix, the bad-CRC case answers `502 Unknown Response: 99932`, leaking an internal code. It should map to a proper NNTP error (e.g. `430`, or try the next provider).
 
 ### 2.4 Memory slots never returned when nothing will upload (corrected)
 
@@ -411,7 +428,13 @@ All three answered by the user on 2026-10-17.
 
 **Never against live Usenet providers.** All runs that talk to a server use local go-while/nntp-server instances (`/tank0/efs/GO/src/github.com/go-while/nntp-server`), never `provider.json`. `race_linux.sh` hardcodes `-provider="provider.json"`, so don't run it as-is; use a copy that takes the provider file as an argument.
 
-### Test setup
+### Test setup (working, 2026-10-17)
+
+- Binaries in `/tank0/tmp/nzbrex/bin`: `nntp-server` (built from the sibling checkout), `nntpseed`, and NZBreX before/after builds. Runs happen in `/tank0/tmp/nzbrex/run`, which has `provider.test.json` (A download-only, B upload target with `PreferIHAVE`) and a test proxy user in `.proxypasswd.new.*`.
+- Checked so far: a download run from A → B with `-crc32 -yenctest=4` copies every article missing on B, and `STAT` on B confirms them.
+- `Workers.go:695` declares `const testing = false` (unused), so tests in package `main` must import `testing` under an alias.
+- Later: real data from the Debian NZBs, fetched once (read-only) via the cubenet4/cubenet5 account. See `nzbs/LOCAL_TESTING.md`. Uploads only ever go to the local servers.
+
 
 - **Storage:** `/tank0/tmp/nzbrex/nntp-server/` (created), one directory per instance:
   - `a/` on `127.0.0.1:11119`: holds every test article.

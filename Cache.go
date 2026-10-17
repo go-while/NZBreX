@@ -294,6 +294,11 @@ func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp st
 } // end func GetYenc
 
 func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
+	// proxy items have no session, file or nzb name: GetYenc and the writer
+	// would dereference nil (in another goroutine, so nothing could recover it).
+	if proxy || item == nil || item.mux == nil || item.s == nil || item.file == nil || item.nzbhashname == nil {
+		return
+	}
 	if c.yenc_writer_chan == nil {
 		dlog(always, "ERROR cache.WriteYenc yenc_writer_chan is nil")
 		return

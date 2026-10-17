@@ -887,9 +887,11 @@ readlines:
 		} // end switch yencTest
 		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d brokenYenc=%t seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, brokenYenc, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
 		if isBadCrc || brokenYenc {
-			item.mux.Lock()
-			item.badcrc++
-			item.mux.Unlock()
+			if item.mux != nil {
+				item.mux.Lock()
+				item.badcrc++
+				item.mux.Unlock()
+			}
 			dlog(always, "ERROR readDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
 			return 99932, rxb, nil, nil // 99932 is a custom code for bad crc32
 		}

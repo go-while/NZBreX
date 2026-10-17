@@ -639,16 +639,19 @@ forever:
 
 		case <-tAchan:
 			//dlog( "watchDir checking '%s'", p.nzbDir)
+			// read p.refresh under a short lock only:
+			// refreshDir() and newSession() take p.mux themselves (not reentrant).
 			p.mux.RLock()
-			if p.refresh > 0 {
+			refresh := p.refresh
+			p.mux.RUnlock()
+			if refresh > 0 {
 				p.refreshDir()
-				tAchan = time.After(p.refresh)
+				tAchan = time.After(refresh)
 			} else {
 				// if p.refresh set to <= 0 don't run refreshDir
 				// but recheck every 15 seconds if value has been updated
 				tAchan = time.After(15 * time.Second)
 			}
-			p.mux.RUnlock()
 		}
 	} // end for
 	dlog(always, "Processor watchDir '%s' quit", p.nzbDir)

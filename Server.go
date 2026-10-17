@@ -14,20 +14,33 @@ import (
 	mrand "math/rand" // Added for random delays in password verification (to mitigate timing attacks)
 	"net"
 	"net/textproto" // Added for textproto
+	"runtime/debug"
 	"strings"
+
+	"github.com/go-while/go-loggedrwmutex"
 )
 
 // handleConnection manages a single NNTP proxy client connection.
 func handleConnection(conn net.Conn) {
+	// Safety net: one bad client must never take down the whole process.
+	// This only covers this goroutine; it is not a substitute for fixing the panic.
+	// Registered first, so it runs after the cleanup defer below.
+	defer func() {
+		if r := recover(); r != nil {
+			dlog(always, "PANIC in proxy handleConnection remote='%s': %v\n%s", conn.RemoteAddr(), r, debug.Stack())
+			conn.Close()
+		}
+	}()
 	//log.Printf("Handling connection from %s", conn.RemoteAddr())
 	cliTp := textproto.NewConn(conn)
 	var currentUser string // Stores username after successful AUTHINFO USER
 	authenticated := false
 	now := time.Now() // Get the current time for session initialization
 	var ps = &ProxySession{
-		Conn:        conn, // Store the connection in the session
-		LastCmd:     now,  // Initialize last command time
-		ConnectedAt: now,  // Set the connection time
+		Conn:        conn,  // Store the connection in the session
+		CliTp:       cliTp, // set before any command is handled: CAPABILITIES works before auth
+		LastCmd:     now,   // Initialize last command time
+		ConnectedAt: now,   // Set the connection time
 	} // ProxySession to hold user session data
 
 	// Ensure connection is closed and proxy session cleaned up when done
@@ -299,7 +312,10 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 	// For now, we just log the command received.
 	// returning any error (e.g.: via fmt.Errorf) will disconnect the user
 	var retry error = nil // retry is used to indicate that the command should be retried
-	if !ps.Authed || (ps.Username == "") || (ps.CliTp == nil) || ps.ExpireAt < time.Now().Unix() {
+	if ps.CliTp == nil {
+		return fmt.Errorf("no client connection")
+	}
+	if !ps.Authed || (ps.Username == "") || ps.ExpireAt < time.Now().Unix() {
 		ps.CliTp.PrintfLine("480 Authentication required for %s command", command)
 		return fmt.Errorf("authentication required")
 	}
@@ -348,6 +364,7 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 				segment: &nzbparser.NzbSegment{
 					Id: args[0],
 				},
+				mux: &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYITEM"}, // readDotLines locks item.mux
 			}
 			ps.MsgNum, ps.Group = 0, "" // Reset message number and group on valid <message@ID>
 			pass = true                 // we have a valid message ID, so we can pass it to a provider
@@ -360,6 +377,7 @@ func (ps *ProxySession) handleRequest(command string, args []string) error {
 				segment: &nzbparser.NzbSegment{
 					Id: args[0],
 				},
+				mux: &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYITEM"}, // readDotLines locks item.mux
 			}
 		}
 
