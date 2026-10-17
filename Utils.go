@@ -146,6 +146,8 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
 		return err
 	} else {
+		s.mux.Lock()
+		defer s.mux.Unlock()
 		if err := json.Unmarshal(file, &cfg.providers); err != nil {
 			return err
 		}
@@ -203,7 +205,6 @@ func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.Wait
 			id++
 		}
 	}
-	time.Sleep(time.Second * 3)
 	return nil
 } // end func loadProviderList
 

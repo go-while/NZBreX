@@ -1,0 +1,44 @@
+/* Custom variables to override Bootstrap defaults */
+:root {
+    --bs-primary: #0d6efd;
+    --bs-border-radius: 0.5rem;
+}
+
+/* Upload zone */
+.upload-zone {
+    border: 2px dashed #dee2e6;
+    border-radius: var(--bs-border-radius);
+    padding: 3rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background-color: #f8f9fa;
+}
+
+.upload-zone:hover,
+.upload-zone.drag-over {
+    border-color: var(--bs-primary);
+    background-color: #e7f3ff;
+}
+
+.upload-icon {
+    font-size: 3rem;
+    opacity: 0.6;
+    margin-bottom: 1rem;
+}
+
+/* Spinner animation */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--bs-primary);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}

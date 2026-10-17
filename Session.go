@@ -268,7 +268,9 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 						item.segment.Id = "<" + segment.Id + ">" // ensure segment.Id is always in the format "<Id>" for consistency
 					}
 					item.hashedId = SHA256str(item.segment.Id)
+					s.mux.Lock()
 					s.segmentList = append(s.segmentList, item)
+					s.mux.Unlock()
 				}
 			}
 
@@ -333,6 +335,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		}
 	}
 	globalmux.Unlock()
+
 	if s.proxy {
 		// infinite block here for proxy server. if a wg is supplied it will never be released
 		_, ok := <-s.stopChan
@@ -348,7 +351,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	var waitDivider sync.WaitGroup     // waitDivider is used to block GoWorkDivider() until all workers are ready
 	var waitDividerDone sync.WaitGroup // waitDividerDone is used to signal that GoWorkDivider() has quit
 	var waitPool sync.WaitGroup        // waitPool waits until all workers closed their connections and routines
-
+	globalmux.Lock()
 	// prepare wait groups
 	waitDivider.Add(1)
 	waitDividerDone.Add(1)
@@ -362,6 +365,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		}
 	}
 	// run the go routines
+	globalmux.Unlock()
 	s.GoBootWorkers(&waitDivider, &workerWGconnReady, &waitWorker, &waitPool, s.nzbFile.Bytes)
 	workerWGconnReady.Wait() // waits for all connections to be established before starting the work
 

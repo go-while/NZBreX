@@ -111,6 +111,36 @@ func main() {
 		}(wg)
 		dlog(cfg.opt.Debug, "main: wg.Wait()")
 		wg.Wait()
+	} else if webServerEnabled {
+		// boot web server
+		wg.Add(1) // waitSession
+		go func(wg *sync.WaitGroup) {
+			globalmux.Lock()
+			// set up a session to load providers for web server
+			// similar to proxy server setup
+			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: web server")
+			s := &SESSION{
+				proc:  thisProcessor,
+				mux:   &loggedrwmutex.LoggedSyncRWMutex{Name: "WEBSESSION"},
+				proxy: true, // Set proxy flag to initialize providers without processing NZB
+			}
+			webProcessor = thisProcessor
+			webWg = wg
+			globalmux.Unlock()
+			go func() {
+				if err := StartWebServer(webServerAddr, webProcessor, wg); err != nil {
+					dlog(always, "ERROR StartWebServer: err='%v'", err)
+					os.Exit(1)
+				}
+			}()
+			// Initialize session to load providers
+			if err := thisProcessor.LaunchSession(s, "", wg); err != nil {
+				dlog(always, "ERROR NewProcessor Boot Web Server: err='%v'", err)
+				os.Exit(1)
+			}
+		}(wg)
+		dlog(cfg.opt.Debug, "main: wg.Wait()")
+		wg.Wait()
 	} else if cfg.opt.NzbDir == "" && nzbfile != "" {
 		wg.Add(1) // waitSession
 		go func(nzbfile string, wg *sync.WaitGroup) {

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NZBreX - NZB Refresh X</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-light">
+    <div class="container my-4">
+        <div class="mb-4">
+            <a href="/jobs" class="btn btn-outline-primary me-2">📋 Jobs</a>
+            <a href="/stats" class="btn btn-outline-primary">📊 Stats</a>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h1 class="card-title">NZBreX</h1>
+                <p class="text-muted">NZB Refresh X - Upload and process NZB files</p>
+
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">📁</div>
+                    <div class="fw-bold mb-2">Drag & Drop NZB files here</div>
+                    <div class="text-muted small">or click to browse (supports multiple .nzb or .nzb.gz files)</div>
+                </div>
+
+                <input type="file" id="fileInput" accept=".nzb,.gz" multiple style="display: none;">
+
+                <div id="uploadQueue"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadQueue = document.getElementById('uploadQueue');
+
+        // Click to upload
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        // File input change - auto upload
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFiles(Array.from(e.target.files));
+                fileInput.value = ''; // Reset for next selection
+            }
+        });
+
+        // Drag and drop
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('drag-over');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('drag-over');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length > 0) {
+                handleFiles(Array.from(e.dataTransfer.files));
+            }
+        });
+
+        function handleFiles(files) {
+            // Filter valid files
+            const validExtensions = ['.nzb', '.gz'];
+            const validFiles = files.filter(file => {
+                const fileName = file.name.toLowerCase();
+                return validExtensions.some(ext => fileName.endsWith(ext));
+            });
+
+            if (validFiles.length === 0) {
+                showNotification('error', 'No valid NZB files selected. Please upload .nzb or .nzb.gz files only.');
+                return;
+            }
+
+            if (validFiles.length < files.length) {
+                showNotification('warning', `Filtered ${files.length - validFiles.length} invalid file(s). Processing ${validFiles.length} NZB file(s).`);
+            }
+
+            // Upload each file automatically
+            validFiles.forEach(file => uploadFile(file));
+        }
+
+        function uploadFile(file) {
+            const uploadId = 'upload-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+            const uploadItem = document.createElement('div');
+            uploadItem.className = 'card mb-3';
+            uploadItem.id = uploadId;
+            uploadItem.innerHTML = `
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="fw-bold">📦 ${escapeHtml(file.name)}</div>
+                        <div class="text-muted small">${formatFileSize(file.size)}</div>
+                    </div>
+                    <div class="d-flex align-items-center mb-2">
+                        <div class="spinner me-2"></div>
+                        <span class="upload-status">Uploading...</span>
+                    </div>
+                    <div class="progress" style="height: 6px;">
+                        <div class="progress-bar" id="${uploadId}-progress" style="width: 0%"></div>
+                    </div>
+                </div>
+            `;
+            uploadQueue.appendChild(uploadItem);
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(result => {
+                const statusEl = uploadItem.querySelector('.upload-status');
+                const progressBar = document.getElementById(uploadId + '-progress');
+                const spinner = uploadItem.querySelector('.spinner');
+
+                if (result.error) {
+                    spinner.remove();
+                    statusEl.className = 'text-danger';
+                    statusEl.innerHTML = `✗ ${escapeHtml(result.error)}`;
+                    progressBar.classList.add('bg-danger');
+                    progressBar.style.width = '100%';
+                } else {
+                    spinner.remove();
+                    statusEl.className = 'text-success';
+                    statusEl.innerHTML = '✓ Queued successfully';
+                    progressBar.classList.add('bg-success');
+                    progressBar.style.width = '100%';
+
+                    setTimeout(() => {
+                        uploadItem.style.opacity = '0';
+                        uploadItem.style.transition = 'opacity 0.3s';
+                        setTimeout(() => uploadItem.remove(), 300);
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                const statusEl = uploadItem.querySelector('.upload-status');
+                const progressBar = document.getElementById(uploadId + '-progress');
+                const spinner = uploadItem.querySelector('.spinner');
+
+                spinner.remove();
+                statusEl.className = 'text-danger';
+                statusEl.innerHTML = `✗ Upload failed: ${escapeHtml(error.message)}`;
+                progressBar.classList.add('bg-danger');
+                progressBar.style.width = '100%';
+            });
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function showNotification(type, message) {
+            const toast = document.createElement('div');
+            toast.className = `toast align-items-center text-bg-${type === 'error' ? 'danger' : type === 'warning' ? 'warning' : 'success'} border-0`;
+            toast.setAttribute('role', 'alert');
+            toast.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            `;
+
+            const container = document.createElement('div');
+            container.className = 'toast-container position-fixed top-0 end-0 p-3';
+            container.appendChild(toast);
+            document.body.appendChild(container);
+
+            const bsToast = new bootstrap.Toast(toast, { delay: 4000 });
+            bsToast.show();
+
+            toast.addEventListener('hidden.bs.toast', () => container.remove());
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

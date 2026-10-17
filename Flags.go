@@ -25,7 +25,7 @@ func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
 	// essentials
 	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
-	//flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "/path/to/watch/dir/for/nzbfiles")
+	flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "/path/to/watch/dir/for/nzbfiles")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
 	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
 	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
@@ -91,6 +91,11 @@ func ParseFlags() {
 	flag.StringVar(&cfg.opt.TLSPrivKey, "tlskey", "privkey.pem", "path to TLS private key file for proxy (default: privkey.pem in current dir)")
 	flag.StringVar(&AddUserDataToProxy, "proxyadduser", "", "if set: adds this user to proxy ( \ne.g.: -proxyadduser='username1234|password4567|maxconns|expires|(no)post'\n ) \nPassword entered MUST be cleartext, hashing is done when writing to .passwd file!\n Expiration: you can use a 'number of days' with 'd' at the end (e.g. 7d, 30d, 365d) or 'h'  for hours (1h, 12h, ...) or 'm' minutes (1m, 30m, ...), it will be converted to a valid unixtimestamp expiring in the future from now on! (default: empty = no user added)\nExample -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d|nopost\" creates a user with 5 conns and 42 days to expiration")
 	flag.StringVar(&cfg.opt.ProxyPasswdFile, "proxypasswdfile", ".proxypasswd", "if set: use this file for proxy (default: .proxypasswd in current dir)")
+	flag.BoolVar(&webServerEnabled, "web", false, "[true|false] enable HTTP web server for NZB upload and statistics (default: false)")
+	flag.StringVar(&webServerAddr, "webaddr", "127.0.0.1:11911", "web server address (e.g.: '127.0.0.1:1234' or '[::1]:1234' or public ':1234') (default: 127.0.0.1:11911)")
+	flag.BoolVar(&webServerSSL, "webssl", false, "[true|false] enable HTTPS/TLS for web server (default: false)")
+	flag.StringVar(&webServerCert, "webssl-crt", "fullchain.pem", "path to TLS certificate file for web server (default: fullchain.pem in current dir)")
+	flag.StringVar(&webServerKey, "webssl-key", "privkey.pem", "path to TLS private key file for web server (default: privkey.pem in current dir)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
 	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
