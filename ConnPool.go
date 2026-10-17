@@ -566,9 +566,7 @@ func (c *ConnPool) GetStats() (openconns int, idle int) {
 // It will run until the global stopChan is closed or the provider is killed.
 // It will also print the status of the mutexes for debugging purposes.
 func (c *ConnPool) WatchOpenConnsThread(workerWGconnReady *sync.WaitGroup) {
-	globalmux.Lock()
 	start := time.Now()
-	globalmux.Unlock()
 	workerWGconnReady.Wait()
 	dlog(cfg.opt.Debug, "WatchOpenConnsThread started for '%s' waited=%v", c.provider.Name, time.Since(start))
 	defer dlog(cfg.opt.Debug, "WatchOpenConnsThread for '%s' defer returned", c.provider.Name)

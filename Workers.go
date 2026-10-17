@@ -47,7 +47,9 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 		dlog(cfg.opt.DebugWorker, "GoBootWorkers list=%d check provider='%#v' ", len(s.providerList), provider.Name)
 
 		if !provider.Enabled || provider.MaxConns <= 0 {
+			// loadProviderList already filters these; release its Add(1) to keep the count balanced
 			dlog(cfg.opt.Verbose, "ignored provider: '%s'", provider.Name)
+			workerWGconnReady.Done()
 			continue
 		}
 

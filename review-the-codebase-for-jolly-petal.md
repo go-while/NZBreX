@@ -8,6 +8,7 @@ Done so far (branch `wip/web-job-queue-2025-10`):
 - **Phase 0:** rapidyenc C library from upstream, `c136df9`.
 - **Phase 1:** Go 1.27.2 bump, `dcce00e`.
 - **2.1, 2.2, 2.3:** fixed, with regression tests for 2.1/2.2 (`Session_test.go`); reproduced and verified against local nntp-server (see each item's *Result*).
+- **3.13 + 3.10:** band-aid locks replaced in one change, plus the web-server wedge fix from 3.14 (see each item's *Result*).
 - **Test setup:** local nntp-server A/B and `tools/nntpseed` are working (see Verification).
 
 Decisions (answered 2026-10-17, see [Decisions](#decisions)): **D1** separate web passwd file; **D2** show per-job settings disabled; **D3** reject broken mode combinations at startup.
@@ -192,6 +193,11 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** `Add()` before any pool is built; call `Done()` (or skip the `Add`) for providers that are skipped.
 
+**Result (2026-10-17):** fixed together with 3.13 (reverting the `globalmux` band-aids made the race detector report this `Add`/`Wait` race, `ConnPool.go:137` vs `LaunchSession`).
+- `loadProviderList` now calls `Add(1)` right before each `NewConnPool`, and skips providers with `MaxConns <= 0`.
+- Proxy/web sessions, which never boot workers, release it in `LaunchSession`. `GoBootWorkers` calls `Done()` on its skip path. The error path releases what it added.
+- Verified: with a `MaxConns: 0` provider the old binary hangs at boot (killed by timeout), the new one skips it and completes. Proxy mode still starts its pool watchers. The race report is gone.
+
 ### 3.11 `ConnPools` map (corrected)
 
 Keyed by a per-session index (`Utils.go:200`, `ConnPool.go:134/181`), so sessions overwrite each other. Harmless: nothing ever reads the map. **Fix:** delete it.
@@ -210,10 +216,18 @@ Keyed by a per-session index (`Utils.go:200`, `ConnPool.go:134/181`), so session
 
 **Ordering:** a plain revert reintroduces the races with `extractSessionStats`. Revert and replace in one change.
 
+**Result (2026-10-17):** done, together with 3.10.
+- Both no-op `globalmux` band-aids reverted.
+- `loadProviderList` parses into a local slice (the shared `cfg.providers` field is removed; nothing else used it), builds the provider list and groups locally, and publishes both once under `s.mux`. `LaunchSession` builds `segmentList` locally and publishes it once under `s.mux`.
+- `extractSessionStats` checks `segmentList` under the lock; `collectStats` copies `providerList` under `session.mux`.
+- Verified with `-race`, CLI download A → B: clean before and after.
+- Verified with `-race`, web mode (2 jobs, `/api/jobs` + `/api/stats` polled every 50 ms): the old build logged 29 races including `Session.go:272` vs `webserver.go:768`, then wedged (below). The new build completes both jobs. The remaining 20–26 races are all inside `webserver.go` job-field handling (4.2).
+
 ### 3.14 Remaining unsynchronised accesses (corrected)
 
 Still races:
 - `Session.go:467`: `len(s.proc.sessMap)` read without `p.mux`.
+- **(new, fixed 2026-10-17) Web server wedge.** Reproduced in the web race test. The nil-`ConnPool` panic below fired in `collectStats` while it held `webProcessor.mux.RLock()` without `defer`. Gin's recovery caught the panic, so the read lock leaked: `removeSession` then blocked forever on `p.mux.Lock()`, the next job never started, and every `/api/jobs` and `/api/stats` request hung. **Fix:** the session loop runs in a closure with a deferred unlock. Each provider's `ConnPool`, article counters and speeds are copied under one `prov.mux.RLock()`, and a nil pool is skipped. This also removed the `GoCheckRoutine` (`Routines.go:78-79`) vs `collectStats` counter races.
 - **`ConnPool.go:184` (worse than the draft said).** `provider.ConnPool = nil` runs in `KillConnPool` (`Session.go:387`) before `clearSession` (`:401`). Meanwhile `webserver.go:854-856` calls `prov.ConnPool.GetStats()` while `session.active` is still true. That is a reachable nil-pointer panic from a web poll.
 - `NetConn.go:987-989`: `checkCapabilities` holds `provider.mux` across two network reads with no deadline (`UseNoDeadline` makes `ExtendConn` a no-op). Add a deadline; don't hold the lock across I/O.
 

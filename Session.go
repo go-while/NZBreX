@@ -216,6 +216,8 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 
 			dlog(cfg.opt.Debug, "nzbfile='%#v'", s.nzbFile)
 
+			// build the segment list locally and publish it once under s.mux below
+			segmentList := make([]*segmentChanItem, 0, nzbfile.TotalSegments)
 			// loop through all file tags within the NZB file
 			for _, file := range nzbfile.Files {
 				if cfg.opt.Debug {
@@ -268,25 +270,26 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 						item.segment.Id = "<" + segment.Id + ">" // ensure segment.Id is always in the format "<Id>" for consistency
 					}
 					item.hashedId = SHA256str(item.segment.Id)
-					s.mux.Lock()
-					s.segmentList = append(s.segmentList, item)
-					s.mux.Unlock()
+					segmentList = append(segmentList, item)
 				}
 			}
+			s.mux.Lock()
+			s.segmentList = segmentList
+			s.mux.Unlock()
 
 			mibsize := float64(nzbfile.Bytes) / 1024 / 1024
-			artsize := mibsize / float64(len(s.segmentList)) * 1024
+			artsize := mibsize / float64(len(segmentList)) * 1024
 			s.nzbSize = nzbfile.Bytes // store the size of the nzb file in bytes
-			dlog(always, "%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, s.nzbName, len(s.segmentList), nzbfile.TotalSegments, mibsize, artsize)
+			dlog(always, "%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, s.nzbName, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
 			// left-padding for log output
-			s.digStr = fmt.Sprintf("%d", len(s.segmentList))
+			s.digStr = fmt.Sprintf("%d", len(segmentList))
 			s.D = fmt.Sprintf("%d", len(s.digStr))
 		} // end if s.nzbFile
 	} // end if !s.proxy
 
 	// re-load the provider list
 	var workerWGconnReady sync.WaitGroup // workerWGconnReady is used to wait for all connections to be established before starting the work
-	s.providerList = nil
+	// loadProviderList replaces s.providerList and s.providerGroups under s.mux
 	if err := cfg.loadProviderList(s, &workerWGconnReady); err != nil {
 		dlog(always, "ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
 		return err
@@ -337,6 +340,11 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	globalmux.Unlock()
 
 	if s.proxy {
+		// proxy/web sessions never boot workers: release the pool goroutines
+		// waiting on workerWGconnReady (one Add per provider in loadProviderList)
+		for range s.providerList {
+			workerWGconnReady.Done()
+		}
 		// infinite block here for proxy server. if a wg is supplied it will never be released
 		_, ok := <-s.stopChan
 		if !ok {
@@ -351,13 +359,13 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	var waitDivider sync.WaitGroup     // waitDivider is used to block GoWorkDivider() until all workers are ready
 	var waitDividerDone sync.WaitGroup // waitDividerDone is used to signal that GoWorkDivider() has quit
 	var waitPool sync.WaitGroup        // waitPool waits until all workers closed their connections and routines
-	globalmux.Lock()
+
 	// prepare wait groups
 	waitDivider.Add(1)
 	waitDividerDone.Add(1)
 	for _, provider := range s.providerList {
 		//waitWorker.Add(1)        // this 1 releases in GoWorker when routines have booted
-		workerWGconnReady.Add(1) // #1 for every provider
+		// workerWGconnReady: #1 for every provider was already added in loadProviderList
 		for i := 1; i <= provider.MaxConns; i++ {
 			//workerWGconnReady.Add(1) // #2 for every connection per provider
 			waitWorker.Add(3) // for the 3 routines per worker in go func will release when routines stop
@@ -365,7 +373,6 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		}
 	}
 	// run the go routines
-	globalmux.Unlock()
 	s.GoBootWorkers(&waitDivider, &workerWGconnReady, &waitWorker, &waitPool, s.nzbFile.Bytes)
 	workerWGconnReady.Wait() // waits for all connections to be established before starting the work
 

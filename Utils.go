@@ -140,71 +140,90 @@ func loadConfigFile(path string) (*CFG, error) {
 */
 
 // loadProviderList loads the provider list from the configuration file.
-// It reads the JSON file specified in cfg.opt.ProvFile, unmarshals it into the cfg.providers slice,
-// and initializes each provider with a connection pool.
+// It reads the JSON file specified in cfg.opt.ProvFile into a local slice,
+// initializes each enabled provider with a connection pool, and then publishes
+// s.providerList and s.providerGroups under s.mux (the web stats reader locks it).
+// Nothing shared is written while parsing, so concurrent sessions don't race.
 func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.WaitGroup) error {
-	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
+	file, err := os.ReadFile(cfg.opt.ProvFile)
+	if err != nil {
 		return err
-	} else {
-		s.mux.Lock()
-		defer s.mux.Unlock()
-		if err := json.Unmarshal(file, &cfg.providers); err != nil {
-			return err
-		}
-		id := 0
-		providernames := make(map[string]bool)          // tmp map to check unique/duped provider names
-		providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
-		for n := range cfg.providers {
-			if !cfg.providers[n].Enabled {
-				dlog(cfg.opt.Debug, "CFG Skipped Provider (n=%d) '%s' because not enabled", n, cfg.providers[n].Name)
-				continue
-			}
-			Name := cfg.providers[n].Name
-			if providernames[Name] {
-				// duplicate provider Name
-				return fmt.Errorf("error in loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
-			}
-			providernames[Name] = true
-			Group := cfg.providers[n].Group
-			if providerACL[Group] == nil {
-				providerACL[Group] = make(map[string]bool)
-			}
-
-			// check for inconsistent configuration
-			if !cfg.providers[n].NoDownload && providerACL[Group]["NoDownload"] {
-				dlog(always, "ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
-				os.Exit(1)
-			}
-			if !cfg.providers[n].NoUpload && providerACL[Group]["NoUpload"] {
-				dlog(always, "ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
-				os.Exit(1)
-			}
-
-			// read NoDownload / NoUpload values from provider and set once per group for all
-			if cfg.providers[n].NoDownload {
-				providerACL[Group]["NoDownload"] = true
-			}
-			if cfg.providers[n].NoUpload {
-				providerACL[Group]["NoUpload"] = true
-			}
-
-			if !slices.Contains(s.providerGroups, Group) {
-				// add group to providerGroups if not already present
-				s.providerGroups = append(s.providerGroups, Group)
-			}
-
-			// link to this provider
-			provider := cfg.providers[n]
-			p := &provider
-			// provider is ready to connect
-			p.id = id
-			p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: p.Name}
-			NewConnPool(s, p, workerWGconnEstablish)
-			s.providerList = append(s.providerList, p)
-			dlog(cfg.opt.Debug, "CFG Loaded Provider (id=%d) '%s'", id, p.Name)
-			id++
-		}
 	}
+	var providers []Provider
+	if err := json.Unmarshal(file, &providers); err != nil {
+		return err
+	}
+	var providerList []*Provider
+	var providerGroups []string
+	id := 0
+	providernames := make(map[string]bool)          // tmp map to check unique/duped provider names
+	providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
+	for n := range providers {
+		if !providers[n].Enabled {
+			dlog(cfg.opt.Debug, "CFG Skipped Provider (n=%d) '%s' because not enabled", n, providers[n].Name)
+			continue
+		}
+		if providers[n].MaxConns <= 0 {
+			// GoBootWorkers would never boot workers for it
+			dlog(always, "CFG Skipped Provider (n=%d) '%s' because MaxConns=%d", n, providers[n].Name, providers[n].MaxConns)
+			continue
+		}
+		Name := providers[n].Name
+		if providernames[Name] {
+			// duplicate provider Name
+			// release the workerWGconnEstablish counts taken for the providers loaded so far
+			for range providerList {
+				workerWGconnEstablish.Done()
+			}
+			return fmt.Errorf("error in loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
+		}
+		providernames[Name] = true
+		Group := providers[n].Group
+		if providerACL[Group] == nil {
+			providerACL[Group] = make(map[string]bool)
+		}
+
+		// check for inconsistent configuration
+		if !providers[n].NoDownload && providerACL[Group]["NoDownload"] {
+			dlog(always, "ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
+			os.Exit(1)
+		}
+		if !providers[n].NoUpload && providerACL[Group]["NoUpload"] {
+			dlog(always, "ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
+			os.Exit(1)
+		}
+
+		// read NoDownload / NoUpload values from provider and set once per group for all
+		if providers[n].NoDownload {
+			providerACL[Group]["NoDownload"] = true
+		}
+		if providers[n].NoUpload {
+			providerACL[Group]["NoUpload"] = true
+		}
+
+		if !slices.Contains(providerGroups, Group) {
+			// add group to providerGroups if not already present
+			providerGroups = append(providerGroups, Group)
+		}
+
+		// every session gets its own copy of each provider
+		p := &providers[n]
+		// provider is ready to connect
+		p.id = id
+		p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: p.Name}
+		// Add before NewConnPool: its Speedmeter and WatchOpenConnsThread goroutines
+		// call workerWGconnEstablish.Wait() right away.
+		// Released once per provider by GoBootWorkers, or by LaunchSession for proxy sessions.
+		workerWGconnEstablish.Add(1)
+		NewConnPool(s, p, workerWGconnEstablish)
+		providerList = append(providerList, p)
+		dlog(cfg.opt.Debug, "CFG Loaded Provider (id=%d) '%s'", id, p.Name)
+		id++
+	}
+	s.mux.Lock()
+	s.providerList = providerList
+	s.providerGroups = providerGroups
+	s.mux.Unlock()
 	return nil
 } // end func loadProviderList
 

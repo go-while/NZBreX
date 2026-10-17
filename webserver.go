@@ -765,11 +765,14 @@ func handleAPIStats(c *gin.Context) {
 // extractSessionStats extracts real-time statistics from a SESSION
 // This function counts the various states of segments in the session
 func extractSessionStats(s *SESSION) *SessionStats {
-	if s == nil || s.segmentList == nil {
+	if s == nil {
 		return nil
 	}
 	s.mux.RLock()
 	defer s.mux.RUnlock()
+	if s.segmentList == nil {
+		return nil
+	}
 
 	stats := &SessionStats{
 		TotalArticles: uint64(len(s.segmentList)),
@@ -848,36 +851,50 @@ func collectStats() WebStats {
 	defer globalmux.RUnlock()
 
 	if webProcessor != nil {
-		webProcessor.mux.RLock()
-		// Iterate through all active sessions
-		for _, session := range webProcessor.sessMap {
-			if session != nil && session.active && session.providerList != nil {
-				for _, prov := range session.providerList {
-					openConns, idleConns := prov.ConnPool.GetStats()
-
-					// Get bandwidth from provider counter
-					provRX := prov.ConnPool.Counter.GetValue("TOTAL_RXbytes")
-					provTX := prov.ConnPool.Counter.GetValue("TOTAL_TXbytes")
-
-					// Get speed values stored by Speedmeter function
+		// closure + defer: a panic in here must never leave webProcessor.mux read-locked,
+		// or removeSession() blocks forever and the whole web server wedges
+		func() {
+			webProcessor.mux.RLock()
+			defer webProcessor.mux.RUnlock()
+			// Iterate through all active sessions
+			for _, session := range webProcessor.sessMap {
+				if session == nil || !session.active {
+					continue
+				}
+				session.mux.RLock()
+				providerList := session.providerList // published under session.mux by loadProviderList
+				session.mux.RUnlock()
+				for _, prov := range providerList {
+					// KillConnPool sets prov.ConnPool = nil and the workers update the
+					// counters under prov.mux: copy everything under one read lock
 					prov.mux.RLock()
-					downloadSpeed := prov.speed.downloadSpeed
+					cp := prov.ConnPool
+					articles := prov.articles
+					downloadSpeed := prov.speed.downloadSpeed // stored by Speedmeter
 					uploadSpeed := prov.speed.uploadSpeed
 					prov.mux.RUnlock()
+					if cp == nil {
+						continue // pool already closed: session is shutting down
+					}
+					openConns, idleConns := cp.GetStats()
+
+					// Get bandwidth from provider counter
+					provRX := cp.Counter.GetValue("TOTAL_RXbytes")
+					provTX := cp.Counter.GetValue("TOTAL_TXbytes")
 
 					provStats := ProviderStats{
 						Name:          prov.Name,
 						Group:         prov.Group,
 						OpenConns:     openConns,
 						IdleConns:     idleConns,
-						Checks:        prov.articles.checked,
-						Downloads:     prov.articles.downloaded,
-						Uploads:       prov.articles.refreshed,
-						Checked:       prov.articles.checked,
-						Available:     prov.articles.available,
-						Missing:       prov.articles.missing,
-						Downloaded:    prov.articles.downloaded,
-						Uploaded:      prov.articles.refreshed,
+						Checks:        articles.checked,
+						Downloads:     articles.downloaded,
+						Uploads:       articles.refreshed,
+						Checked:       articles.checked,
+						Available:     articles.available,
+						Missing:       articles.missing,
+						Downloaded:    articles.downloaded,
+						Uploaded:      articles.refreshed,
 						TotalRXbyte:   provRX,
 						TotalTXbyte:   provTX,
 						TotalDownload: provRX,        // For JSON compatibility
@@ -888,8 +905,7 @@ func collectStats() WebStats {
 					stats.Providers = append(stats.Providers, provStats)
 				}
 			}
-		}
-		webProcessor.mux.RUnlock()
+		}()
 	}
 
 	// Collect active job information

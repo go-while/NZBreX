@@ -45,8 +45,7 @@ const (
 )
 
 type Config struct {
-	providers []Provider
-	opt       *CFG
+	opt *CFG
 }
 
 type CFG struct {
