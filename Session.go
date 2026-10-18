@@ -75,8 +75,8 @@ type SESSION struct {
 	workDone          atomic.Uint64                    // items finished by any check/downs/reups routine, ok or not (divider watchdog)
 	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
 	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
-	preBoot               bool              // will be set to false before workers start
-	active                bool              // will be set to true when processing starts // REVIEW!TODO!FIXME: set to false is missing!!
+	preBoot               bool              // true from LaunchSession until GoBootWorkers starts the workers; guarded by mux
+	active                bool              // true while the workers run (GoBootWorkers until closeSession); guarded by mux
 	preparationStartTime  time.Time         // flag // time when the session was started
 	segmentCheckStartTime time.Time         // flag // time when the segment check started
 	segmentCheckEndTime   time.Time         // flag // time when the segment check ended

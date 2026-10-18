@@ -282,6 +282,8 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** guard both fields only with `s.mux` (or make them `atomic.Bool`), and read them that way in `webserver.go`. Move `defer waitDivider.Done()` above the early returns anyway; it costs nothing.
 
+**Result (2026-10-18):** fixed. `GoBootWorkers` sets both fields under `s.mux` (no more `globalmux`), `defer waitDivider.Done()` is first, and the `s == nil` branch no longer dereferences `s` in its log line. `collectStats` reads `active` together with `providerList` under one `session.mux.RLock()`. Lock order there stays `globalmux` → `webProcessor.mux` → `session.mux`; nothing takes `globalmux` while holding a session's `mux`. The race detector never caught this one in the web runs (the write in `closeSession` and the poll never overlapped), so the check is: `-race` CLI A→B clean, web race run with both jobs completed, and the only 13 remaining reports are the job-field races in `webserver.go` (4.2).
+
 ### 3.10 `WaitGroup.Add` after `Wait` has started (corrected) and a boot hang (new)
 
 `NewConnPool` (via `loadProviderList`, `Session.go:290`) spawns `Speedmeter` and `WatchOpenConnsThread`, which call `workerWGconnReady.Wait()` (`ConnPool.go:572`, `:802`) before the `Add(1)` loop at `Session.go:356-366`. `Wait()` can return early, which is harmless. **Dropped:** the "WaitGroup is reused" panic; it needs reuse after reaching 0, and this WaitGroup is local and never reused. At most `-race` reports it.

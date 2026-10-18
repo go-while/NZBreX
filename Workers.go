@@ -12,21 +12,21 @@ import (
 
 // GoBootWorkers boots up all workers for a session
 func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *sync.WaitGroup, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup, byteSize int64) {
-	globalmux.Lock()
+	defer waitDivider.Done() // allows WorkDivider to run when this releases, also on the early returns
 	if s == nil {
-		dlog(always, "ERROR in GoBootWorkers: session is nil... preBoot=%t ", s.preBoot)
-		globalmux.Unlock()
+		dlog(always, "ERROR in GoBootWorkers: session is nil")
 		return
-	} else if s.active || !s.preBoot {
+	}
+	// preBoot/active are guarded by s.mux, like in LaunchSession and closeSession
+	s.mux.Lock()
+	if s.active || !s.preBoot {
 		dlog(always, "ERROR in GoBootWorkers: session %d already booted... s.preBoot=%t s.active=%t", s.sessId, s.preBoot, s.active)
-		globalmux.Unlock()
+		s.mux.Unlock()
 		return
 	}
 	s.preBoot = false
 	s.active = true
-	globalmux.Unlock()
-
-	defer waitDivider.Done() // allows WorkDivider to run when this releases
+	s.mux.Unlock()
 
 	if cacheON && cfg.opt.CheckCacheOnBoot {
 		cached := 0

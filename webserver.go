@@ -858,12 +858,16 @@ func collectStats() WebStats {
 			defer webProcessor.mux.RUnlock()
 			// Iterate through all active sessions
 			for _, session := range webProcessor.sessMap {
-				if session == nil || !session.active {
+				if session == nil {
 					continue
 				}
 				session.mux.RLock()
+				active := session.active             // written under session.mux by GoBootWorkers and closeSession
 				providerList := session.providerList // published under session.mux by loadProviderList
 				session.mux.RUnlock()
+				if !active {
+					continue
+				}
 				for _, prov := range providerList {
 					// KillConnPool sets prov.ConnPool = nil and the workers update the
 					// counters under prov.mux: copy everything under one read lock
