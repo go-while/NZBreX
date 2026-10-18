@@ -88,30 +88,43 @@ The tool uses the NNTP commands:
 
 ### Build Instructions
 
-NZBreX requires the rapidyenc C++ library to be compiled before building the Go application.
+NZBreX builds in two variants. They differ only in the yEnc decoder used by
+`-yenctest=4` (the default `-crc32` mode):
 
-#### Linux Build
+| Variant | Build | yEnc decoder (`-yenctest=4`) |
+|---|---|---|
+| **purego** (default) | `go build .` | [go-yenc-simd](https://github.com/go-while/go-yenc-simd), pure Go |
+| **rapidyenc** | `go build -tags rapidyenc .` | rapidyenc's C code via cgo; `-yencgo` switches to go-yenc-simd |
+
+#### Pure Go (default)
 ```sh
-# Build rapidyenc library
-cd rapidyenc && ./build_rapidyenc_linux-amd64.sh && cd ..
-
-# Build NZBreX
 go build .
 ```
+No C compiler, no cgo. Cross-compiles to any target, e.g.
+`CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build .` or `GOOS=darwin GOARCH=arm64`.
+Built on Linux with `CGO_ENABLED=0`, the binary is static (runs on glibc and musl/Alpine).
 
-#### Windows Native Build
+For go-yenc-simd's AVX2/AVX-512 code on amd64, build with
+`GOEXPERIMENT=simd go build .` (Go 1.27; an experiment, outside the Go 1
+compatibility promise). Without it the decoder still works, in plain Go.
+
+#### With rapidyenc's C decoder
+Needs a C/C++ compiler and cmake; the rapidyenc library is built first.
+
+```sh
+# Linux
+cd rapidyenc && ./build_rapidyenc_linux-amd64.sh && cd ..
+go build -tags rapidyenc .
+```
+
 ```cmd
-REM Install dependencies: Go, MinGW-w64, CMake
-REM Then run:
+REM Windows, native: Go, MinGW-w64 and CMake installed, then
 build_windows.bat
 ```
 
-#### Windows Cross-Compilation (from Linux)
 ```sh
-# Install dependencies
+# Windows, cross-compiled from Linux
 sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 cmake
-
-# Run cross-compilation script
 ./local_crossbuild_windows-amd64.sh
 ```
 
@@ -164,7 +177,8 @@ Run with the following arguments:
 - `-yencdelparts` [true|false] delete .part.N.yenc files after merge (only with -yencmerge)
 - `-rapidyencbufsize` "set only if you know what you do! (default: 4K) (experimental/testing)"
 - `-doublecheckrapidyenccrc` "[true|false] (experimental/testing)"
-- `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapidyenc) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
+- `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapidyenc C or go-yenc-simd, see Build Instructions) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
+- `-yencgo` [true|false] with `-yenctest=4` in a `-tags rapidyenc` build: decode with go-yenc-simd instead of the C code. Builds without the tag always use go-yenc-simd. (default: false)
 - `-yencasync` limits async parallel decoding with -crc32=true and -yenctest=3 or 4. 0 defaults to runtime.NumCPU().
 - `-debugsharedcc` debug sharedConn Chan (default: false)
 - `-debugflags` debug item flags (default: false)
@@ -264,9 +278,9 @@ The Windows executable is statically linked and only depends on core Windows sys
 
 ### Build Issues
 
-- **rapidyenc library missing**: Run the appropriate rapidyenc build script before building NZBreX
-- **Cross-compilation fails**: Ensure MinGW-w64 and cmake are installed
-- **Link errors**: Make sure the rapidyenc library matches your target platform
+- **rapidyenc library missing** (`-tags rapidyenc` builds only): run the matching rapidyenc build script first, or build without the tag
+- **Cross-compilation fails**: build without `-tags rapidyenc` (pure Go cross-compiles anywhere), or install MinGW-w64 and cmake for the C variant
+- **Link errors**: make sure the rapidyenc library matches your target platform
 
 ---
 

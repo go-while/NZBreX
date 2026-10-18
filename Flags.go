@@ -17,7 +17,6 @@ import (
 
 	"github.com/go-while/NZBreX/rapidyenc"
 	prof "github.com/go-while/go-cpu-mem-profiler"
-	yencsimd "github.com/go-while/go-yenc-simd"
 )
 
 var AddUserDataToProxy string // AddUserToProxy is a flag to add user to proxy
@@ -49,7 +48,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (default: false) (experimental/testing) ")
 	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (default: false) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (default: false) (experimental/testing)")
-	flag.BoolVar(&cfg.opt.YencGo, "yencgo", false, "[true|false] with -yenctest=4: decode with the pure-Go decoder (go-yenc-simd, SIMD with GOEXPERIMENT=simd) instead of rapidyenc's C code (experimental)")
+	flag.BoolVar(&cfg.opt.YencGo, "yencgo", false, "[true|false] with -yenctest=4 in a build with the C decoder (-tags rapidyenc): decode with go-yenc-simd instead. Builds without the tag always use go-yenc-simd")
 	flag.IntVar(&cfg.opt.RapidYencBufSize, "rapidyencbufsize", rapidyenc.DefaultBufSize, "set only if you know what you do! (default: 4K) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.DoubleCheckRapidYencCRC, "doublecheckrapidyenccrc", false, "(experimental/testing)")
 	// debug output flags
@@ -262,11 +261,9 @@ func ParseFlags() {
 
 		if cfg.opt.YencTest == 4 {
 			if cfg.opt.YencGo {
-				rapidyenc.UseGoDecoder = true
-				dlog(always, "Using the pure-Go yenc decoder (go-yenc-simd, kernel=%s)", yencsimd.Kernel())
-			} else {
-				dlog(always, "Using rapidyenc for yenc decoding!")
+				rapidyenc.UseGoDecoder = true // only matters in a -tags rapidyenc build
 			}
+			dlog(always, "yenc decoding (-yenctest=4): %s", rapidyenc.Backend())
 		} else if cfg.opt.YencGo {
 			dlog(always, "ERROR: -yencgo needs -crc32 -yenctest=4")
 			os.Exit(1)

@@ -1,14 +1,5 @@
 package rapidyenc
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/src
-#cgo darwin LDFLAGS: ${SRCDIR}/librapidyenc_darwin.a -lstdc++
-#cgo windows,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_windows_amd64.a -lstdc++ -static-libstdc++ -static-libgcc
-#cgo linux,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_amd64.a -lstdc++
-#cgo linux,arm64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_arm64.a -lstdc++
-#include "rapidyenc.h"
-*/
-import "C"
 import (
 	"bytes"
 	"encoding/binary"
@@ -21,7 +12,6 @@ import (
 	"log"
 	"strconv"
 	"sync"
-	"unsafe"
 
 	yencsimd "github.com/go-while/go-yenc-simd"
 	"golang.org/x/text/transform"
@@ -516,30 +506,34 @@ const (
 // CR (\r), LF (\n), EQ (=), DT (.)
 type State int
 
+// The values are rapidyenc's RapidYencDecoderState and RapidYencDecoderEnd
+// (rapidyenc.h), and go-yenc-simd's State and End: the C build checks them
+// against the C headers (TestStateValuesMatchC), both builds against
+// go-yenc-simd (TestStateValuesMatchYencsimd).
 const (
-	StateCRLF     = State(C.RYDEC_STATE_CRLF)
-	StateEQ       = State(C.RYDEC_STATE_EQ)
-	StateCR       = State(C.RYDEC_STATE_CR)
-	StateNone     = State(C.RYDEC_STATE_NONE)
-	StateCRLFDT   = State(C.RYDEC_STATE_CRLFDT)
-	StateCRLFDTCR = State(C.RYDEC_STATE_CRLFDTCR)
-	StateCRLFEQ   = State(C.RYDEC_STATE_CRLFEQ) // may actually be "\r\n.=" in raw Decoder
+	StateCRLF     State = 0
+	StateEQ       State = 1
+	StateCR       State = 2
+	StateNone     State = 3
+	StateCRLFDT   State = 4
+	StateCRLFDTCR State = 5
+	StateCRLFEQ   State = 6 // may actually be "\r\n.=" in raw Decoder
 )
 
 // End is the State for incremental decoding, whether the end of the yEnc data was reached
 type End int
 
 const (
-	EndNone    = End(C.RYDEC_END_NONE)    // end not reached
-	EndControl = End(C.RYDEC_END_CONTROL) // \r\n=y sequence found, src points to byte after 'y'
-	EndArticle = End(C.RYDEC_END_ARTICLE) // \r\n.\r\n sequence found, src points to byte after last '\n'
+	EndNone    End = 0 // end not reached
+	EndControl End = 1 // \r\n=y sequence found, src points to byte after 'y'
+	EndArticle End = 2 // \r\n.\r\n sequence found, src points to byte after last '\n'
 )
 
-var decodeInitOnce sync.Once
-
-// UseGoDecoder makes every Decoder use the pure-Go decoder (github.com/go-while/go-yenc-simd)
-// instead of the C library for the yEnc data (plan Phase 8). Headers, CRC and
-// size checks are the same Go code either way. Set it before decoding starts.
+// UseGoDecoder makes every Decoder use the pure-Go decoder
+// (github.com/go-while/go-yenc-simd) for the yEnc data in a build with the C
+// library (-tags rapidyenc). Builds without the tag always use it. Headers,
+// CRC and size checks are the same Go code either way. Set it before
+// decoding starts.
 var UseGoDecoder bool
 
 // decodeIncremental runs the yEnc data through the C or the Go decoder.
@@ -554,44 +548,14 @@ func (d *Decoder) decodeIncremental(dst, src []byte) (int, int, End, error) {
 	return DecodeIncremental(dst, src, &d.State)
 }
 
-// DecodeKernel reports the decode kernel rapidyenc picked for this CPU
-// (RYKERN_* in rapidyenc.h, e.g. 0x403 AVX2, 0x603 VBMI2).
-func DecodeKernel() int {
-	decodeInitOnce.Do(func() {
-		C.rapidyenc_decode_init()
-	})
-	return int(C.rapidyenc_decode_kernel())
-}
-
-// DecodeIncremental decodes yEnc encoded data incrementally.
-// DecodeIncremental stops decoding when a yEnc/NNTP end sequence is found
-func DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, err error) {
-	decodeInitOnce.Do(func() {
-		C.rapidyenc_decode_init()
-	})
-
-	if len(src) == 0 {
-		return 0, 0, EndNone, nil
+// Backend reports the decoder in use for the yEnc data: rapidyenc's C code
+// (only in builds with -tags rapidyenc, unless UseGoDecoder is set) or
+// go-yenc-simd with its kernel.
+func Backend() string {
+	if CBackend && !UseGoDecoder {
+		return cBackendName()
 	}
-
-	if len(dst) < len(src) {
-		return 0, 0, 0, errDestinationTooSmall
-	}
-
-	srcPointer := uintptr(unsafe.Pointer(&src[0]))
-	dstPointer := uintptr(unsafe.Pointer(&dst[0]))
-
-	result := End(C.rapidyenc_decode_incremental(
-		(*unsafe.Pointer)(unsafe.Pointer(&srcPointer)),
-		(*unsafe.Pointer)(unsafe.Pointer(&dstPointer)),
-		C.size_t(len(src)),
-		(*C.RapidYencDecoderState)(unsafe.Pointer(state)),
-	))
-
-	nSrc = int(srcPointer - uintptr(unsafe.Pointer(&src[0])))
-	nDst = int(dstPointer - uintptr(unsafe.Pointer(&dst[0])))
-
-	return nDst, nSrc, result, nil
+	return "go-yenc-simd (" + yencsimd.Kernel() + ")"
 }
 
 func extractString(data, substr []byte) (string, error) {
