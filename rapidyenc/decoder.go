@@ -23,6 +23,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/go-while/NZBreX/ydec"
 	"golang.org/x/text/transform"
 )
 
@@ -36,9 +37,6 @@ var (
 	// Default buffer size for decoding can be set before calling any AcquireDecoder
 	//  via: rapidyenc.DefaultBufSize = 64*1024 // 64 KiB
 	DefaultBufSize = int(constBufSize) // Default buffer size for Decoder instances
-
-	// private variables for the package to stay compatible with the old API
-	defaultBufSize = DefaultBufSize
 )
 
 // errors for yEnc decoding
@@ -109,7 +107,7 @@ type Decoder struct {
 func AcquireDecoder() *Decoder {
 	v := decoderPool.Get()
 	if v == nil {
-		return NewDecoder(defaultBufSize)
+		return NewDecoder(DefaultBufSize) // DefaultBufSize, not a copy made at init: -rapidyencbufsize had no effect
 	}
 	return v.(*Decoder)
 }
@@ -125,7 +123,7 @@ func AcquireDecoderWithReader(reader io.Reader) *Decoder {
 	v := decoderPool.Get()
 	var dec *Decoder
 	if v == nil {
-		dec = NewDecoder(defaultBufSize)
+		dec = NewDecoder(DefaultBufSize)
 	} else {
 		dec = v.(*Decoder)
 	}
@@ -259,7 +257,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 func (d *Decoder) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
 loop:
 	if d.body && d.format == FormatYenc {
-		nd, ns, end, _ := DecodeIncremental(dst[nDst:], src[nSrc:], &d.State)
+		nd, ns, end, _ := d.decodeIncremental(dst[nDst:], src[nSrc:])
 		if nd > 0 {
 			d.hash.Write(dst[nDst : nDst+nd])
 			d.actualSize += int64(nd)
@@ -538,6 +536,32 @@ const (
 )
 
 var decodeInitOnce sync.Once
+
+// UseGoDecoder makes every Decoder use the pure-Go decoder (package ydec)
+// instead of the C library for the yEnc data (plan Phase 8). Headers, CRC and
+// size checks are the same Go code either way. Set it before decoding starts.
+var UseGoDecoder bool
+
+// decodeIncremental runs the yEnc data through the C or the Go decoder.
+// Both use the same State and End values (checked in decoder_test.go).
+func (d *Decoder) decodeIncremental(dst, src []byte) (int, int, End, error) {
+	if UseGoDecoder {
+		st := ydec.State(d.State)
+		nd, ns, end, err := ydec.DecodeIncremental(dst, src, &st)
+		d.State = State(st)
+		return nd, ns, End(end), err
+	}
+	return DecodeIncremental(dst, src, &d.State)
+}
+
+// DecodeKernel reports the decode kernel rapidyenc picked for this CPU
+// (RYKERN_* in rapidyenc.h, e.g. 0x403 AVX2, 0x603 VBMI2).
+func DecodeKernel() int {
+	decodeInitOnce.Do(func() {
+		C.rapidyenc_decode_init()
+	})
+	return int(C.rapidyenc_decode_kernel())
+}
 
 // DecodeIncremental decodes yEnc encoded data incrementally.
 // DecodeIncremental stops decoding when a yEnc/NNTP end sequence is found

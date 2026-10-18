@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/go-while/NZBreX/rapidyenc"
+	"github.com/go-while/NZBreX/ydec"
 	prof "github.com/go-while/go-cpu-mem-profiler"
 )
 
@@ -48,6 +49,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (default: false) (experimental/testing) ")
 	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (default: false) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (default: false) (experimental/testing)")
+	flag.BoolVar(&cfg.opt.YencGo, "yencgo", false, "[true|false] with -yenctest=4: decode with the pure-Go decoder (ydec, SIMD with GOEXPERIMENT=simd) instead of rapidyenc's C code (experimental)")
 	flag.IntVar(&cfg.opt.RapidYencBufSize, "rapidyencbufsize", rapidyenc.DefaultBufSize, "set only if you know what you do! (default: 4K) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.DoubleCheckRapidYencCRC, "doublecheckrapidyenccrc", false, "(experimental/testing)")
 	// debug output flags
@@ -259,7 +261,15 @@ func ParseFlags() {
 		}
 
 		if cfg.opt.YencTest == 4 {
-			dlog(always, "Using rapidyenc for yenc decoding!")
+			if cfg.opt.YencGo {
+				rapidyenc.UseGoDecoder = true
+				dlog(always, "Using the pure-Go yenc decoder (ydec, kernel=%s)", ydec.Kernel())
+			} else {
+				dlog(always, "Using rapidyenc for yenc decoding!")
+			}
+		} else if cfg.opt.YencGo {
+			dlog(always, "ERROR: -yencgo needs -crc32 -yenctest=4")
+			os.Exit(1)
 		}
 
 		if cfg.opt.YencCpu < 0 || cfg.opt.YencAsyncCpu < 0 {
@@ -284,6 +294,10 @@ func ParseFlags() {
 		}
 
 	} else {
+		if cfg.opt.YencGo {
+			dlog(always, "ERROR: -yencgo needs -crc32 -yenctest=4")
+			os.Exit(1)
+		}
 		cfg.opt.YencTest = 0      // reset to 0 if not using YencCRC
 		cfg.opt.YencWrite = false // reset to false if not using YencCRC
 		cfg.opt.YencMerge = false // reset to false if not using YencCRC

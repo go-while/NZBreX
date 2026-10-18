@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"github.com/go-while/NZBreX/rapidyenc"
 	"net"
 	"net/textproto"
 	"runtime"
@@ -173,4 +174,12 @@ func TestReadDotLinesBrokenYencIsBadCrc(t *gotesting.T) {
 	if code == 99932 || len(item.article) == 0 {
 		t.Fatalf("plain text article: code=%d len(article)=%d, want its content", code, len(item.article))
 	}
+}
+
+// The same checks with -yencgo: the pure-Go decoder behind the same Decoder.
+func TestReadDotLinesWithGoDecoder(t *gotesting.T) {
+	rapidyenc.UseGoDecoder = true
+	defer func() { rapidyenc.UseGoDecoder = false }()
+	t.Run("EarlyReturnStopsDecoder", TestReadDotLinesEarlyReturnStopsDecoder)
+	t.Run("BrokenYencIsBadCrc", TestReadDotLinesBrokenYencIsBadCrc)
 }

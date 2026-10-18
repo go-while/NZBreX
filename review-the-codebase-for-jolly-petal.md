@@ -597,6 +597,27 @@ Plan:
 
 Independent of Phases 1–7; can run in parallel.
 
+**Result (2026-10-18): prototype done, default unchanged (C).**
+- **`ydec/`** (pure Go, no cgo): `DecodeIncremental(dst, src, *State)`, a drop-in for `rapidyenc_decode_incremental` (raw NNTP, dot-unstuffing, stops at `\r\n=y` / `\r\n.\r\n`; same `State`/`End` values). Only this was C; headers, CRC and size checks were already Go.
+  - A 7-state machine (`step`) that matches rapidyenc's scalar reference byte for byte.
+  - With `GOEXPERIMENT=simd` on amd64: an AVX/AVX2 loop (16/32 bytes per step; escapes from a load one byte back, line starts from two bytes back, packing with `VPSHUFB` and 256-entry tables), and an AVX-512 VBMI2 loop (64 bytes, `VPCOMPRESSB`) in its own function. Anything unusual (`==`, an escaped line break, the end sequences) goes through the state machine. Without the experiment or on other CPUs: plain Go.
+  - Lessons: no helper calls in the hot loop (calls, including `bits.OnesCount`'s fallback, make the compiler reload every vector constant); no data-dependent branches per block; a function that mentions 512-bit vectors uses 512-bit instructions on entry (SIGILL elsewhere).
+- **Integration:** `rapidyenc.UseGoDecoder`, set by the new flag `-yencgo` (needs `-crc32 -yenctest=4`). It replaces only the C call inside the existing `Decoder`, so the header, CRC and size checks are shared. Also fixed: `-rapidyencbufsize` had no effect (`AcquireDecoder` used a copy of `DefaultBufSize` made at init). Added `rapidyenc.DecodeKernel()`.
+- **Tests:** differential against the C library: 200k random inputs dense with `= \r \n . y`, chunked decoding at random cuts, 300 encoded articles up to 800 KB (incl. escape-heavy data), the rapidyenc sample files, and a fuzz target (2×60 s, ~3M execs each, no difference). Mutation checks: breaking any vector rule fails the tests. rapidyenc's own decoder tests and the `readDotLines` broken-yEnc tests also run with the Go decoder. Both run on AVX2 (here) and AVX-512 VBMI2 (remote, both paths).
+- **End to end** (race build, local servers): download A → upload B with `-crc32 -yenctest=4`, with and without `-yencgo`: identical result tables, 0 races; with damaged articles (bad CRC, cut `=yend`) both reject the same ones.
+- **Benchmarks** (750 KB article, MB/s):
+
+  | | i7-10710U, AVX2, capped at 2 GHz | EPYC 9B45 (Zen 5, KVM), AVX-512 VBMI2 |
+  |---|---|---|
+  | yEnc loop, C (rapidyenc kernel) | 3700 (AVX2) | 17400 (VBMI2) |
+  | yEnc loop, Go | 1830 (49%) | 11000 (63%); 7400 forced to AVX2 |
+  | yEnc loop, Go without SIMD | 460 | 1150 |
+  | whole Decoder, 4 KiB reads, C / Go | 1700 / 1170 (69%) | 7000 / 5700 (81%) |
+  | whole Decoder, 64 KiB reads, C / Go | 1990 / 1220 (61%) | 8500 / 6600 (78%) |
+
+  The C path also makes 390 allocations per article (cgo pointer escapes), Go 12.
+- **Step 4, decision open (user):** Go is not "close" in the raw loop (49–63%), but 61–81% through the whole decoder, and far above download speeds on either machine. Making it the default would drop cgo for the decoder (the encoder is only used by tests), the `.a`/`.dll` builds and the cross toolchains; it would also tie the fast path to `GOEXPERIMENT=simd` (without it: 460–1150 MB/s, still above a 1 Gbit/s link). Until decided, C stays the default and `-yencgo` is opt-in.
+
 ---
 
 ## Decisions
