@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -198,4 +199,76 @@ func multipartFile(t *gotesting.T, name, data string) *multipart.FileHeader {
 		t.Fatal(err)
 	}
 	return req.MultipartForm.File["file"][0]
+}
+
+// Brute force: after webLoginMaxFails wrong passwords from one address it
+// gets 429 (no bcrypt) for webLoginBlock. Cached logins and other addresses
+// keep working; a success resets the count.
+func TestWebLoginRateLimit(t *gotesting.T) {
+	file := filepath.Join(t.TempDir(), "webpasswd")
+	writeWebUser(t, file, "webadmin0001", "secretpass01", 0)
+	writeWebUser(t, file, "webadmin0002", "secretpass02", 0)
+	a, err := newWebAuth(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldMax, oldBlock := webLoginMaxFails, webLoginBlock
+	webLoginMaxFails, webLoginBlock = 5, 300*time.Millisecond
+	t.Cleanup(func() { webLoginMaxFails, webLoginBlock = oldMax, oldBlock })
+	h := webTestServer(t, a)
+	login := func(ip, user, pass string) (int, string) {
+		req := httptest.NewRequest("GET", "http://127.0.0.1:11911/api/jobs", nil)
+		req.RemoteAddr = ip + ":40000"
+		req.SetBasicAuth(user, pass)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code, w.Header().Get("Retry-After")
+	}
+
+	if c, _ := login("192.0.2.10", "webadmin0002", "secretpass02"); c != 200 { // now cached
+		t.Fatalf("first login: %d", c)
+	}
+	for i := 0; i < 4; i++ {
+		login("192.0.2.10", "webadmin0001", "wrongpass001")
+	}
+	if c, _ := login("192.0.2.10", "webadmin0001", "secretpass01"); c != 200 {
+		t.Fatalf("good login after 4 failures: %d", c)
+	}
+	for i := 0; i < 4; i++ { // the success reset the count
+		if c, _ := login("192.0.2.10", "webadmin0001", "wrongpass001"); c != 401 {
+			t.Fatalf("failure %d after the reset: %d, want 401", i+1, c)
+		}
+	}
+	if c, _ := login("192.0.2.10", "webadmin0001", "wrongpass002"); c != 401 {
+		t.Fatalf("5th failure: %d, want 401", c)
+	}
+	// blocked now: even the right password (uncached) is refused without a check
+	if c, ra := login("192.0.2.10", "webadmin0001", "secretpass99"); c != 429 || ra == "" {
+		t.Fatalf("blocked address: %d Retry-After=%q, want 429 with Retry-After", c, ra)
+	}
+	if c, _ := login("192.0.2.10", "webadmin0002", "secretpass02"); c != 200 {
+		t.Errorf("cached login from a blocked address: %d, want 200", c)
+	}
+	if c, _ := login("192.0.2.20", "webadmin0001", "secretpass01"); c != 200 {
+		t.Errorf("another address: %d, want 200", c)
+	}
+	time.Sleep(350 * time.Millisecond)
+	if c, _ := login("192.0.2.10", "webadmin0001", "wrongpass003"); c != 401 {
+		t.Errorf("after the block: %d, want 401", c)
+	}
+}
+
+// The failed-login table stays bounded when many addresses guess.
+func TestWebLoginFailTableBounded(t *gotesting.T) {
+	oldMax := webLoginTrackMax
+	webLoginTrackMax = 100
+	t.Cleanup(func() { webLoginTrackMax = oldMax })
+	a := &webAuth{fails: make(map[string]*loginFails)}
+	now := time.Now()
+	for i := 0; i < 1000; i++ {
+		a.loginFailed(fmt.Sprintf("198.51.100.%d-%d", i/250, i), now)
+	}
+	if n := len(a.fails); n > webLoginTrackMax {
+		t.Fatalf("%d records kept, cap %d", n, webLoginTrackMax)
+	}
 }

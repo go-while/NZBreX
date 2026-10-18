@@ -644,6 +644,10 @@ Independent of Phases 1–7; can run in parallel.
 
 gin replaced by `net/http` (Go 1.22+ method/wildcard patterns): `webHandler` builds the routes behind `webGuard` and the login (`auth.middleware`), with `writeJSON`, template pages rendered into a buffer, `filesOnly` (no directory listings), panic recovery (500 + stack, as gin's Recovery) and an access log with `-debug` only (gin logged every poll). Same routes, JSON bodies, status codes and content types; a wrong method now gets 405 instead of 404. Before switching, `webserver_test.go` was written against the gin router (every route, uploads incl. 413, login, CSRF, Host) and passes unchanged on `net/http`. Binary 33.5 → 17.1 MB, third-party packages 114 → 27 (gin pulled bytedance/sonic, go-playground/validator, quic-go, ...). Real binary: both web race scripts (two jobs, pollers, `-log`), the Phase 4 login/CSRF/size probes and SIGTERM give the same results as before.
 
+## Web login brute-force limit (2026-10-18)
+
+Per client address: after `webLoginMaxFails` (10) failed logins within `webLoginWindow` (10 min) the address gets `429` with `Retry-After` for `webLoginBlock` (10 min), answered before any bcrypt check. A success clears the record. Credentials already verified (the 5-minute cache) pass during a block, so users behind a shared address (reverse proxy) aren't locked out by someone else's guessing, and the cache only holds exact verified pairs. The table is capped (`webLoginTrackMax`, 10000; unblocked records go first). Tests: `TestWebLoginRateLimit`, `TestWebLoginFailTableBounded`; real binary: 10 × 401, then 429 `Retry-After: 599`.
+
 ## Decisions
 
 All three answered by the user on 2026-10-17.

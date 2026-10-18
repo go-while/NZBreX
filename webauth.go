@@ -30,6 +30,23 @@ const (
 	webMaxUploadBytes = 128 << 20 // one NZB upload, multipart overhead included
 )
 
+// Failed logins per client address: after webLoginMaxFails within
+// webLoginWindow the address gets 429 for webLoginBlock, without a bcrypt
+// check. Variables for the tests.
+var (
+	webLoginMaxFails = 10
+	webLoginWindow   = 10 * time.Minute
+	webLoginBlock    = 10 * time.Minute
+	webLoginTrackMax = 10000 // addresses remembered; beyond that the oldest records go
+)
+
+// loginFails is one client address's recent failed logins.
+type loginFails struct {
+	count        int
+	first        time.Time // start of the current window
+	blockedUntil time.Time
+}
+
 type webAuth struct {
 	file    string
 	mu      sync.Mutex
@@ -38,12 +55,13 @@ type webAuth struct {
 	size    int64
 	cache   map[[32]byte]time.Time // sha256(user, password) → when the check expires
 	checks  chan struct{}
+	fails   map[string]*loginFails // client address → failed logins (under mu)
 }
 
 // newWebAuth loads the web passwd file. A file with no usable users is an
 // error: the login would lock everyone out.
 func newWebAuth(file string) (*webAuth, error) {
-	a := &webAuth{file: file, cache: make(map[[32]byte]time.Time), checks: make(chan struct{}, webAuthMaxChecks)}
+	a := &webAuth{file: file, cache: make(map[[32]byte]time.Time), checks: make(chan struct{}, webAuthMaxChecks), fails: make(map[string]*loginFails)}
 	mergeNewPasswdFiles(file)
 	if err := a.load(); err != nil {
 		return nil, err
@@ -104,14 +122,11 @@ func authCacheKey(user, pass string) [32]byte {
 // check verifies user and password. Successful checks are cached for
 // webAuthCacheTTL: the pages poll every few seconds, bcrypt costs ~50–100 ms.
 func (a *webAuth) check(user, pass string) bool {
-	key := authCacheKey(user, pass)
-	now := time.Now()
-	a.mu.Lock()
-	if exp, ok := a.cache[key]; ok && now.Before(exp) {
-		a.mu.Unlock()
+	if a.cached(user, pass) {
 		return true
 	}
-	a.mu.Unlock()
+	key := authCacheKey(user, pass)
+	now := time.Now()
 
 	a.reloadIfChanged()
 	a.checks <- struct{}{} // bound the CPU a flood of guesses can take
@@ -134,18 +149,104 @@ func (a *webAuth) check(user, pass string) bool {
 	return true
 }
 
-// middleware asks for basic auth on every request.
+// cached reports whether user and password passed a check within webAuthCacheTTL.
+func (a *webAuth) cached(user, pass string) bool {
+	key := authCacheKey(user, pass)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	exp, ok := a.cache[key]
+	return ok && time.Now().Before(exp)
+}
+
+// blockedFor returns how long ip is still blocked after too many failed logins (0: not).
+func (a *webAuth) blockedFor(ip string, now time.Time) time.Duration {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if f := a.fails[ip]; f != nil && now.Before(f.blockedUntil) {
+		return f.blockedUntil.Sub(now)
+	}
+	return 0
+}
+
+// loginFailed records a failed login from ip and reports whether ip is now blocked.
+func (a *webAuth) loginFailed(ip string, now time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	f := a.fails[ip]
+	if f == nil || now.Sub(f.first) > webLoginWindow {
+		if f == nil && len(a.fails) >= webLoginTrackMax {
+			a.pruneFails(now)
+		}
+		f = &loginFails{first: now}
+		a.fails[ip] = f
+	}
+	f.count++
+	if f.count >= webLoginMaxFails {
+		f.blockedUntil = now.Add(webLoginBlock)
+		f.count, f.first = 0, now // the next window starts after the block
+		return true
+	}
+	return false
+}
+
+// loginOK forgets ip's failed logins.
+func (a *webAuth) loginOK(ip string) {
+	a.mu.Lock()
+	delete(a.fails, ip)
+	a.mu.Unlock()
+}
+
+// pruneFails makes room in the failed-login table. First records that are
+// neither blocked nor in their window; if the table is still full, unblocked
+// ones until it is half full, and only then blocked ones (more than
+// webLoginTrackMax addresses guessing at once). Caller holds mu.
+func (a *webAuth) pruneFails(now time.Time) {
+	for ip, f := range a.fails {
+		if now.After(f.blockedUntil) && now.Sub(f.first) > webLoginWindow {
+			delete(a.fails, ip)
+		}
+	}
+	for _, keepBlocked := range []bool{true, false} {
+		for ip, f := range a.fails {
+			if len(a.fails) < webLoginTrackMax/2 {
+				return
+			}
+			if !keepBlocked || now.After(f.blockedUntil) {
+				delete(a.fails, ip)
+			}
+		}
+	}
+}
+
+// middleware asks for basic auth on every request, and limits failed logins
+// per client address (brute force): blocked addresses get 429 without a
+// bcrypt check. Credentials already verified (cached) still pass, so other
+// users behind the same address, e.g. a reverse proxy, keep working.
 func (a *webAuth) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
+		if ok && a.cached(user, pass) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ip, now := peerIP(r), time.Now()
+		if wait := a.blockedFor(ip, now); wait > 0 {
+			w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
+			writeJSON(w, http.StatusTooManyRequests, H{"error": "too many failed logins, try again later"})
+			return
+		}
 		if !ok || !a.check(user, pass) {
 			if ok {
-				log.Printf("Web: failed login for user '%s' from %s", user, peerIP(r))
+				log.Printf("Web: failed login for user '%s' from %s", user, ip)
+				if a.loginFailed(ip, now) {
+					log.Printf("Web: %s blocked for %v after %d failed logins", ip, webLoginBlock, webLoginMaxFails)
+				}
 			}
 			w.Header().Set("WWW-Authenticate", `Basic realm="NZBreX", charset="UTF-8"`)
 			writeJSON(w, http.StatusUnauthorized, H{"error": "login required"})
 			return
 		}
+		a.loginOK(ip)
 		next.ServeHTTP(w, r)
 	})
 }

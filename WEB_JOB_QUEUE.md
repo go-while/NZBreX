@@ -125,6 +125,12 @@ address. To reach it from elsewhere, set `-webpasswd`, prefer `-webssl` (TLS 1.2
 `-webhosts`. Exposing it directly on the internet is not recommended: it drives
 your provider accounts.
 
+After 10 failed logins within 10 minutes, a client address gets `429 Too Many
+Requests` (with `Retry-After`) for 10 minutes, without a password check. A
+successful login resets the count, and logins that already succeeded keep
+working during a block, so other users behind the same address (e.g. a
+reverse proxy) aren't locked out.
+
 User names and passwords need at least 10 characters; `-webadduser 'auto|auto'`
 generates both and prints them. Users added with `-webadduser` (or edits to the
 file) are picked up while the server runs. Web users don't expire unless their
