@@ -3,7 +3,7 @@
 #
 # Builds one NZBreX binary and packs it for a release:
 #   <outdir>/NZBreX_<version>_<goos>-<goarch>_<variant>.tar.gz   (.zip for windows)
-#   <outdir>/nzbrex_<debversion>_<arch>_<variant>.deb            (linux, with DEB=1)
+#   <outdir>/nzbrex_<version>_<arch>_<variant>.deb               (linux, with DEB=1)
 #
 # purego:    CGO_ENABLED=0, decoder go-yenc-simd. Cross-compiles from anywhere;
 #            static on linux. GOEXPERIMENT=simd unless SIMD=0.
@@ -90,7 +90,9 @@ Description: re-upload Usenet articles missing from providers
  NZBreX checks the articles of an NZB on your providers and re-uploads the
  missing ones. Build variant: $variant.
 EOF
-	dpkg-deb --root-owner-group --build "$root" "$outdir/nzbrex_${debversion}_${goarch}_${variant}.deb" >/dev/null
+	# file name without '~': GitHub turns it into '.' in asset names, and the
+	# names in SHA256SUMS would no longer match (v0.0.7-test-p1)
+	dpkg-deb --root-owner-group --build "$root" "$outdir/nzbrex_${version#v}_${goarch}_${variant}.deb" >/dev/null
 fi
 
-ls -l "$outdir" | grep -F -e "$name" -e "_${goarch}_${variant}.deb" || true
+ls -l "$outdir" | grep -F -e "$name" -e "nzbrex_${version#v}_${goarch}_${variant}.deb" || true
