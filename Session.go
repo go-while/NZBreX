@@ -486,7 +486,10 @@ func (p *PROCESSOR) newssid() uint64 {
 // If the session map exceeds the threshold, it removes the session from the processor map.
 // If the session is below the threshold, it closes the session partly.
 func (s *SESSION) clearSession() {
-	if len(s.proc.sessMap) > cfg.opt.SessThreshold {
+	s.proc.mux.RLock()
+	sessions := len(s.proc.sessMap) // the web job queue adds and removes sessions concurrently
+	s.proc.mux.RUnlock()
+	if sessions > cfg.opt.SessThreshold {
 		s.proc.removeSession(s.sessId, s) // remove session from processor map
 		return
 	}

@@ -346,6 +346,16 @@ Still races:
 - **`ConnPool.go:184` (worse than the draft said).** `provider.ConnPool = nil` runs in `KillConnPool` (`Session.go:387`) before `clearSession` (`:401`). Meanwhile `webserver.go:854-856` calls `prov.ConnPool.GetStats()` while `session.active` is still true. That is a reachable nil-pointer panic from a web poll.
 - `NetConn.go:987-989`: `checkCapabilities` holds `provider.mux` across two network reads with no deadline (`UseNoDeadline` makes `ExtendConn` a no-op). Add a deadline; don't hold the lock across I/O.
 
+**Result (2026-10-18):** done.
+- `clearSession` reads `len(sessMap)` under `p.mux.RLock()`.
+- `ConnPool` nil panic: already fixed with the web wedge above (`9299fd8`): `collectStats` copies the pool pointer under `prov.mux` and skips a nil one. `KillConnPool` runs only after all workers have joined, and proxy sessions never call it, so no other reader can see the nil.
+- `checkCapabilities` gives the exchange its own deadline (`connHandshakeTimeout`, 30 s), parses into locals with no lock held, and takes `provider.mux` only to store the result.
+- **New, same cause:** `connect()` read the greeting and the AUTHINFO replies with no deadline either, so a server that accepts the TCP connection and then sends nothing blocked `GetConn` forever. The whole handshake now has the same 30 s deadline, cleared before the conn is handed out. A handshake timeout counts as `errDial`, so `GetConn` marks the provider down after `MaxConnErrors` tries (never in proxy mode).
+- **New:** `connect()` read the greeting with `ReadCodeLine(200)`. A `201` greeting ("no posting", common on download-only servers) passed the range check but came back with an error, so without a login configured `NewConn` failed and leaked the conn. It now accepts any 2xx and closes the conn on every failure.
+- Tests: `TestConnectSilentServerTimesOut`, `TestConnectAccepts201Greeting`, `TestCheckCapabilitiesTimesOutWithoutHoldingLock` (all three fail on the old code: two hang, one errors).
+- Verified with `-race` against the local servers: B replaced by a listener that accepts and never answers: the old build was still hanging when killed at 180 s; the new one marks B down and ends at 105 s (3 × (30 s + 3 s retry sleep)). A→B (`-yenctest 4`), same group, B refused at boot (13 s), proxy login + STAT (223 / 430): unchanged, no races.
+- **Still open:** in-session reads (ARTICLE/STAT/IHAVE/POST) still have no deadline because `UseNoDeadline = true` turns `ExtendConn` into a no-op, and pooled conns only get a deadline through `ExtendConn` on the shared-conn path. A server that goes silent mid-session can still block a routine until the session's stop. Turning deadlines on needs a deadline set before every command (parked conns would otherwise hit a stale one), so it is a design change, not a flag flip.
+
 **Not races (dropped):**
 - `Workers.go:129`, `Routines.go:355-368`, `Workers.go:616-618`: written in the boot goroutine before the workers start, so the writes happen first.
 - `writeCsvFile` (`Utils.go:444-451`): runs after the workers are joined.

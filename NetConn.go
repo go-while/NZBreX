@@ -1018,10 +1018,13 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	}
 	rcode := 101 // expected
 
-	provider.mux.Lock()         // mutex #9b71 checkCapabilities
-	defer provider.mux.Unlock() // mutex #9b71 checkCapabilities
 	defer provider.ConnPool.CloseConn(connitem, nil)
+	// The conn has no read deadline (UseNoDeadline): give this exchange its own, so a
+	// server that stops answering can't block the boot. The conn is closed afterwards,
+	// so the deadline never reaches a reused conn.
+	connitem.conn.SetDeadline(time.Now().Add(connHandshakeTimeout))
 
+	// No lock is held during the network I/O (it used to hold provider.mux across both reads).
 	if !msg2srv(connitem.conn, "CAPABILITIES") {
 		return fmt.Errorf("error '%s' checkCapabilities", provider.Name)
 	}
@@ -1033,24 +1036,25 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	if err != nil {
 		return fmt.Errorf("error '%s' checkCapabilities ReadDotLines err='%v'", provider.Name, err)
 	}
+	var check, ihave, post, stream bool
 	setpostProviders := 0
 	//dlog( "Read %d CAPAS from Provider %s", len(lines), provider.Name)
 	for _, capability := range lines {
 		//dlog( "CAPAS @ %s: %s", provider.Name, capability)
 		switch strings.ToLower(capability) {
 		case "check":
-			provider.capabilities.check = true
+			check = true
 		case "ihave":
-			provider.capabilities.ihave = true
+			ihave = true
 			setpostProviders++
 		case "post":
-			provider.capabilities.post = true
+			post = true
 			setpostProviders++
 		case "takethis":
-			provider.capabilities.stream = true
+			stream = true
 			setpostProviders++
 		case "streaming":
-			provider.capabilities.stream = true
+			stream = true
 			setpostProviders++
 		}
 	}
@@ -1060,8 +1064,14 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	if setpostProviders > 0 {
 		GCounter.Incr("postProviders")
 	}
+	provider.mux.Lock() // mutex #9b71 checkCapabilities
+	provider.capabilities.check = check
+	provider.capabilities.ihave = ihave
+	provider.capabilities.post = post
+	provider.capabilities.stream = stream
 	// provider.NoUpload will be set to true if none capa is available
-	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)
+	provider.NoUpload = (!ihave && !post && !stream)
+	provider.mux.Unlock()
 	// done
 	return nil
 } // end func checkCapabilities

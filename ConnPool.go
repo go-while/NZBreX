@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"net"
 	"net/textproto"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,6 +51,11 @@ const (
 var (
 	//noDeadLine   time.Time                 // used as zero value!
 	readDeadConn = time.Unix(1, 0) // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
+
+	// connHandshakeTimeout bounds the greeting, login and CAPABILITIES exchange of a new conn.
+	// UseNoDeadline turns ExtendConn into a no-op, so without this a server that accepts the
+	// TCP connection and then sends nothing blocks the caller forever. A var so tests can shorten it.
+	connHandshakeTimeout = 30 * time.Second
 )
 
 // holds an active connection to share around
@@ -255,26 +261,43 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 	} // end switch
 	dlog(cfg.opt.DebugConnPool, "ConPool connect raw conn established '%s' took=(%d ms)", c.provider.Name, time.Since(start).Milliseconds())
 
+	// bound the greeting and login; cleared again once the conn is handed out
+	conn.SetDeadline(time.Now().Add(connHandshakeTimeout))
+	defer func() {
+		if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+			// accepted but silent: as useless as a refused dial, so GetConn may mark the provider down
+			err = fmt.Errorf("%w: handshake timed out after %v: %w", errDial, connHandshakeTimeout, err)
+		}
+	}()
+
 	time0 := time.Now()
 	srvtp := textproto.NewConn(conn)
 	dlog(cfg.opt.DebugConnPool, "ConnPool connect textproto.NewConn took=(%d ms) '%s'", time.Since(time0).Milliseconds(), c.provider.Name)
 	time00 := time.Now()
-	code, msg, err := srvtp.ReadCodeLine(200)
-	dlog(cfg.opt.DebugConnPool, "ConnPool connect ReadCodeLine(20) took=(%d ms) '%s' code=%d msg='%s' err='%v'", time.Since(time00).Milliseconds(), c.provider.Name, code, msg, err)
+	// expectCode 2 accepts any 2xx. It was 200, so a "201 no posting" greeting came back
+	// with an error: NewConn then failed and the conn leaked when no login was configured.
+	code, msg, err := srvtp.ReadCodeLine(2)
+	dlog(cfg.opt.DebugConnPool, "ConnPool connect ReadCodeLine(2) took=(%d ms) '%s' code=%d msg='%s' err='%v'", time.Since(time00).Milliseconds(), c.provider.Name, code, msg, err)
 	time000 := time.Now()
 
-	if code < nntpWelcomeCodeMin || code > nntpWelcomeCodeMax { // not a valid nntp welcome code
-		if conn != nil {
-			conn.Close()
-		}
+	if err != nil || code < nntpWelcomeCodeMin || code > nntpWelcomeCodeMax { // not a valid nntp welcome code
+		conn.Close()
 		dlog(always, "ERROR in connect '%s' welcome banner code=%d err='%v'", c.provider.Name, code, err)
-		return nil, err
+		if err == nil {
+			err = fmt.Errorf("unexpected welcome banner code=%d msg='%s'", code, msg)
+		}
+		return nil, fmt.Errorf("error connect '%s': %w", c.provider.Name, err)
 	}
 	dlog(cfg.opt.DebugConnPool, "ConnPool connect welcome '%s' time0=(%d ms) time00=(%d ms) time000=(%d ms)", c.provider.Name, time.Since(time0).Milliseconds(), time.Since(time00).Milliseconds(), time.Since(time000).Milliseconds())
 	if !c.wants_auth {
-		return &ConnItem{c: c, connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
+		connitem = &ConnItem{c: c, connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}
+	} else {
+		connitem, err = c.auth(srvtp, conn, start)
 	}
-	return c.auth(srvtp, conn, start)
+	if connitem != nil && connitem.conn != nil {
+		connitem.conn.SetDeadline(time.Time{}) // no deadline from here on, see ExtendConn / UseNoDeadline
+	}
+	return connitem, err
 } // end func connect
 
 func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (connitem *ConnItem, err error) {
