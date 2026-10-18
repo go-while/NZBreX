@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"embed"
 	"errors"
@@ -13,9 +14,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -186,6 +189,7 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 	router.GET("/api/jobs", handleAPIJobsList)
 	router.POST("/api/jobs/:id/start", handleJobStart)
 	router.POST("/api/jobs/start-all", handleJobStartAll)
+	router.POST("/api/jobs/:id/stop", handleJobStop)
 	router.DELETE("/api/jobs/:id", handleJobDelete)
 	// per-job settings are not implemented yet (D2)
 	router.PATCH("/api/jobs/:id/config", handleJobConfigNotImplemented)
@@ -237,6 +241,33 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 		}
 	}()
 	return nil
+}
+
+// webShutdownOnSignal stops the web server cleanly on SIGINT/SIGTERM: no new
+// requests, waiting jobs canceled, the running job stopped (its session tears
+// down as usual), the upload dir removed. Then the process exits.
+func webShutdownOnSignal() {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigs
+		dlog(always, "Web: got %v, shutting down (again to force)", sig)
+		go func() { <-sigs; dlog(always, "Web: forced exit"); os.Exit(1) }()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := webSrv.Shutdown(ctx); err != nil {
+			dlog(always, "Web: shutdown: %v", err)
+		}
+		cancel()
+		jobQueue.stopAll()
+		if !jobQueue.waitIdle(60 * time.Second) {
+			dlog(always, "WARN Web: the running job did not stop within 60s, exiting anyway")
+		}
+		if webUploadDir != "" {
+			os.RemoveAll(webUploadDir)
+		}
+		dlog(always, "Web: shut down")
+		os.Exit(0)
+	}()
 }
 
 // handleIndex serves the main page
@@ -380,6 +411,19 @@ func handleJobStart(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Job started successfully",
+		"job_id":  jobID,
+	})
+}
+
+// handleJobStop cancels a waiting job or stops a running one
+func handleJobStop(c *gin.Context) {
+	jobID := c.Param("id")
+	if err := jobQueue.StopJob(jobID); err != nil {
+		c.JSON(jobErrStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Job stopping",
 		"job_id":  jobID,
 	})
 }

@@ -79,13 +79,8 @@ func main() {
 	if err := thisProcessor.NewProcessor(); err != nil {
 		dlog(always, "ERROR NewProcessor: proxy err='%v'", err)
 		os.Exit(1)
-	} else {
-		if cfg.opt.NzbDir != "" {
-			thisProcessor.SetDirRefresh(cfg.opt.DirRefresh)
-			dlog(cfg.opt.Debug, "// infinite wait!")
-			select {} // infinite wait!
-		}
 	}
+	// -nzbdir is refused in ParseFlags until directory processing works (D3)
 	if proxy {
 		// boot proxy server
 		wg.Add(1) // waitSession
@@ -118,6 +113,7 @@ func main() {
 			dlog(always, "ERROR StartWebServer: err='%v'", err)
 			os.Exit(1)
 		}
+		webShutdownOnSignal()
 		// a base session loads the providers for the web server, like the proxy's
 		s := &SESSION{
 			proc:     thisProcessor,

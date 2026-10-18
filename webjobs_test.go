@@ -123,3 +123,56 @@ func TestStartWebServerReportsBindError(t *gotesting.T) {
 		t.Fatal("StartWebServer on a busy port returned no error")
 	}
 }
+
+// D3: broken mode combinations are rejected at startup.
+func TestStartupModeError(t *gotesting.T) {
+	cases := []struct {
+		nzb        bool
+		dir        string
+		web, proxy bool
+		ok         bool
+	}{
+		{false, "", false, false, true}, // default -nzb
+		{true, "", false, false, true},
+		{false, "", true, false, true},
+		{false, "", false, true, true},
+		{false, "/d", false, false, false}, // -nzbdir unfinished
+		{false, "/d", true, false, false},
+		{false, "/d", false, true, false},
+		{true, "/d", false, false, false},
+		{false, "", true, true, false},
+		{true, "", true, false, false},
+		{true, "", false, true, false},
+	}
+	for _, c := range cases {
+		if err := startupModeError(c.nzb, c.dir, c.web, c.proxy); (err == nil) != c.ok {
+			t.Errorf("nzb=%t dir=%q web=%t proxy=%t: err=%v, want ok=%t", c.nzb, c.dir, c.web, c.proxy, err, c.ok)
+		}
+	}
+}
+
+// Jobs run in the order they were added: each started job used to get its own
+// goroutine racing for a mutex, so start-all ran them in random order.
+func TestJobsRunInQueueOrder(t *gotesting.T) {
+	testCfg()
+	jq := &JobQueue{nextID: 1, wake: make(chan struct{}, 1)} // no runner: check what it would pick
+	var ids []string
+	for i := 0; i < 5; i++ {
+		id, _ := jq.AddJob(writeFile(t, "ok.nzb", testNZB), "ok.nzb")
+		ids = append(ids, id)
+	}
+	for i := len(ids) - 1; i >= 0; i-- { // start them newest first
+		if err := jq.StartJob(ids[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, want := range ids {
+		job := jq.nextWaiting()
+		if job == nil || job.ID != want {
+			t.Fatalf("next job = %v, want %s", job, want)
+		}
+		jq.mu.Lock()
+		jq.finishLocked(job, nil)
+		jq.mu.Unlock()
+	}
+}

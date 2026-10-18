@@ -11,7 +11,7 @@ import (
 )
 
 // Job states. A job moves queued → waiting → running → completed/failed.
-// waiting: started, but another job still holds processingMu.
+// waiting: started, but the jobs before it are still running.
 const (
 	jobQueued    = "queued"
 	jobWaiting   = "waiting"
@@ -31,17 +31,18 @@ var (
 	errQueueFull   = errors.New("job queue is full")
 )
 
-// JobQueue manages the web jobs. Jobs run one at a time (processingMu), because
-// sessions still share the global cfg.
+// JobQueue manages the web jobs. One runner goroutine runs them one at a time,
+// oldest waiting job first, because sessions still share the global cfg.
+// (A goroutine per started job racing for a mutex ran them in random order.)
 //
 // Locking: jq.mu guards every job field. Readers get copies (ListJobs, GetJob),
 // never pointers. Lock order: jq.mu before PROCESSOR.mux (runJob calls
 // newSession under jq.mu); nothing takes jq.mu while holding PROCESSOR.mux.
 type JobQueue struct {
-	mu           sync.RWMutex
-	jobs         []*QueuedJob // every job, in the order it was added
-	nextID       int
-	processingMu sync.Mutex // only one job runs at a time
+	mu     sync.RWMutex
+	jobs   []*QueuedJob // every job, in the order it was added
+	nextID int
+	wake   chan struct{} // a job became waiting
 }
 
 // QueuedJob is one uploaded NZB. The exported fields are the JSON the pages read.
@@ -64,7 +65,8 @@ type QueuedJob struct {
 	TotalSize         int64   `json:"total_size"` // bytes
 	SessionID         uint64  `json:"session_id"`
 
-	session *SESSION // set when the job starts running; the job's own session, never matched by path
+	session       *SESSION // set when the job starts running; the job's own session, never matched by path
+	stopRequested bool     // StopJob was called while it ran
 }
 
 // JobConfig holds per-job settings. They are not applied yet (D2): every job
@@ -79,7 +81,34 @@ type JobConfig struct {
 }
 
 func NewJobQueue() *JobQueue {
-	return &JobQueue{nextID: 1}
+	jq := &JobQueue{nextID: 1, wake: make(chan struct{}, 1)}
+	go jq.runner()
+	return jq
+}
+
+// runner runs waiting jobs in the order they were added, one at a time.
+func (jq *JobQueue) runner() {
+	for range jq.wake {
+		for {
+			job := jq.nextWaiting()
+			if job == nil {
+				break
+			}
+			jq.runJob(job)
+		}
+	}
+}
+
+// nextWaiting returns the oldest waiting job, or nil.
+func (jq *JobQueue) nextWaiting() *QueuedJob {
+	jq.mu.RLock()
+	defer jq.mu.RUnlock()
+	for _, j := range jq.jobs {
+		if j.Status == jobWaiting {
+			return j
+		}
+	}
+	return nil
 }
 
 // startupJobConfig reports the settings every job runs with.
@@ -235,8 +264,8 @@ func (jq *JobQueue) StartAllQueued() int {
 	return started
 }
 
-// StartJob moves a queued job to waiting and starts its goroutine. The job
-// becomes running once it holds processingMu.
+// StartJob moves a queued job to waiting. The runner starts it when the jobs
+// before it are done.
 func (jq *JobQueue) StartJob(jobID string) error {
 	jq.mu.Lock()
 	defer jq.mu.Unlock()
@@ -248,18 +277,18 @@ func (jq *JobQueue) StartJob(jobID string) error {
 		return fmt.Errorf("%w: %s is %s, not %s", errJobState, jobID, job.Status, jobQueued)
 	}
 	job.Status = jobWaiting
-	go jq.runJob(job)
+	select {
+	case jq.wake <- struct{}{}:
+	default: // the runner is already awake
+	}
 	return nil
 }
 
-// runJob waits for its turn, runs the job's session and records the result.
+// runJob runs the job's session and records the result. Only the runner calls it.
 func (jq *JobQueue) runJob(job *QueuedJob) {
-	jq.processingMu.Lock()
-	defer jq.processingMu.Unlock()
-
 	jq.mu.Lock()
 	if job.Status != jobWaiting {
-		jq.mu.Unlock() // removed or canceled while waiting
+		jq.mu.Unlock() // canceled since nextWaiting
 		return
 	}
 	if webProcessor == nil {
@@ -308,6 +337,9 @@ func (jq *JobQueue) finishLocked(job *QueuedJob, err error) {
 		job.setProgress(&job.session.progress) // final counts, also when nobody polled
 		job.session = nil                      // let the session be collected
 	}
+	if err == nil && job.stopRequested {
+		err = errors.New("stopped")
+	}
 	if err != nil {
 		job.Status = jobFailed
 		job.Error = err.Error()
@@ -336,6 +368,63 @@ func (jq *JobQueue) finishLocked(job *QueuedJob, err error) {
 		}
 		clear(jq.jobs[len(kept):])
 		jq.jobs = kept
+	}
+}
+
+// StopJob cancels a waiting job, or stops a running one: its session drops the
+// work that is left and ends as usual; the job ends as failed "stopped".
+func (jq *JobQueue) StopJob(jobID string) error {
+	jq.mu.Lock()
+	_, job := jq.find(jobID)
+	if job == nil {
+		jq.mu.Unlock()
+		return fmt.Errorf("%w: %s", errJobNotFound, jobID)
+	}
+	switch job.Status {
+	case jobWaiting:
+		jq.finishLocked(job, errors.New("canceled before it started")) // the runner skips it
+		jq.mu.Unlock()
+		return nil
+	case jobRunning:
+		job.stopRequested = true
+		s := job.session
+		jq.mu.Unlock()
+		if s != nil {
+			s.stop()
+		}
+		return nil
+	}
+	status := job.Status
+	jq.mu.Unlock()
+	return fmt.Errorf("%w: %s is %s, only waiting or running jobs can be stopped", errJobState, jobID, status)
+}
+
+// stopAll cancels waiting jobs and stops running ones (shutdown).
+func (jq *JobQueue) stopAll() {
+	jq.mu.RLock()
+	var ids []string
+	for _, j := range jq.jobs {
+		if j.Status == jobWaiting || j.Status == jobRunning {
+			ids = append(ids, j.ID)
+		}
+	}
+	jq.mu.RUnlock()
+	for _, id := range ids {
+		jq.StopJob(id)
+	}
+}
+
+// waitIdle waits until no job is running, or until timeout. It reports whether none is.
+func (jq *JobQueue) waitIdle(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if len(jq.runningJobs()) == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

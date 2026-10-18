@@ -440,7 +440,14 @@ Still races:
 - Status codes: not-found returns 400 at `:663`/`:678`, conflict returns 400 at `:678`/`:699`. Use 404/409.
 - No graceful shutdown: add `srv.Shutdown(ctx)` on signal.
 
-**Partial result (2026-10-18), with 4.2:** `waiting` state (`StartJob` sets it; `runJob` sets `running`/`StartedAt` once it holds `processingMu`); `SessionID` assigned and used; panic recovery on the job goroutine (`launch`); a failed `LaunchSession` removes its session from `sessMap`; pending jobs capped at 1000 (503), finished jobs at 50; second `webProcessor`/`webWg` assignment and the no-op WaitGroup removed; 404/409 instead of 400. **Still open:** stop/cancel endpoint, D3 mode checks, graceful shutdown.
+**Partial result (2026-10-18), with 4.2:** `waiting` state (`StartJob` sets it; `runJob` sets `running`/`StartedAt` once it holds `processingMu`); `SessionID` assigned and used; panic recovery on the job goroutine (`launch`); a failed `LaunchSession` removes its session from `sessMap`; pending jobs capped at 1000 (503), finished jobs at 50; second `webProcessor`/`webWg` assignment and the no-op WaitGroup removed; 404/409 instead of 400. 
+
+**Result (2026-10-18), rest of 4.5:** done.
+- **Queue order (new bug, found by the stop test):** every started job had its own goroutine racing for `processingMu`, so start-all ran jobs in random order (job-2 ran before job-1). One runner goroutine now takes the oldest waiting job; `processingMu` is gone. `TestJobsRunInQueueOrder`.
+- **Stop/cancel:** `POST /api/jobs/:id/stop` (■ button for waiting/running jobs). A waiting job is canceled (`failed: canceled before it started`); a running job's session is stopped: the divider quits with close case "stopped", the check feeders stop and the check routines drain without checking, the download/upload loops drop what is queued (3.2), and `LaunchSession` tears down as usual. The job ends as `failed: stopped`. Verified: a slowed job (`-slomou 200`, 360 items) stopped mid-upload ended 0.9 s later, all 16 mem slots came back, and the next job completed.
+- **Graceful shutdown:** SIGINT/SIGTERM in web mode: `srv.Shutdown` (5 s), waiting jobs canceled, the running job stopped and waited for (60 s max), upload dir removed, exit 0; a second signal forces exit 1. Verified: idle 1.0 s, mid-job 2.8 s, exit 0, no dir left.
+- **D3:** `startupModeError` in `ParseFlags` (only an explicit `-nzb` counts, it has a default). Rejected with exit 1: `-nzb` with `-web`/proxy, `-web` with proxy, `-nzbdir` with anything and `-nzbdir` alone. The unreachable `select {}` for `-nzbdir` in `main` is gone. `TestStartupModeError`.
+- Verified with `-race`: stop test, SIGTERM tests, CLI A→B: no races.
 
 ### 4.6 Templates (corrected)
 
@@ -450,7 +457,7 @@ Still races:
 - `index.html:169-176` `showNotification` inserts `${message}` without `escapeHtml`. Latent (callers at `:80`, `:85` pass static text). Escape it anyway.
 - Fine as-is: templates and CSS are embedded (`webserver.go:17-18`, `:495`, `:503`); no `template.HTML` or `text/template`.
 
-**Partial result (2026-10-18):** with 4.2/4.4: `base.html` deleted; `handleJobsList`/`handleStats` (and `handleIndex`) pass no data; `showNotification` escapes its message; the Config button is deliberately disabled (D2). **Still open:** nothing else in 4.6.
+**Result (2026-10-18):** done with 4.2/4.4: `base.html` deleted; `handleJobsList`/`handleStats` (and `handleIndex`) pass no data; `showNotification` escapes its message; the Config button is deliberately disabled (D2).
 
 ---
 

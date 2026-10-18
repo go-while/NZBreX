@@ -215,6 +215,8 @@ feed:
 		case <-checkersGone:
 			abandoned()
 			break feed
+		case <-s.stopChan: // session stopped (web job stop): feed no more
+			break feed
 		}
 	}
 	if fed == len(s.segmentList) {
@@ -227,6 +229,8 @@ feed:
 				if len(segmentChanCheck) > 0 {
 					abandoned()
 				}
+				break waitEmpty
+			case <-s.stopChan:
 				break waitEmpty
 			}
 		}
@@ -302,6 +306,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				}
 				timeOut = time.Now().Add(15 * time.Second)
 				lastGood = time.Now()
+				if s.stopped() {
+					continue forGoCheckRoutine // session stopped: drain without checking until the feeder closes the chan
+				}
 				switch cfg.opt.ByPassSTAT {
 				case false:
 					code, err := s.checkItem(wid, provider, item, sharedCC)
@@ -955,6 +962,14 @@ forever:
 			dlog(cfg.opt.DebugWorker, " | [DV] lastRunTook='%d ms' '%v microsleep=%v fetchedtoUP=%d fetchedtoDL=%d backlogDL=%d refillUP=%d", dvlastRunTook.Milliseconds(), dvlastRunTook, microsleep, fetchedtoUP, fetchedtoDL, backlogDL, refillUP)
 		}
 		time.Sleep(time.Duration((dvlastRunTook.Milliseconds() * 2)) + (time.Duration(microsleep) * time.Millisecond))
+
+		if s.stopped() {
+			// stop() before the work is done: a web job was stopped. The routines drop
+			// what is queued, the feeders stop, LaunchSession tears down as usual.
+			dlog(always, "GoWorkDivider: session %d stopped, quitting", s.sessId)
+			closeCase = "stopped"
+			break forever
+		}
 
 		if deadWorkersDeadline <= 0 {
 			dlog(always, "GoWorkDivider: no booted workers for too long, exiting")

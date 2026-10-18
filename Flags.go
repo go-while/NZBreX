@@ -322,6 +322,17 @@ func ParseFlags() {
 		proxy = true
 	}
 
+	nzbSet := false // -nzb has a default value: only an explicit -nzb counts as a mode
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "nzb" {
+			nzbSet = true
+		}
+	})
+	if err := startupModeError(nzbSet, cfg.opt.NzbDir, webServerEnabled, proxy); err != nil {
+		dlog(always, "ERROR: %v", err)
+		os.Exit(1)
+	}
+
 	dlog(cfg.opt.Verbose, "Settings: '%#v'", *cfg.opt)
 
 } // end func ParseFlags
@@ -459,4 +470,29 @@ func addWebUser(spec string) {
 	if auto {
 		dlog(always, "-webadduser: auto generated credentials: username='%s' password='%s'", username, password)
 	}
+}
+
+// startupModeError rejects mode combinations that don't work (D3). Exactly one
+// of -nzb, -web or -proxytcp/-proxytls runs; with none, the default -nzb runs.
+// -nzbdir is unfinished (processorThread is a stub) and is refused for now.
+func startupModeError(nzbSet bool, nzbDir string, web, proxy bool) error {
+	if nzbDir != "" {
+		switch {
+		case web:
+			return fmt.Errorf("-nzbdir can't be combined with -web")
+		case proxy:
+			return fmt.Errorf("-nzbdir can't be combined with -proxytcp/-proxytls")
+		case nzbSet:
+			return fmt.Errorf("-nzbdir can't be combined with -nzb")
+		}
+		return fmt.Errorf("-nzbdir is not supported yet (directory processing is unfinished): use -nzb or -web")
+	}
+	if web && proxy {
+		// both would open their own pools: together they could exceed a provider account's connection limit
+		return fmt.Errorf("-web and -proxytcp/-proxytls can't run in one process")
+	}
+	if nzbSet && (web || proxy) {
+		return fmt.Errorf("-nzb can't be combined with -web or -proxytcp/-proxytls: give exactly one of them")
+	}
+	return nil
 }

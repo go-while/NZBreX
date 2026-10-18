@@ -175,7 +175,8 @@
             jobs.forEach(job => {
                 const statusClass = 'status-' + job.Status;
                 const canStart = job.Status === 'queued';
-                const canDelete = job.Status === 'queued';
+                const canDelete = job.Status === 'queued' || job.Status === 'completed' || job.Status === 'failed';
+                const canStop = job.Status === 'waiting' || job.Status === 'running';
                 const canConfig = job.Status === 'queued';
 
                 const config = job.Config || {};
@@ -239,6 +240,9 @@
                     // per-job settings are not supported yet: the button is shown, but disabled on purpose
                     html += `<button class="btn btn-sm btn-info me-1" title="Per-job settings are not supported yet" disabled>⚙</button>`;
                 }
+                if (canStop) {
+                    html += `<button class="btn btn-sm btn-warning me-1" title="Stop Job" onclick="stopJob('${job.ID}')">■</button>`;
+                }
                 if (canDelete) {
                     html += `<button class="btn btn-sm btn-danger" title="Delete Job" onclick="deleteJob('${job.ID}')">🗑</button>`;
                 }
@@ -276,6 +280,21 @@
                 }
             } catch (error) {
                 alert('Failed to start job: ' + error.message);
+            }
+        }
+
+        async function stopJob(jobId) {
+            if (!confirm('Stop this job? Work that is left is dropped.')) return;
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/stop`, { method: 'POST', headers: { 'X-NZBreX-Request': '1' } });
+                const result = await response.json();
+                if (response.ok) {
+                    loadJobs();
+                } else {
+                    alert('Failed to stop job: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to stop job: ' + error.message);
             }
         }
 
