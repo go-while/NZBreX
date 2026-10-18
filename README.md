@@ -178,6 +178,8 @@ Run with the following arguments:
 - `-rapidyencbufsize` "set only if you know what you do! (default: 4K) (experimental/testing)"
 - `-doublecheckrapidyenccrc` "[true|false] (experimental/testing)"
 - `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapidyenc C or go-yenc-simd, see Build Instructions) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
+- `-dlmissing` [true|false] download the articles missing on any provider into the cache (`-cd`), also when no provider takes uploads, e.g. to re-upload them later. (default: false)
+- `-dlall` [true|false] download every article not yet in the cache (`-cd`): fill the cache, or get the files with `-crc32 -yencout -yencmerge`. Without an upload provider this makes NZBreX a plain downloader. (default: false)
 - `-yencgo` [true|false] with `-yenctest=4` in a `-tags rapidyenc` build: decode with go-yenc-simd instead of the C code. Builds without the tag always use go-yenc-simd. (default: false)
 - `-yencasync` limits async parallel decoding with -crc32=true and -yenctest=3 or 4. 0 defaults to runtime.NumCPU().
 - `-debugsharedcc` debug sharedConn Chan (default: false)

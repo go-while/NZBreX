@@ -657,6 +657,23 @@ func (item *segmentChanItem) FlagDLFailed(providerList []*Provider, providerGrou
 // hasUploadTarget reports whether some provider the item is missing on could
 // still take an upload for it (same rules as pushUP; a pending retry counts).
 // The caller holds item.mux (read or write).
+// wantDownload reports whether -dlmissing or -dlall still want the item
+// downloaded: not yet downloaded or cached, and for -dlmissing missing on
+// some provider. Without the flags only uploads cause downloads. Caller
+// holds item.mux.
+func wantDownload(item *segmentChanItem) bool {
+	if item.flagisDL || item.flagCache || item.flaginDL {
+		return false
+	}
+	switch {
+	case cfg.opt.DlAll:
+		return true
+	case cfg.opt.DlMissing:
+		return len(item.missingOn) > 0
+	}
+	return false
+}
+
 // onAllProviders reports whether every provider has the item: confirmed
 // there (availableOn, from STAT/download) or uploaded there by this session
 // (uploadedTo). availableOn stays "confirmed": pushDL picks download sources
@@ -947,6 +964,7 @@ func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sy
 
 	//segcheckdone := false
 	closeWait, closeCase := 1, ""
+	hintedNoTarget := false // the -dlmissing/-dlall hint, once per session
 	todo := uint64(len(s.segmentList))
 	providersCnt := len(s.providerList)
 	// some values we count on in every loop to check how far processing
@@ -1009,7 +1027,8 @@ forever:
 
 		// uint64
 		var segm, allOk, done, fails, dead, isdl, indl, inup, isup, checked, dmca, nodl, noup, cached, inretry, inyenc, isyenc, dlQ, upQ, yeQ uint64
-		var notarget uint64 // checked items no provider can take an upload for (retired)
+		var notarget uint64      // checked items no provider can take an upload for (retired)
+		var notDownloaded uint64 // of those: never downloaded (no -dlmissing/-dlall wanted them)
 
 		// Tnodl, Tnoup counts segments that not have been downloaded
 		// or uploaded because provider has config flat NoDownload or NoUpload set
@@ -1046,6 +1065,7 @@ forever:
 			}
 
 			doContinue := false
+			retireDone := false
 			if item.flaginDL {
 				indl++
 				doContinue = true
@@ -1073,7 +1093,7 @@ forever:
 				doContinue = true
 			}
 
-			if len(item.missingOn) == 0 && s.onAllProviders(item) {
+			if len(item.missingOn) == 0 && s.onAllProviders(item) && !wantDownload(item) {
 				// on every provider: confirmed there, or uploaded there by us.
 				// (An upload sets uploadedTo, not availableOn, so this used to
 				// count uploaded items as "no upload target" and the run only
@@ -1081,36 +1101,52 @@ forever:
 				allOk++
 				done++
 				doContinue = true
+				// -dlall downloaded it only for the cache: no upload returns its slot
+				retireDone = cfg.opt.DlAll && item.memlocked > 0 && !item.flaginUP && !item.flaginDL
 			} else {
 				// segment is missing on providers
 			}
 
 			if doContinue {
 				item.mux.RUnlock() // RUNLOCKS HERE #824d
+				if retireDone {
+					s.retireNoUploadTarget(item)
+				}
 				continue forsegmentList
 			}
-			if allowUp && !s.hasUploadTarget(item) && (item.flagisDL || item.flagCache || !(cacheON || cfg.opt.YencWrite)) {
-				// missing only where nothing can upload it (NoUpload, no IHAVE/POST, errors, ...):
-				// no upload will ever return its mem slot. Retire it: give the slot back,
-				// don't download it, and count it as finished.
+			hasTarget := allowUp && s.hasUploadTarget(item)
+			if !hasTarget && !wantDownload(item) {
+				// missing only where nothing can upload it (NoUpload, no IHAVE/POST, errors, ...),
+				// and -dlmissing/-dlall don't want it (or have it already): no upload will ever
+				// return its mem slot. Retire it: give the slot back, don't download it, and
+				// count it as finished. (With -cd and no flag these used to wait forever.)
 				notarget++
+				if !item.flagisDL && !item.flagCache {
+					notDownloaded++
+				}
 				item.mux.RUnlock() // RUNLOCKS HERE #824d
 				s.retireNoUploadTarget(item)
 				continue forsegmentList
 			}
 			item.mux.RUnlock() // RUNLOCKS HERE #824d
 
-			pushedUp, nNoUp, nInRetry, a1err := s.pushUP(allowUp, item)
-			if a1err != nil {
-				dlog(cfg.opt.DebugWorker, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.ID)
-				continue forsegmentList
+			pushedUp := false
+			if hasTarget {
+				// only with somewhere to upload: pushUP's "no target" error used to skip pushDL too
+				var nNoUp, nInRetry uint64
+				var a1err error
+				pushedUp, nNoUp, nInRetry, a1err = s.pushUP(allowUp, item)
+				if a1err != nil {
+					dlog(cfg.opt.DebugWorker, "ERROR pushUP err='%v' (seg.Id='%s')", a1err, item.segment.ID)
+					continue forsegmentList
+				}
+				if pushedUp {
+					inup++
+					dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDup seg.Id='%s' pushedUp=%t inup=%d", item.segment.ID, pushedUp, inup)
+				}
+				noup += nNoUp
+				inretry += nInRetry
 			}
-			if pushedUp {
-				inup++
-				dlog(cfg.opt.DebugWorker, " | [DV] PUSHEDup seg.Id='%s' pushedUp=%t inup=%d", item.segment.ID, pushedUp, inup)
-			}
-			noup += nNoUp
-			inretry += nInRetry
 
 			if !pushedUp && allowDl {
 				pushedDl, nNoDl, b1err := s.pushDL(allowDl, item)
@@ -1347,6 +1383,10 @@ forever:
 		} else if closeCase8 {
 			closeWait--
 			closeCase = closeCase + "|Debug#8"
+			if notDownloaded > 0 && !hintedNoTarget {
+				hintedNoTarget = true
+				dlog(always, " | [DV] %d articles are missing where nothing takes uploads and were not downloaded: -dlmissing or -dlall (with -cd) download them", notDownloaded)
+			}
 
 		} else {
 			if closeWait >= 10 {

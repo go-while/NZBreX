@@ -28,6 +28,8 @@ func ParseFlags() {
 	flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "/path/to/watch/dir/for/nzbfiles")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
 	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
+	flag.BoolVar(&cfg.opt.DlMissing, "dlmissing", false, "[true|false] download the articles missing on any provider into the cache (-cd), also when no provider takes uploads, e.g. to re-upload them later (default: false)")
+	flag.BoolVar(&cfg.opt.DlAll, "dlall", false, "[true|false] download every article not yet in the cache (-cd): fill the cache, or get the files with -crc32 -yencout -yencmerge (default: false)")
 	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
 	//flag.BoolVar(&cfg.opt.ByPassSTAT, "bypassstat", false, "[true|false] true goes directly to download without checking availability with STAT first (default: false)")
 	//flag.BoolVar(&cfg.opt.UploadLater, "uploadlater", false, "[true|false] if true: starts upload if everything (available) has been downloaded to cache (default: false) !not implemented: TODO!")
@@ -235,6 +237,19 @@ func ParseFlags() {
 		if !cache.MkSubDir("test") {
 			os.Exit(1)
 		}
+	}
+
+	if (cfg.opt.DlMissing || cfg.opt.DlAll) && cfg.opt.Cachedir == "" {
+		dlog(always, "ERROR: -dlmissing and -dlall need -cd=/path/to/cache/dir: the downloads are kept there")
+		os.Exit(1)
+	}
+	if cfg.opt.DlMissing && cfg.opt.DlAll {
+		dlog(always, "ERROR: use -dlmissing or -dlall, not both (-dlall includes the missing articles)")
+		os.Exit(1)
+	}
+	if (cfg.opt.DlMissing || cfg.opt.DlAll) && cfg.opt.CheckOnly {
+		dlog(always, "ERROR: -dlmissing and -dlall download articles, -checkonly doesn't")
+		os.Exit(1)
 	}
 
 	if cfg.opt.UploadLater && cfg.opt.Cachedir == "" {

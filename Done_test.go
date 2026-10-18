@@ -23,3 +23,28 @@ func TestOnAllProviders(t *gotesting.T) {
 		t.Fatal("provider 1 dropped: still reported on all providers")
 	}
 }
+
+// -dlmissing wants articles missing somewhere, -dlall every one; both only
+// until it is downloaded or cached. Without them nothing is downloaded for
+// its own sake.
+func TestWantDownload(t *gotesting.T) {
+	testCfg()
+	defer func() { cfg.opt.DlMissing, cfg.opt.DlAll = false, false }()
+	everywhere := &segmentChanItem{missingOn: map[int]bool{}}
+	missing := &segmentChanItem{missingOn: map[int]bool{1: true}}
+	cached := &segmentChanItem{missingOn: map[int]bool{1: true}, flagCache: true}
+	for _, c := range []struct {
+		name                        string
+		dlMissing, dlAll            bool
+		everywhere, missing, cached bool
+	}{
+		{"no flag", false, false, false, false, false},
+		{"-dlmissing", true, false, false, true, false},
+		{"-dlall", false, true, true, true, false},
+	} {
+		cfg.opt.DlMissing, cfg.opt.DlAll = c.dlMissing, c.dlAll
+		if got := [3]bool{wantDownload(everywhere), wantDownload(missing), wantDownload(cached)}; got != [3]bool{c.everywhere, c.missing, c.cached} {
+			t.Errorf("%s: everywhere/missing/cached = %v, want %v", c.name, got, [3]bool{c.everywhere, c.missing, c.cached})
+		}
+	}
+}

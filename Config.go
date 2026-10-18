@@ -62,6 +62,8 @@ type CFG struct {
 	ChanSize                int    `json:"ChanSize"`                // size of channels for reading/writing cache and yenc
 	CheckOnly               bool   `json:"CheckOnly"`               // if true, no download or upload will be done
 	CheckFirst              bool   `json:"CheckFirst"`              // if true, check for article existence before download
+	DlMissing               bool   `json:"DlMissing"`               // download articles missing on any provider into the cache, also without an upload target
+	DlAll                   bool   `json:"DlAll"`                   // download every article not yet in the cache
 	UploadLater             bool   `json:"UploadLater"`             // if true, upload will be done after all articles are downloaded
 	Verify                  bool   `json:"Verify"`                  // if true, verify articles after upload
 	YencCRC                 bool   `json:"YencCRC"`                 // if true, crc32 will be checked while downloading yenc articles
