@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -336,6 +337,9 @@ func CMD_POST(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, e
 // the number of bytes read (rxb), the content as a slice of strings, and any error encountered.
 // The function supports parsing headers, handling continued lines, and cleaning headers based on the configuration.
 // It also supports yenc decoding if enabled in the configuration.
+// errReadAborted closes the rapidyenc pipe when readDotLines returns early.
+var errReadAborted = errors.New("readDotLines aborted")
+
 // WARNING: TODO! Be careful when reading X/OVER or X/HDR on large groups because you may run out of memory!
 func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (code int, rxb int, content []string, err error) {
 	if connitem.conn == nil || connitem.srvtp == nil {
@@ -391,6 +395,7 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 			start := time.Now()
 			decodedBuf := make([]byte, cfg.opt.RapidYencBufSize)
 			total := 0
+			var result error
 			for {
 				n, err := rydecoder.Read(decodedBuf)
 				if n > 0 {
@@ -398,15 +403,15 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 					total += n
 				}
 				if err == io.EOF {
-					done <- nil
 					break
 				}
 				if err != nil {
-					done <- err
+					result = err
 					break
 				}
 			}
 			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc decoder done for seg.Id='%s' @ '%s' decoded=%d bufsize=%d total=%d took=(%d µs)", *segId, connitem.c.provider.Name, len(*decoded), len(decodedBuf), total, time.Since(start).Microseconds())
+			done <- result // last: after this the caller may release the decoder
 		}(&item.segment.Id, &decodedData, ryDoneChan)
 
 	case 3:
@@ -451,7 +456,9 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 							cERR++
 							counter.Incr("ERR")
 							returnAsyncCoreLimiter()
-							break readChan
+							// keep draining (broken skips the rest): breaking here left the reader
+							// blocked on a full decodeBodyChan forever
+							continue readChan
 						}
 						returnAsyncCoreLimiter()
 
@@ -467,6 +474,25 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 			}(item.segment.Id, connitem.c.provider.Name, decodeBodyChan, counter, releaseDecoder)
 		} // end if async
 	} // end case 3
+
+	// An early return (read error, max size, write error, ...) used to leave the async
+	// decoder goroutine blocked forever: case 4 on the pipe that was never closed (and the
+	// deferred ReleaseDecoder handed the decoder back while it still read from it),
+	// case 3 on decodeBodyChan. The success path below closes them itself (finished).
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		if pipeWriter != nil {
+			pipeWriter.CloseWithError(errReadAborted)
+			<-ryDoneChan // the reader goroutine has stopped: ReleaseDecoder (deferred before) is safe now
+		}
+		if decodeBodyChan != nil {
+			close(decodeBodyChan)
+			<-releaseDecoder // it drains what is buffered, then exits
+		}
+	}()
 	startReadLines := time.Now()
 	i := 0
 readlines:
@@ -670,6 +696,7 @@ readlines:
 
 	} // end for readlines
 
+	finished = true // from here on the pipe / decodeBodyChan are closed below
 	// case 4: we are done reading lines, close the pipe writer from rapidyenc decoder
 	if pipeWriter != nil {
 		if _, err := pipeWriter.Write([]byte(DOT + CRLF)); err != nil { // write the final dot to the pipe

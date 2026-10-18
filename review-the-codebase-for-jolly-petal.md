@@ -208,11 +208,18 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 - **Fix (corrected):** guard **only the decrement** (`if connitem.conn == nil` → skip `openConns--`), and **always** send the `nil` token to `sharedCC`. In the double-close case the second call is the only one that sends it. An early `return` at the top would leave sibling routines blocked at `ConnPool.go:729`.
 - The draft's "blocking send under `provider.mux`" is **dropped**: `checkCapabilities` passes `nil` for `sharedCC` (`NetConn.go:989`). A non-blocking `select` there is harmless.
 
+**Result (2026-10-18):** fixed as planned. Only the close and the decrement are guarded (`closeConnOnce`, which runs only while `connitem.conn != nil`). The nil token is always sent, and a nil item no longer panics; `GetConn` did hit this, via `go c.CloseConn(nil, nil)` for a nil item taken from the pool. Test: `TestCloseConnNilSafeAndDecrementsOnce` (panics on the old code).
+
 ### 3.5 `KillConnPool` waits unboundedly while holding `PoolsLock` (corrected)
 
 `ConnPool.go:144-178` holds the global `PoolsLock` across an unbounded `Sleep(10ms)` loop until `openConns == 0`. It spins only on a *positive* leak (a connection that is never returned), not on the negative drift from 3.4. `LaunchSession` calls it per provider (`Session.go:386-388`).
 
 **Fix:** drain under a short lock, wait outside `PoolsLock` with a deadline. Force-close only items that are idle in the pool; closing a `connitem` another goroutine is using is a data race.
+
+**Result (2026-10-18):** fixed together with 3.11 and 3.12.
+- `ConnPools` and `PoolsLock` are deleted (never read), which also removes the lock-order inversion.
+- `KillConnPool` closes the idle conns and waits up to `killConnPoolWait` (5 s) for the ones in use, without a global lock. It never closes a conn another goroutine holds, and it logs a WARN if it gives up.
+- No WARN in any verification run: after `waitWorker`/`waitPool` nothing is in use anymore.
 
 ### 3.6 Blocking receives with no stop case (corrected)
 
@@ -244,6 +251,16 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** stop channel per `ConnPool`, closed by `KillConnPool`; `time.Ticker` with `defer Stop()`; move the `NetConn` cleanup into a `defer` that uses a "done" flag, so the success path (`:669-684`) doesn't close `decodeBodyChan`/`pipeWriter` twice.
 
+**Result (2026-10-18):** fixed, except the `WriteYenc` spin (latent, unchanged).
+- **Tickers:** the three per-routine tick goroutines are a `time.Ticker` with `defer Stop()`.
+- **Pool goroutines:** `ConnPool.poolStop` is closed once by `KillConnPool`. `WatchOpenConnsThread` and the per-pool `Speedmeter` select on it; the global `Speedmeter` (nil `cp`) keeps running.
+- **`readDotLines`:** a deferred cleanup with a `finished` flag closes the pipe (`CloseWithError`) or `decodeBodyChan` on every early return, then waits for the decoder goroutine.
+- **(new) Worse than the table said** for `-yenctest=4`: the deferred `ReleaseDecoder` gave the decoder back to the pool while the leaked reader goroutine still read from it (use after release). The reader now signals `done` as its last action, and the cleanup waits for it before the release runs.
+- **(new) `-yenctest=3`:** after a decode error the decoder goroutine stopped reading (`break`). If `decodeBodyChan` (6666 slots) was full at that moment, the reader blocked forever on the send. It now keeps draining (the `broken` flag skips the work).
+- Test: `TestReadDotLinesEarlyReturnStopsDecoder` (fails on the old code).
+- **Verified:** 4 sequential web jobs, goroutine dump 20 s after the last one. Old build: 122 goroutines (49 leaked worker tickers, plus watchers and speed meters of finished sessions). New: 10, and the 4 pool goroutines among them belong to the web processor's long-lived base session.
+- **Note for 6.2:** `LaunchSession` replaces the global `core_chan`/`async_core_chan` when `YencCpu`/`YencAsyncCpu` changes, under `globalmux`, while `get/returnAsyncCoreLimiter` use them without it. Only reachable if per-job settings change those values.
+
 ### 3.8 `MemLimiter` check-then-act gap (corrected; fix added)
 
 `MemLimit.go:74-90`: `memdata[item]` is set before the blocking wait, `memlocked` only after it at `:113`. No concrete path with two concurrent lockers on one item was found. A double `MemReturn` hits `log.Fatalf` (`:148`) only if the channel is full; otherwise it silently adds an extra slot and drives `memlocked` to −1. `MemAvail()` (`:67`) tests `m.waiting < m.mem_max`, which reports "available" with an empty `memchan`; it is used at `Workers.go:523`.
@@ -273,9 +290,13 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 Keyed by a per-session index (`Utils.go:200`, `ConnPool.go:134/181`), so sessions overwrite each other. Harmless: nothing ever reads the map. **Fix:** delete it.
 
+**Result (2026-10-18):** deleted, with 3.5.
+
 ### 3.12 `PoolsLock` ↔ `provider.mux` lock-order inversion (latent)
 
 `NewConnPool` takes `provider.mux` (`ConnPool.go:88`) then `PoolsLock` (`:133`); `KillConnPool` takes them in the reverse order (`:144`, `:183`). Not live today, because each session copies its providers (`Utils.go:197-198`). Fix while the file is open: never hold `provider.mux` while taking `PoolsLock`.
+
+**Result (2026-10-18):** gone with `PoolsLock` (3.5/3.11).
 
 ### 3.13 The uncommitted band-aid locks (corrected; must land with their replacement)
 

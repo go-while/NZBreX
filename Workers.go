@@ -278,16 +278,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		defer s.checkersExit(provider, 1)
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
-		toChan := make(chan struct{}, 1)
-		go func() {
-			for {
-				time.Sleep(3 * time.Second)
-				select {
-				case toChan <- struct{}{}:
-				default:
-				}
-			}
-		}()
+		tick := time.NewTicker(3 * time.Second) // was a goroutine per routine that never stopped
+		defer tick.Stop()
+		toChan := tick.C
 	forGoCheckRoutine:
 		for {
 			select {
@@ -346,16 +339,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		defer thisWorkerWG.Done()
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
-		toChan := make(chan struct{}, 1)
-		go func() {
-			for {
-				time.Sleep(3 * time.Second)
-				select {
-				case toChan <- struct{}{}:
-				default:
-				}
-			}
-		}()
+		tick := time.NewTicker(3 * time.Second) // was a goroutine per routine that never stopped
+		defer tick.Stop()
+		toChan := tick.C
 	forGoDownsRoutine:
 		for {
 			dlog(cfg.opt.DebugWorker, "GoDownsRoutine: (%d@'%s') wait on segCD len=%d", wid, provider.Name, len(segCD))
@@ -454,16 +440,9 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 		defer thisWorkerWG.Done()
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
-		toChan := make(chan struct{}, 1)
-		go func() {
-			for {
-				time.Sleep(3 * time.Second)
-				select {
-				case toChan <- struct{}{}:
-				default:
-				}
-			}
-		}()
+		tick := time.NewTicker(3 * time.Second) // was a goroutine per routine that never stopped
+		defer tick.Stop()
+		toChan := tick.C
 	forGoReupsRoutine:
 		for {
 			dlog(cfg.opt.DebugWorker, "ReupsRoutine: (%d@'%s') wait on segCD len=%d", wid, provider.Name, len(segCD))

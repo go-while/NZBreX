@@ -49,9 +49,7 @@ const (
 
 var (
 	//noDeadLine   time.Time                 // used as zero value!
-	readDeadConn = time.Unix(1, 0)         // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
-	ConnPools    = make(map[int]*ConnPool) // used in KillConnPool
-	PoolsLock    sync.RWMutex
+	readDeadConn = time.Unix(1, 0) // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
 )
 
 // holds an active connection to share around
@@ -78,13 +76,15 @@ type ConnPool struct {
 	wants_auth bool
 	// we have created an endless loop
 	// provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.CloseConn(provider, connitem) xD
-	// if we want to call closeconn from outside the routine which keep a provider ptr too
-	// we cann call ConnPools[provider.id].CloseConn(connitem)
 	provider *Provider // pointer to the provider which created this ConnPool and holds the config
 	s        *SESSION  // session pointer to the session which created this ConnPool (access via c.s.%%SESSIONVARIABLES%% OR provider.ConnPool.s.%%SESSIONVARIABLES%%).
 	// sessStop is the owning session's stopChan (nil: never stops). Blocking waits
 	// for a connection give up when it is closed.
 	sessStop <-chan struct{}
+	// poolStop ends the pool's own goroutines (WatchOpenConnsThread, Speedmeter).
+	// Closed once by KillConnPool; the proxy's pools are never killed, so it is not the session's.
+	poolStop     chan struct{}
+	poolStopOnce sync.Once
 }
 
 // errSessionStopped is returned by waits that gave up because the session stopped.
@@ -152,10 +152,8 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 		mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: fmt.Sprintf("ConnPool-%s", provider.Name)},
 		s:        s, // session pointer to the session which created this ConnPool
 		sessStop: s.stopChan,
+		poolStop: make(chan struct{}),
 	}
-	PoolsLock.Lock()
-	ConnPools[provider.id] = provider.ConnPool
-	PoolsLock.Unlock()
 	if !cfg.opt.CheckOnly {
 		go Speedmeter(s.nzbSize, provider.ConnPool, nil, workerWGconnReady) // start speed meter for this ConnPool / Provider
 	}
@@ -163,45 +161,49 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 	// no return value as we mutate the provider pointer!
 } // end func NewConnPool
 
-func KillConnPool(provider *Provider) {
-	PoolsLock.Lock()
-	defer PoolsLock.Unlock()
+// killConnPoolWait is how long KillConnPool waits for conns still in use to come back.
+// It runs after all workers have exited, so normally nothing is in use anymore.
+const killConnPoolWait = 5 * time.Second
 
-	if provider == nil || provider.ConnPool == nil {
+// KillConnPool closes the idle conns of the provider's pool, waits (bounded) for the
+// ones still in use, then drops the pool. Conns in use belong to their goroutine and
+// are not closed here (that would be a data race on the ConnItem).
+// No global lock is held while waiting (it used to hold PoolsLock for as long as it took).
+func KillConnPool(provider *Provider) {
+	if provider == nil {
 		return
 	}
-
-	provider.ConnPool.mux.RLock()
-	openConns := provider.ConnPool.openConns
-	provider.ConnPool.mux.RUnlock()
-
-	if openConns > 0 {
-		dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s'", provider.Name)
-		killed := 0
+	provider.mux.RLock()
+	c := provider.ConnPool
+	provider.mux.RUnlock()
+	if c == nil {
+		return
+	}
+	deadline := time.Now().Add(killConnPoolWait)
+	killed := 0
+	for {
+	drain:
 		for {
 			select {
-			case connitem := <-provider.ConnPool.pool:
-				provider.ConnPool.CloseConn(connitem, nil)
-
-				dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s' closed a conn", provider.Name)
-
+			case connitem := <-c.pool:
+				c.CloseConn(connitem, nil)
 				killed++
 			default:
-				// chan ran empty
+				break drain // chan ran empty
 			}
-			provider.ConnPool.mux.RLock()
-			openConns := provider.ConnPool.openConns
-			provider.ConnPool.mux.RUnlock()
-			dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s' openConns=%d killed=%d", provider.Name, openConns, killed)
-			if openConns > 0 {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
+		}
+		openConns, _ := c.GetStats()
+		if openConns <= 0 {
 			break
-		} // end for
+		}
+		if time.Now().After(deadline) {
+			dlog(always, "WARN KillConnPool '%s': %d conns still in use after %v, not waiting for them", provider.Name, openConns, killConnPoolWait)
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-
-	delete(ConnPools, provider.id)
+	dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s' closed %d idle conns", provider.Name, killed)
+	c.poolStopOnce.Do(func() { close(c.poolStop) }) // ends WatchOpenConnsThread and Speedmeter
 
 	provider.mux.Lock()
 	provider.ConnPool = nil
@@ -553,8 +555,27 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 // This is used to signal the routines to get a new connection from the pool.
 // If the connection is nil, it will not close it and just remove it from the pool.
 // If the connection is already closed, it will not close it again.
+// CloseConn closes connitem and gives back its slot in the pool count, once:
+// a second call on the same item (readDotLines closes on read errors, the caller
+// closes again) or a nil item only passes the token on. If sharedConnChan is given
+// a nil token is always sent, so sibling routines waiting in SharedConnGet go on.
 func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) {
+	// only the decrement is guarded: returning early would skip the token below
+	// and leave the worker's other routines blocked in SharedConnGet
+	if connitem != nil && connitem.conn != nil {
+		c.closeConnOnce(connitem)
+	}
+	// if a sharedConnChan is supplied we send a nil to the channel
+	// a nil as connitem signals the routines to get a new conn
+	// mostly because conn was closed by network, protocol error or timeout
+	if sharedConnChan != nil {
+		sharedConnChan <- nil
+	}
+} // end func CloseConn
 
+// closeConnOnce closes an open connitem and decrements the open counters.
+// The caller checked connitem.conn != nil; conn is set to nil here, so it runs once per conn.
+func (c *ConnPool) closeConnOnce(connitem *ConnItem) {
 	if cfg.opt.DebugConnPool {
 		GCounter.Incr("TOTAL_DisConns")
 	}
@@ -582,13 +603,7 @@ func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) 
 	dlog(cfg.opt.DebugConnPool, "DisConn '%s' inPool=%d open=%d", c.provider.Name, len(c.pool), c.openConns)
 	c.mux.Unlock()
 	go c.provider.DecrementOpenConns()
-	// if a sharedConnChan is supplied we send a nil to the channel
-	// a nil as connitem signals the routines to get a new conn
-	// mostly because conn was closed by network, protocol error or timeout
-	if sharedConnChan != nil {
-		sharedConnChan <- nil
-	}
-} // end func CloseConn
+} // end func closeConnOnce
 
 // GetStats returns the current stats of the connection pool.
 // It returns the number of open connections and the number of idle connections in the pool.
@@ -612,9 +627,15 @@ func (c *ConnPool) WatchOpenConnsThread(workerWGconnReady *sync.WaitGroup) {
 	dlog(cfg.opt.Debug, "WatchOpenConnsThread started for '%s' waited=%v", c.provider.Name, time.Since(start))
 	defer dlog(cfg.opt.Debug, "WatchOpenConnsThread for '%s' defer returned", c.provider.Name)
 	//tempItems := []*ConnItem{} // temporary slice to hold ConnItems
+	tick := time.NewTicker(15 * time.Second) // check every N
+	defer tick.Stop()
 forever:
 	for {
-		time.Sleep(time.Millisecond * 15000) // check every N milliseconds
+		select {
+		case <-tick.C:
+		case <-c.poolStop:
+			return // KillConnPool: it used to run (and log) forever after the session ended
+		}
 		if !loggedrwmutex.DisableLogging {
 			c.provider.mux.Lock()
 			if c.provider.ConnPool != nil {
@@ -871,10 +892,19 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 		return fmt.Errorf("error in Speedmeter: supply cp or cnt or nothing to use global counter, but not both")
 	}
 
+	var stop <-chan struct{} // nil for the global meter: runs as long as the process
+	if cp != nil {
+		stop = cp.poolStop
+	}
 	var totalTX, totalRX uint64
 	ticker := time.NewTicker(time.Second * time.Duration(PrintStats))
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
+		case <-stop:
+			return nil // KillConnPool
+		}
 		var tmpRX, tmpTX uint64
 		globalmux.Lock()
 		tmpRX, tmpTX = counter.GetReset("TMP_RXbytes"), counter.GetReset("TMP_TXbytes")
@@ -900,7 +930,6 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 		printSpeedTable(dlPerc, upPerc, totalRX, totalTX, rxSpeed, txSpeed, rxMbps, txMbps, name, group)
 
 	}
-	return nil
 }
 
 func printSpeedTable(dlPerc, upPerc int, totalRX uint64, totalTX uint64, rxSpeed int64, txSpeed int64, rxMbps float64, txMbps float64, provider string, group string) {

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"net"
 	"net/textproto"
+	"runtime"
 	"strings"
 	gotesting "testing" // Workers.go declares a const named testing
 	"time"
@@ -56,6 +57,61 @@ func TestIHAVEReplyNot335KeepsConnUsable(t *gotesting.T) {
 			}
 		case <-time.After(3 * time.Second):
 			t.Fatalf("CMD_IHAVE expecting %d blocked: previous response was never ended", want)
+		}
+	}
+}
+
+// Plan 3.7: with -yenctest=3/4 an early return from readDotLines (here: the server
+// closes the conn mid-article) left the async decoder goroutine blocked forever,
+// and with 4 the deferred ReleaseDecoder handed the decoder back while it was still in use.
+func TestReadDotLinesEarlyReturnStopsDecoder(t *gotesting.T) {
+	testCfg()
+	old := *cfg.opt
+	defer func() { *cfg.opt = old }()
+	cfg.opt.YencCRC, cfg.opt.MaxArtSize, cfg.opt.RapidYencBufSize = true, 1<<20, 4096
+	if async_core_chan == nil { // LaunchSession sets it up
+		async_core_chan = make(chan struct{}, 1)
+		async_core_chan <- struct{}{}
+	}
+
+	for _, mode := range []int{3, 4} {
+		cfg.opt.YencTest = mode
+		cli, srv := net.Pipe()
+		go func() {
+			srv.Write([]byte("Subject: x\r\n\r\n=ybegin part=1 total=1 line=128 size=3 name=x\r\n=ypart begin=1 end=3\r\n"))
+			srv.Write([]byte("abc\r\n"))
+			srv.Close() // no "=yend", no final dot: ReadLine fails
+		}()
+		prov := &Provider{Name: "fake", mux: &loggedrwmutex.LoggedSyncRWMutex{Name: "fake"}}
+		connitem := &ConnItem{c: &ConnPool{provider: prov}, conn: cli, srvtp: textproto.NewConn(cli), writer: bufio.NewWriter(cli)}
+
+		done := make(chan error, 1)
+		go func() {
+			_, _, _, err := readDotLines(connitem, testItem("<a@b>"), cmdARTICLE)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatalf("yenctest=%d: want a read error", mode)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("yenctest=%d: readDotLines blocked", mode)
+		}
+		cli.Close()
+
+		// the fix waits for the decoder goroutine before returning; allow a little slack anyway
+		deadline := time.Now().Add(time.Second)
+		for {
+			buf := make([]byte, 1<<20)
+			stacks := string(buf[:runtime.Stack(buf, true)])
+			if !strings.Contains(stacks, ".readDotLines.func") { // package path differs under go test
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("yenctest=%d: async decoder goroutine still running after readDotLines returned", mode)
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 }
