@@ -6,15 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	mrand "math/rand"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 func LinesWriter(cliwriter *bufio.Writer, conn net.Conn, code int, item *segmentChanItem) (txb uint64, err error) {
@@ -75,207 +70,48 @@ func (ps *ProxySession) printCapabilities() {
 	dw.Close()
 }
 
-// Passwords in the file are expected to be bcrypt hash strings.
-// File format: username:bcrypt_hash:maxconns:ExpireAt_unix_timestamp
+// loadPasswdFile merges filename.new.* into filename and loads the proxy users.
+// The live map is replaced only by a successfully parsed, non-empty one (plan 5.2:
+// it used to be cleared first, so a failed or empty reload locked everyone out
+// until restart). Emptying the file therefore keeps the previous users.
 func loadPasswdFile(filename string) error {
-	// Before loading, merge any .new.* files into the main passwd file
-	dir := filepath.Dir(filename)
-	base := filepath.Base(filename)
-	if dir == "" {
-		dir = "."
-	}
-	pattern := fmt.Sprintf("%s.new.", base)
-	entries, err := os.ReadDir(dir)
-	if err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			if strings.HasPrefix(name, pattern) {
-				newfile := filepath.Join(dir, name)
-				// Append contents to main passwd file
-				func() {
-					mainf, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-					if err != nil {
-						log.Printf("Could not open %s for appending: %v", filename, err)
-						return
-					}
-					defer mainf.Close()
-					f, err := os.Open(newfile)
-					if err != nil {
-						log.Printf("Could not open %s: %v", newfile, err)
-						return
-					}
-					defer f.Close()
-					if _, err := io.Copy(mainf, f); err != nil {
-						log.Printf("Failed to import %s into %s: %v", newfile, filename, err)
-					} else {
-						log.Printf("Imported new user(s) from %s into %s", newfile, filename)
-						os.Remove(newfile)
-					}
-				}()
-			}
-		}
-	}
-
-	file, err := os.Open(filename)
+	mergeNewPasswdFiles(filename)
+	users, err := parsePasswdFile(filename, passwdOpts{})
 	if err != nil {
-		return fmt.Errorf("failed to open passwd file %s: %w", filename, err)
+		return err
 	}
-	defer file.Close()
-
+	if len(users) == 0 {
+		log.Printf("Warning: No users loaded from passwd file '%s', keeping the %d users loaded before.", filename, proxyUserCount())
+		return nil
+	}
 	proxyMutex.Lock()
-	defer proxyMutex.Unlock()
-
-	// Clear existing map before loading to support reloading
-	for k := range passwdMap {
-		delete(passwdMap, k)
-	}
-
-	scanner := bufio.NewScanner(file)
-	lineNumber := 0
-	usersLoaded := 0
-	newpasswdMap := make(map[string]*UserData) // Temporary map to hold new users
-	for scanner.Scan() {
-		lineNumber++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") { // Skip empty lines and comments
-			continue
-		}
-		parts := strings.SplitN(line, "|", 5) // username|bcrypt_hash|maxconns|ExpireAt|(no)post
-		if len(parts) != 5 {
-			log.Printf("Skipping malformed line in passwd file (%d) (expected 5 parts, got %d): %s", lineNumber, len(parts), line)
-			continue
-		}
-		// check the splitted line parts
-		username := strings.TrimSpace(parts[0])
-		bcryptHashFromFile := parts[1]
-		maxconnsStr := parts[2]
-		ExpireAtStr := parts[3]
-		posting := strings.HasPrefix(strings.ToLower(parts[4]), "post")
-
-		maxconns, err := strconv.ParseInt(maxconnsStr, 10, 64)
-		if err != nil {
-			log.Printf("Skipping line in passwd file (%d) for user '%s' due to invalid maxconns ('%s'): %v", lineNumber, username, maxconnsStr, err)
-			continue
-		}
-		ExpireAt, err := strconv.ParseInt(ExpireAtStr, 10, 64)
-		if err != nil {
-			log.Printf("Skipping line in passwd file (%d) for user '%s' due to invalid ExpireAt ('%s'): %v", lineNumber, username, ExpireAtStr, err)
-			continue
-		}
-		if ExpireAt < time.Now().Unix() {
-			log.Printf("Skipping line in passwd file (%d) for user '%s' due to expired account (ExpireAt: %d, Current: %d)", lineNumber, username, ExpireAt, time.Now().Unix())
-			continue
-		}
-
-		if len(username) < 10 {
-			log.Printf("Skipping line in passwd file (%d) due to short username: %s", lineNumber, line)
-			continue
-		}
-		if len(bcryptHashFromFile) < 60 {
-			// Bcrypt hashes are typically 60 characters long, so we check for that.
-			// If the hash is empty or too short, we skip this user.
-			log.Printf("Skipping user '%s' on line in passwd file (%d) due to empty/short password hash.", username, lineNumber)
-			continue
-		}
-
-		// check if the username already exists in the map
-		if _, exists := newpasswdMap[username]; exists {
-			delete(newpasswdMap, username) // Remove existing entry to avoid duplicates
-			log.Printf("WARNING: Skipping duplicate user '%s' on line %d in passwd file.", username, lineNumber)
-			continue // Skip duplicate usernames
-		}
-		newpasswdMap[username] = &UserData{
-			Username: username,
-			Password: bcryptHashFromFile, // Store the bcrypt hash directly
-			MaxConns: int(maxconns),
-			ExpireAt: ExpireAt,
-			Posting:  posting,
-		}
-		usersLoaded++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading passwd file %s: %w", filename, err)
-	}
-
-	if usersLoaded == 0 {
-		log.Printf("Warning: No users loaded from passwd file '%s'.", filename)
-	} else {
-		passwdMap = newpasswdMap
-		log.Printf("Successfully loaded %d users from '%s'.", usersLoaded, filename)
-	}
+	passwdMap = users // a new map: readers holding the old one are unaffected
+	proxyMutex.Unlock()
+	log.Printf("Successfully loaded %d users from '%s'.", len(users), filename)
 	return nil
 }
 
-// verifyPassword checks if the provided plaintext password matches the stored bcrypt hash for the user.
+// proxyUserCount returns the number of loaded proxy users.
+func proxyUserCount() int {
+	proxyMutex.RLock()
+	defer proxyMutex.RUnlock()
+	return len(passwdMap)
+}
+
+// verifyPassword checks a proxy user's password and expiry. The map is never
+// changed after it is published, so it is read outside proxyMutex.
 func verifyPassword(user string, plainPassword string) bool {
 	proxyMutex.RLock()
-	userData, ok := passwdMap[user]
+	users := passwdMap
 	proxyMutex.RUnlock()
-
-	if !ok {
-		return false // User not found
-	}
-	time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // small delay
-	// userData.Password holds the full bcrypt hash string from the .passwd file
-	err := bcrypt.CompareHashAndPassword([]byte(userData.Password), []byte(plainPassword))
-	return err == nil // If err is nil, the password matches
+	_, ok := verifyUser(users, user, plainPassword)
+	return ok
 }
 
-// addUserToPasswdFile adds a new user to the passwd file with a bcrypt hashed password.
+// addUserToProxyPasswdFile adds a new user to the passwd file with a bcrypt hashed password.
 // The UserData.Password field should contain the plaintext password for the new user.
 func addUserToProxyPasswdFile(userData *UserData, filename string) error {
-	if userData.Password == "" {
-		return fmt.Errorf("cannot add user '%s': plaintext password is empty", userData.Username)
-	}
-
-	// Generate bcrypt hash from the plaintext password
-	// bcrypt.DefaultCost is 10. You can increase this for more security (e.g., 12-14),
-	// but it will also be slower to hash and verify.
-	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(userData.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("failed to generate bcrypt hash for user '%s': %w", userData.Username, err)
-	}
-	bcrpytHashString := string(hashedPasswordBytes)
-
-	// Format the line to be appended to the file
-	// username:bcrypt_hash_string:maxconns:ExpireAt
-	posting := "nopost" // Default ACL for new users, can be changed if needed
-	if userData.Posting {
-		posting = "post" // Set ACL to post if userData.Posting is true
-	}
-	newUserLine := fmt.Sprintf("%s|%s|%d|%d|%s\n", userData.Username, bcrpytHashString, userData.MaxConns, userData.ExpireAt, posting)
-
-	// Open the file in append mode, create if it doesn't exist
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-	if err != nil {
-		return fmt.Errorf("failed to open passwd file '%s' for appending: %w", filename, err)
-	}
-	defer file.Close()
-
-	if _, err := file.WriteString(newUserLine); err != nil {
-		return fmt.Errorf("failed to write new user '%s' to passwd file '%s': %w", userData.Username, filename, err)
-	}
-
-	log.Printf("Successfully added user '%s' to '%s' with a bcrypt hashed password.", userData.Username, filename)
-	// Optionally, reload passwdMap or add the new user directly to the in-memory map
-	// For simplicity here, we assume a restart or separate reload mechanism if immediate in-memory update is needed.
-	// To update in-memory map immediately:
-	/* TODO
-	proxyMutex.Lock()
-	passwdMap[userData.Username] = &UserData{
-		Username: userData.Username,
-		Password: bcrpytHashString, // Store the newly generated hash
-		MaxConns: userData.MaxConns,
-		ExpireAt: userData.ExpireAt,
-	}
-	proxyMutex.Unlock()
-	log.Printf("User '%s' also updated in the in-memory passwdMap.", userData.Username)
-	*/
-	return nil
+	return appendPasswdUser(userData, filename)
 }
 
 const DefaultPasswordLength = 8 // 8 bytes will give us 16 hex characters, which is a common length for usernames/passwords

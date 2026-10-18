@@ -415,6 +415,18 @@ Still races:
 - `gin.Default()` trusts all proxies (`0.0.0.0/0`): call `router.SetTrustedProxies(nil)`.
 - Bootstrap comes from `cdn.jsdelivr.net` without SRI in all four templates and breaks on an offline host. Embed it locally (the directory is already embedded).
 
+**Result (2026-10-18):** done.
+- **Login (D1):** `passwd.go` holds the shared code: `parsePasswdFile` (into a new map), `verifyUser` (bcrypt against a dummy hash on a miss, expiry checked), `mergeNewPasswdFiles`, `appendPasswdUser`. The proxy keeps its global `passwdMap` through thin wrappers; the web server has its own map (`webauth.go`): HTTP basic auth against `-webpasswd`, users added with `-webadduser 'user|password'` (written to `.new.*`, merged on load; web users have `ExpireAt 0` = never, allowed only in the web file). The file is reloaded when it changes. Verified logins are cached for 5 min (key = SHA-256 of user and password); at most 4 bcrypt checks run at once. No `-webpasswd`: refuses to start unless bound to loopback, and warns there. A file with no usable users is a start error.
+- **CSRF:** every POST/PUT/PATCH/DELETE needs `X-NZBreX-Request: 1` (forces a preflight the server never answers); `Sec-Fetch-Site` must be `same-origin`/`none` and `Origin` must match `Host` when sent. `index.html`/`jobs.html` send the header.
+- **Host allowlist:** without a login always enforced (localhost, 127.0.0.1, ::1, the `-webaddr` host, `-webhosts`), 421 otherwise. With a login only when `-webhosts` is set.
+- **Server:** `ReadHeaderTimeout` 10 s, `IdleTimeout` 60 s; uploads capped at 128 MiB with `http.MaxBytesReader` (413); `MaxMultipartMemory` 8 MiB; `SetTrustedProxies(nil)`; TLS `MinVersion` 1.2 (with 4.1).
+- **Uploads:** `os.MkdirTemp` (0700) at start; each upload is written by our own code with `O_CREATE|O_EXCL` under a unique `<n>-<sanitised name>` (an existing file or a planted symlink makes it fail). The job keeps the client's name for display. The file is deleted when the job finishes or is deleted.
+- **Bootstrap:** embedded from Debian's `libjs-bootstrap5` 5.3.5 (`web/static/`, MIT headers kept, source-map comments removed); `style.css` moved there; served by `StaticFS`.
+- `WEB_JOB_QUEUE.md`: the `:443` example is gone; the usage section documents `-webpasswd`, the header and `-u` (rest of the file: 6.3).
+- Tests: `TestWebGuardBlocksCrossSiteAndUnknownHosts`, `TestWebAuthLoginCacheAndReload`, `TestStartWebServerRefusesPublicWithoutLogin`, `TestSaveUploadUniqueAndNoSymlinkFollow`.
+- Verified with `-race` against the local servers: web race run with login and header, 2 jobs completed, 0 races. Probes: no login 401, wrong password 401, pages and static files 200, POST without header 403, foreign Origin 403, form upload without header 403, 140 MB upload 413, two uploads of one name → two files, delete removes the file, public bind without `-webpasswd` exits 1. Proxy login still works (281 / 481).
+- **Not done:** graceful shutdown removes the upload dir (4.5). A brute-force limit beyond bcrypt's cost and the 4-check cap.
+
 ### 4.5 Job lifecycle (corrected)
 
 - **Panic recovery** on the job goroutine (`:290`): add it, but it only catches panics on that goroutine. Worker goroutines and the runtime's `fatal error: concurrent map` are not recoverable there; Phase 2 is the real fix.
@@ -437,6 +449,8 @@ Still races:
 - `handleJobsList`/`handleStats` pass `jobs`/`stats` into templates that contain no template actions at all, so every page load pays for `ListJobs()` and throws the result away. Pass nothing.
 - `index.html:169-176` `showNotification` inserts `${message}` without `escapeHtml`. Latent (callers at `:80`, `:85` pass static text). Escape it anyway.
 - Fine as-is: templates and CSS are embedded (`webserver.go:17-18`, `:495`, `:503`); no `template.HTML` or `text/template`.
+
+**Partial result (2026-10-18):** with 4.2/4.4: `base.html` deleted; `handleJobsList`/`handleStats` (and `handleIndex`) pass no data; `showNotification` escapes its message; the Config button is deliberately disabled (D2). **Still open:** nothing else in 4.6.
 
 ---
 
@@ -468,10 +482,12 @@ The proxy runs alone in its own mode (see Context), so its bugs affect only prox
   - `ARTICLE <message-id>` resets the selected group (`Server.go:352`), which §6.2.1.2 forbids. **The reset is load-bearing:** `Server.go:413`/`:431` treat `ps.Group != "" && ps.MsgNum > 0` as "request by number". Add a local `byNumber` flag first, or message-ID requests get misrouted. `:357` also moves `MsgNum` before the request has succeeded.
   - Article number field: `0` is correct for message-ID requests (§6.2.1.2). Only numeric requests are wrong (the number is hardcoded and also lands in the message-ID slot, `ProxyHelper.go:40`, `Server.go:510`). Use the upstream response line for numeric requests.
 - **`passwdMap` wiped in place.** `ProxyHelper.go:132-134` clears the live map before parsing. On `usersLoaded == 0` (`:204`) or `scanner.Err` (`:200`) nothing is restored. Reload runs only after a successful `verifyPassword` (`Server.go:167` before `:173-188`), so once the map is empty nobody can log in again until restart. **Fix:** parse into a new map and swap it in only on success. Policy note: emptying the file on purpose then no longer locks everyone out.
+  **Fixed (2026-10-18, with 4.4):** `loadPasswdFile` parses into a new map and swaps it in only if it parsed and has users; emptying the file keeps the old users (logged). `TestLoadPasswdFileKeepsUsersOnBadReload`.
 - **(dropped)** "The `.new.*` merge lets anyone add users": this merge is how `-proxyadduser` delivers new users (`Flags.go:176`), and anyone with write access to that directory can already replace `.proxypasswd`. **Keep it.**
 - **`ProxySessions` keyed by username** (`Server.go:240`, deleted at `:44`): never read anywhere. Delete the map, or switch it to `map[uint64]` keyed by `ps.id`.
 - **Plaintext password kept** in `ps.Password` (`Server.go:232`), never read. Delete the field.
 - **Timing oracle for unknown users** (`ProxyHelper.go:219-221` returns before the sleep and bcrypt). Run bcrypt against a dummy hash of the same cost (`DefaultCost`) on the miss path.
+  **Fixed (2026-10-18, with 4.4):** `verifyUser` compares against a lazily made `DefaultCost` dummy hash on a miss and checks expiry; the random sleep in `verifyPassword` is gone (`Server.go` keeps its own). `TestVerifyUserUnknownCostsBcrypt`.
 - **`AUTHINFO PASS` split on whitespace** (`Server.go:100`, `:165`, plus `TrimSpace` at `:99`). (Corrected: RFC 4643 does not require taking the rest of the line; its grammar excludes spaces, and §2.3.2 makes whitespace a MAY.) The effect is the reverse of the draft: a password with spaces *fails*, and `correctpw <junk>` is *accepted*. Optional: reject extra arguments.
 - **Client writes unchecked** almost everywhere (the `LinesWriter` error at `Server.go:481` is checked). Check them, so handlers stop fetching upstream for clients that are gone.
 - `ps.Close()` (`ProxyHelper.go:311-319`) logs the username after clearing it, and would skip the deferred `CountConns` decrement (`Server.go:35`). Currently unreachable.

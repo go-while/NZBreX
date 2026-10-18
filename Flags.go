@@ -96,6 +96,9 @@ func ParseFlags() {
 	flag.BoolVar(&webServerSSL, "webssl", false, "[true|false] enable HTTPS/TLS for web server (default: false)")
 	flag.StringVar(&webServerCert, "webssl-crt", "fullchain.pem", "path to TLS certificate file for web server (default: fullchain.pem in current dir)")
 	flag.StringVar(&webServerKey, "webssl-key", "privkey.pem", "path to TLS private key file for web server (default: privkey.pem in current dir)")
+	flag.StringVar(&webPasswdFile, "webpasswd", "", "web server login: passwd file with the web users (same format as the proxy's, separate users). Without it the web server only runs on a loopback address (default: empty = no login)")
+	flag.StringVar(&webAddUser, "webadduser", "", "adds a user to the -webpasswd file and exits: 'username|password' (both at least 10 characters) or 'auto|auto' for random credentials")
+	flag.StringVar(&webHosts, "webhosts", "", "comma separated host names the web server answers to (Host header), e.g. 'nzbrex.example.org'. Always enforced without a login (localhost, 127.0.0.1, ::1 and the -webaddr host are allowed)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
 	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
@@ -185,6 +188,10 @@ func ParseFlags() {
 			log.Fatalf("Failed to add user to %s: %v", newPasswdFile, err)
 		}
 		// Redact password before logging
+		os.Exit(0)
+	}
+	if webAddUser != "" {
+		addWebUser(webAddUser)
 		os.Exit(0)
 	}
 	// test rapidyenc decoder
@@ -419,3 +426,37 @@ func rapidyencDecoderFilesTest() (errs []error) {
 	} // end for range files
 	return errs
 } // end func rapidyencDecoderFilesTest
+
+// addWebUser handles -webadduser 'username|password'. The user goes to a
+// <webpasswd>.new.* file, which the web server merges on its next load. Web
+// users don't expire (ExpireAt 0) and have no connection or posting rights.
+func addWebUser(spec string) {
+	if webPasswdFile == "" {
+		log.Fatalf("-webadduser needs -webpasswd to name the web passwd file")
+	}
+	parts := strings.SplitN(spec, "|", 2)
+	if len(parts) != 2 {
+		log.Fatalf("-webadduser expects format: username|password")
+	}
+	username, password := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	auto := username == "auto" && password == "auto"
+	if auto {
+		var err error
+		if username, password, err = generateRandomHexCredentials(); err != nil {
+			log.Fatalf("-webadduser: %v", err)
+		}
+	}
+	if len(username) < minUsernameLen || len(password) < 10 {
+		log.Fatalf("-webadduser: username and password must be at least 10 characters long")
+	}
+	if strings.ContainsAny(username, "|:") {
+		log.Fatalf("-webadduser: username must not contain '|' or ':'")
+	}
+	newFile := fmt.Sprintf("%s.new.%d.%d", webPasswdFile, time.Now().Unix(), mrand.Intn(65535))
+	if err := appendPasswdUser(&UserData{Username: username, Password: password}, newFile); err != nil {
+		log.Fatalf("Failed to add web user to %s: %v", newFile, err)
+	}
+	if auto {
+		dlog(always, "-webadduser: auto generated credentials: username='%s' password='%s'", username, password)
+	}
+}

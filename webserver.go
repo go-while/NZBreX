@@ -6,11 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
+	"io/fs"
 	"log"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +23,11 @@ import (
 
 //go:embed web/templates/*
 var templatesFS embed.FS
+
+// bootstrap is served from here, not a CDN: no third-party script, works offline
+//
+//go:embed web/static/*
+var staticFS embed.FS
 
 var (
 	webServerEnabled bool
@@ -28,6 +38,8 @@ var (
 	webProcessor     *PROCESSOR   // set by StartWebServer before the server serves
 	jobQueue         *JobQueue    // set by StartWebServer before the server serves
 	webSrv           *http.Server // the running server, for Shutdown
+	webUploadDir     string       // private dir (0700) for uploaded NZBs, made at start
+	webUploadSeq     atomic.Uint64
 )
 
 // WebStats holds statistics for the web interface
@@ -118,6 +130,20 @@ type JobInfo struct {
 // background. A bind or certificate error is returned (plan 4.1: it used to be
 // logged from a goroutine while the process went on without a web server).
 func StartWebServer(addr string, processor *PROCESSOR) error {
+	// login (D1): its own passwd file; no file is allowed only on loopback
+	var auth *webAuth
+	if webPasswdFile == "" {
+		if !isLoopbackAddr(addr) {
+			return fmt.Errorf("refusing to serve on '%s' without a login: set -webpasswd (users via -webadduser), or bind to 127.0.0.1", addr)
+		}
+		dlog(always, "WARNING: web server has no login (no -webpasswd): anyone who can reach %s can run jobs", addr)
+	} else {
+		var err error
+		if auth, err = newWebAuth(webPasswdFile); err != nil {
+			return err
+		}
+	}
+
 	webProcessor = processor
 	jobQueue = NewJobQueue()
 
@@ -127,6 +153,14 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 	}
 
 	router := gin.Default()
+	if err := router.SetTrustedProxies(nil); err != nil { // c.ClientIP() is the peer, never X-Forwarded-For
+		return err
+	}
+	router.MaxMultipartMemory = 8 << 20 // bigger uploads spool to a temp file
+	router.Use(webGuard(webAllowedHosts(addr, auth != nil)))
+	if auth != nil {
+		router.Use(auth.middleware())
+	}
 
 	// Parse embedded templates
 	tmpl, err := template.ParseFS(templatesFS, "web/templates/*.html")
@@ -135,15 +169,11 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 	}
 	router.SetHTMLTemplate(tmpl)
 
-	// Serve static CSS file from embedded filesystem
-	router.GET("/static/style.css", func(c *gin.Context) {
-		data, err := templatesFS.ReadFile("web/templates/style.css")
-		if err != nil {
-			c.String(http.StatusNotFound, "CSS file not found")
-			return
-		}
-		c.Data(http.StatusOK, "text/css", data)
-	})
+	static, err := fs.Sub(staticFS, "web/static")
+	if err != nil {
+		return err
+	}
+	router.StaticFS("/static", http.FS(static))
 
 	// Routes
 	router.GET("/", handleIndex)
@@ -170,11 +200,23 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 		}
 		tlsConf = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 	}
+	// a fresh private dir: the old fixed /tmp/nzbrex-uploads (0755) let another
+	// local user plant symlinks that gin's SaveUploadedFile would follow
+	if webUploadDir, err = os.MkdirTemp("", "nzbrex-uploads-"); err != nil {
+		return fmt.Errorf("web server upload dir: %w", err)
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
+		os.Remove(webUploadDir)
 		return fmt.Errorf("web server listen on '%s': %w", addr, err)
 	}
-	srv := &http.Server{Handler: router, TLSConfig: tlsConf}
+	srv := &http.Server{
+		Handler:           router,
+		TLSConfig:         tlsConf,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		// no WriteTimeout/ReadTimeout: slow uploads are fine, their size is capped instead
+	}
 	webSrv = srv
 
 	protocol := "http"
@@ -220,10 +262,59 @@ func jobErrStatus(err error) int {
 	return http.StatusBadRequest
 }
 
+// uploadName turns a client file name into a safe, unique name in webUploadDir.
+// The job's display name stays the client's name.
+func uploadName(clientName string) string {
+	base := filepath.Base(strings.ReplaceAll(clientName, "\\", "/"))
+	clean := []rune{}
+	for _, r := range base {
+		if r == '.' || r == '-' || r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			clean = append(clean, r)
+		} else {
+			clean = append(clean, '_')
+		}
+	}
+	if len(clean) > 100 {
+		clean = clean[len(clean)-100:] // keep the extension
+	}
+	return fmt.Sprintf("%d-%s", webUploadSeq.Add(1), string(clean))
+}
+
+// saveUpload writes the upload to a new file in webUploadDir. O_EXCL: an
+// existing file or symlink at that name makes it fail instead of being followed.
+func saveUpload(file *multipart.FileHeader) (string, error) {
+	src, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+	dst := filepath.Join(webUploadDir, uploadName(file.Filename))
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		out.Close()
+		os.Remove(dst)
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(dst)
+		return "", err
+	}
+	return dst, nil
+}
+
 // handleUpload processes NZB file uploads and adds them to the job queue
 func handleUpload(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, webMaxUploadBytes)
 	file, err := c.FormFile("file")
 	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("upload larger than %d MiB", webMaxUploadBytes>>20)})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
 		return
 	}
@@ -235,16 +326,10 @@ func handleUpload(c *gin.Context) {
 		return
 	}
 
-	// Create temporary directory for uploads if it doesn't exist
-	uploadDir := filepath.Join(os.TempDir(), "nzbrex-uploads")
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
-		return
-	}
-
-	// Save uploaded file
-	dst := filepath.Join(uploadDir, file.Filename)
-	if err := c.SaveUploadedFile(file, dst); err != nil {
+	// saved under a unique name: two uploads of foo.nzb used to overwrite each other
+	dst, err := saveUpload(file)
+	if err != nil {
+		dlog(always, "ERROR Web: saving upload '%s': %v", file.Filename, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
 		return
 	}

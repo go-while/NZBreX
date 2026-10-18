@@ -104,7 +104,7 @@ func StartNNTPServer(addr string, passwdFilePath string, certFile string, keyFil
 		dlog(always, "To manually add users, use the '-proxyadduser' command or craft a new .passwd file manually")
 		dlog(always, "Example -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d\" creates a user with 5 conns and 42 days to expiration")
 
-	} else if len(passwdMap) == 0 {
+	} else if proxyUserCount() == 0 {
 		dlog(always, "Warning: Passwd file '%s' loaded, but no users found or all entries were invalid.", passwdFilePath)
 	}
 

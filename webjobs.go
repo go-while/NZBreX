@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -315,6 +317,7 @@ func (jq *JobQueue) finishLocked(job *QueuedJob, err error) {
 		dlog(always, "Job %s completed successfully", job.ID)
 	}
 	job.FinishedAt = time.Now()
+	removeUpload(job.NZBPath) // the session is done with it
 
 	finished := 0
 	for _, j := range jq.jobs {
@@ -350,5 +353,16 @@ func (jq *JobQueue) DeleteJob(jobID string) error {
 		return fmt.Errorf("%w: cannot delete %s job %s", errJobState, job.Status, jobID)
 	}
 	jq.jobs = append(jq.jobs[:i], jq.jobs[i+1:]...)
+	removeUpload(job.NZBPath)
 	return nil
+}
+
+// removeUpload deletes an uploaded NZB. Only files in webUploadDir are touched.
+func removeUpload(path string) {
+	if webUploadDir == "" || filepath.Dir(path) != webUploadDir {
+		return
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		dlog(always, "WARN: removing upload '%s': %v", path, err)
+	}
 }

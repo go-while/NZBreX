@@ -108,44 +108,38 @@ When job finishes:
 
 ### Start Web Server
 ```bash
-# HTTP (default)
+# local only, no login (allowed only on a loopback address; a warning is logged)
 ./NZBreX -web -webaddr "127.0.0.1:11911" -cd /cache -provider provider.json
 
-# HTTPS
-./NZBreX -web -webssl \
-  -webssl-crt "/etc/letsencrypt/fullchain.pem" \
-  -webssl-key "/etc/letsencrypt/privkey.pem" \
-  -webaddr ":443" -cd /cache -provider provider.json
+# with login: create a web user first (its own file, not the proxy's .proxypasswd)
+./NZBreX -webpasswd /etc/nzbrex/webpasswd -webadduser 'webadmin01|a-long-password'
+./NZBreX -web -webaddr "127.0.0.1:11911" -webpasswd /etc/nzbrex/webpasswd -cd /cache -provider provider.json
 ```
 
-### Upload File with Configuration (cURL)
-```bash
-# Upload with default config
-curl -F "file=@myfile.nzb" http://127.0.0.1:11911/upload
+Without `-webpasswd` the server refuses to start on anything but a loopback
+address. To reach it from elsewhere, set `-webpasswd`, prefer `-webssl` (TLS 1.2+),
+and list the host names it is reached by in `-webhosts`. Exposing it directly on
+the internet is not recommended: it drives your provider accounts.
 
-# Upload with custom config
-curl -F "file=@myfile.nzb" \
-  -F "checkonly=true" \
-  -F "crc32=true" \
-  -F "cachedir=/custom/cache" \
-  http://127.0.0.1:11911/upload
-```
-
-### Manage Jobs (API)
+### API (cURL)
+Every request that changes something (POST, PUT, PATCH, DELETE) needs the header
+`X-NZBreX-Request: 1`; browsers can't send it cross-site, which blocks CSRF.
+With a login, add `-u user:password`.
 ```bash
+# Upload (max 128 MiB). Per-job settings are not supported yet: jobs run with
+# the startup settings, and config fields in the form are ignored.
+curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" \
+  -F "file=@myfile.nzb" http://127.0.0.1:11911/upload
+
 # List all jobs
-curl http://127.0.0.1:11911/api/jobs
+curl -u webadmin01:a-long-password http://127.0.0.1:11911/api/jobs
 
-# Start job
-curl -X POST http://127.0.0.1:11911/api/jobs/job-1/start
+# Start one job, or all queued jobs (they run one after another)
+curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X POST http://127.0.0.1:11911/api/jobs/job-1/start
+curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X POST http://127.0.0.1:11911/api/jobs/start-all
 
-# Update job config
-curl -X PATCH http://127.0.0.1:11911/api/jobs/job-1/config \
-  -H "Content-Type: application/json" \
-  -d '{"CheckOnly":true,"YencCRC":true}'
-
-# Delete job
-curl -X DELETE http://127.0.0.1:11911/api/jobs/job-1
+# Delete a queued or finished job
+curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X DELETE http://127.0.0.1:11911/api/jobs/job-1
 ```
 
 ## Web Interface Features
