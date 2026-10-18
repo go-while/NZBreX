@@ -621,6 +621,15 @@ Independent of Phases 1–7; can run in parallel.
 
 ---
 
+## Dependency review: subjectparser (2026-10-18)
+
+`github.com/Tensai75/subjectparser` (via nzbparser; last change 2024-06) forked to `github.com/go-while/subjectparser`, fixes on the local branch `review-fixes` (not pushed). NZBreX uses it with `replace github.com/Tensai75/subjectparser => ../subjectparser`.
+- **Fixed in the fork:** a subject without `(x/y)` segment numbers lost its filename (`"file.bin" yEnc` → ""); a number too big for an int became the largest int (nzbparser sums it into `TotalSegments`); the four regexps were compiled on every call (90 → 28 µs, 265 → 18 allocations). Added table tests (real Debian/Ubuntu subjects and edge cases), a fuzz test and a benchmark. Over 52 subjects only the two lost-filename cases change.
+- **Not changed (ambiguous, kept as is):** unbracketed `X/Y` inside a quoted name counts as file numbers (a filename can't contain `/`); quotes inside the quoted name cut it; `x [1/2] [3/4] "f.bin"` loses the name (everything after the segment numbers is assumed irrelevant); `"a" "b.rar"` takes the first quoted string.
+- **Found in NZBreX while reviewing (fixed):**
+  - `Session.go` sized the segment list with `nzbfile.TotalSegments`, the count the subjects claim. `(1/9999999999999999999)` → `panic: makeslice: cap out of range`, a plausible `(1/2000000000)` would allocate ~16 GB. Now sized by the segments in the NZB (`nzbfile.Segments`); the web job count too.
+  - `-yencmerge` wrote to `filepath.Join(cache, hash, "yenc", <filename from the subject>)`: `"../../../escape-test.bin"` wrote outside the cache (shown with a local run: the file appeared in `run/`). Now only the last path element is used (`safeFileName`, `/` and `\` both separators; `..`, `.`, "" refused); part files use it too (they used `filepath.Base` already).
+
 ## Decisions
 
 All three answered by the user on 2026-10-17.

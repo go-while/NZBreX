@@ -133,10 +133,9 @@ func (jq *JobQueue) AddJob(nzbPath, nzbName string) (string, error) {
 		}
 		return "", fmt.Errorf("invalid NZB file: %w", err)
 	}
-	var totalArticles uint64
-	for _, file := range nzbfile.Files {
-		totalArticles += uint64(file.TotalSegments)
-	}
+	// the segments in the NZB, as the session counts them (TotalSegments is
+	// what the subjects claim)
+	totalArticles := uint64(nzbfile.Segments)
 	job := &QueuedJob{
 		NZBPath:       nzbPath,
 		NZBName:       nzbName,

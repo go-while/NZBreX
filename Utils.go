@@ -14,6 +14,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -25,6 +26,18 @@ import (
 	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
 )
+
+// safeFileName returns the last element of a filename taken from an article
+// subject, for use in a path, and false if nothing usable is left. Both '/'
+// and '\\' count as separators, on every OS.
+func safeFileName(name string) (string, bool) {
+	base := path.Base(strings.ReplaceAll(name, `\`, "/"))
+	switch {
+	case base == "" || base == "." || base == ".." || base == "/", strings.ContainsRune(base, 0):
+		return "", false
+	}
+	return base, true
+}
 
 func getCoreLimiter() {
 	<-core_chan

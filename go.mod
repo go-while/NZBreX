@@ -53,3 +53,7 @@ require (
 
 // go-yenc-simd: local sibling checkout until it is published
 replace github.com/go-while/go-yenc-simd => ../go-yenc-simd
+
+// subjectparser: go-while's fork (review-fixes branch) until it is published
+// or merged upstream; nzbparser imports it under the upstream path
+replace github.com/Tensai75/subjectparser => ../subjectparser

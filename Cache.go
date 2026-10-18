@@ -285,7 +285,11 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 
 func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp string, yencdir string, fp string, fp_tmp string) {
 	//filename = fmt.Sprintf("%s.part.%d.yenc", filepath.Base(item.file.Filename), item.segment.Number)
-	filename = fmt.Sprintf("%s.%0"+item.s.D+"d", filepath.Base(item.file.Filename), item.segment.Number)
+	base, ok := safeFileName(item.file.Filename)
+	if !ok {
+		base = SHA256str(item.file.Subject) // no usable name in the subject
+	}
+	filename = fmt.Sprintf("%s.%0"+item.s.D+"d", base, item.segment.Number)
 	filename_tmp = filename + ".tmp"
 	yencdir = filepath.Join(c.cachedir, *item.nzbhashname, "yenc")
 	fp = filepath.Join(yencdir, filename)

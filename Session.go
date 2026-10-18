@@ -234,7 +234,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 			dlog(cfg.opt.Debug, "nzbfile='%#v'", s.nzbFile)
 
 			// build the segment list locally and publish it once under s.mux below
-			segmentList := make([]*segmentChanItem, 0, nzbfile.TotalSegments)
+			// sized by the segments in the NZB, not by TotalSegments: that is the
+			// count the subjects claim ("(1/9999999999)"), and it made the
+			// make() panic or allocate gigabytes
+			segmentList := make([]*segmentChanItem, 0, nzbfile.Segments)
 			// loop through all file tags within the NZB file
 			for _, file := range nzbfile.Files {
 				if cfg.opt.Debug {

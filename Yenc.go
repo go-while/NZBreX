@@ -39,7 +39,14 @@ func (s *SESSION) YencMerge(result *string) {
 		go func(filename string, waitMerge *sync.WaitGroup) {
 			defer returnCoreLimiter()
 			defer waitMerge.Done()
-			target := filepath.Join(cfg.opt.Cachedir, s.nzbHashedname, "yenc", filename)
+			// the filename comes from the article subject: only its last element
+			// may name the target ("../../x" wrote outside the cache dir)
+			safe, ok := safeFileName(filename)
+			if !ok {
+				dlog(always, "ERROR YencMerge: refusing filename %q from the subject", filename)
+				return
+			}
+			target := filepath.Join(cfg.opt.Cachedir, s.nzbHashedname, "yenc", safe)
 			if FileExists(target) {
 				dlog(always, "ERROR YencMerge: exists target='%s'", target)
 				return
