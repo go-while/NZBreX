@@ -267,6 +267,15 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** set `memdata` and `memlocked` together, under one lock, after the slot is acquired. Make a second `MemReturn` a logged no-op instead of a fatal error. Base `MemAvail` on `len(m.memchan)`.
 
+**Result (2026-10-18):** fixed, except `MemAvail` (kept on purpose, see below).
+- `memdata` is now the only record of who owns a slot. It changes together with `item.memlocked` (now 0/1), both under `m.mux`, and only after the slot was taken. Lock order is `m.mux` → `item.mux`; no caller holds `item.mux` when calling `MemLockWait`/`MemReturn`.
+- `MemReturn` checks and removes ownership in one critical section. A second return (or one for an item without a slot) is a logged no-op; the `log.Fatalf` on a full chan is now a logged `BUG`.
+- A second `MemLockWait` on an item still waiting (was `os.Exit(1)`) now waits for the first one and shares its slot.
+- **`MemAvail` unchanged in meaning.** Gating `pushDL` on free slots made a `-mem 4` run 25% slower (38 s → 50 s, twice, both orders): each freed slot waited for the next divider pass before a download was queued for it. The old test ("fewer than `mem_max` callers waiting") only bounds how many downloads wait in `MemLockWait`, and they hold no memory. `waiting` is now an `atomic.Int64`, so `MemAvail` takes no lock: `pushDL` calls it while holding `item.mux`, which would otherwise invert the new lock order.
+- Tests: `TestMemReturnTwiceReturnsOneSlot` (old code: `log.Fatalf` "chan is full") and `TestMemLockWaitSameItemTwiceSharesOneSlot` (old code: `os.Exit(1)`).
+- Verified with `-race` against the local servers: A→B, same group, slot leak, `-mem 4` (39 s, old build 38 s), kill B during uploads (ends in 32 s). No races, no "non-memlocked" warnings.
+- **Noted:** with `-mem 4` and 4 connections per server, uploads run at about 2 articles/s (~65 KiB/s) to the local server on both builds. This is the race build, but it looks slow; worth a look with a normal build later.
+
 ### 3.9 `s.preBoot`/`s.active` guarded by two mutexes (corrected; fix added)
 
 `Session.go:170-178`/`:520-524` use `s.mux`; `Workers.go:13-25` uses `globalmux`. `LaunchSession` and `GoBootWorkers` run in the same goroutine (`Session.go:369`), so they don't race each other. The real race is `webserver.go:854` reading `active` under `globalmux` while `closeSession` writes it under `s.mux`. The nil dereference at `Workers.go:15` and the early returns before the `defer` at `:27` are unreachable (`LaunchSession` rejects a double launch at `:171`).

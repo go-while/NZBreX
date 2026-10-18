@@ -15,17 +15,21 @@ package main
  */
 
 import (
-	"log"
-	"os"
+	"sync/atomic"
 
 	"github.com/go-while/go-loggedrwmutex"
 )
 
 type MemLimiter struct {
 	mem_max int
-	waiting int
+	waiting atomic.Int64 // callers inside MemLockWait waiting for a slot; atomic so MemAvail needs no lock
 	memchan chan struct{}
+	// memdata holds the items that own a slot. It is the only record of who owns
+	// one: it changes together with item.memlocked, and both only under mux.
 	memdata map[*segmentChanItem]bool
+	// pending holds the items still waiting for a slot. A second MemLockWait on
+	// such an item waits for the first one instead of taking a second slot.
+	pending map[*segmentChanItem]chan struct{}
 	//mux     sync.RWMutex
 	mux *loggedrwmutex.LoggedSyncRWMutex // debug mutex
 }
@@ -37,6 +41,7 @@ func NewMemLimiter(value int) *MemLimiter {
 	memlim := &MemLimiter{
 		memchan: make(chan struct{}, value),
 		memdata: make(map[*segmentChanItem]bool, value),
+		pending: make(map[*segmentChanItem]chan struct{}),
 		mem_max: value,
 		mux:     &loggedrwmutex.LoggedSyncRWMutex{Name: "MemLimiter"},
 	}
@@ -64,37 +69,52 @@ func (m *MemLimiter) ViewData() (data []string) {
 	return
 } // end func memlim.ViewData
 
-func (m *MemLimiter) MemAvail() (retbool bool) {
-	m.mux.RLock()
-	retbool = (m.waiting < m.mem_max)
-	m.mux.RUnlock()
-	return
+// MemAvail reports whether fewer than mem_max callers are waiting for a slot.
+// pushDL uses it to bound the downloads queued behind a full limiter. It does
+// not mean a slot is free: queued downloads wait in MemLockWait, holding no
+// memory, so they take a slot the moment one comes back. Gating on free slots
+// instead (plan 3.8) cost ~25% throughput with -mem 4: every freed slot then
+// waited for the next divider pass before a download was queued for it.
+//
+// It takes no lock: pushDL calls it while holding item.mux.
+func (m *MemLimiter) MemAvail() bool {
+	return m.waiting.Load() < int64(m.mem_max)
 }
 
 // MemLockWait takes a memory slot for item. It waits until a slot is free or
 // until stop is closed (a nil stop waits forever). It returns false if it gave
 // up because of stop: the item then holds no slot and must not be downloaded.
 // It returns true if the item holds a slot (also when it already held one).
+//
+// Lock order: m.mux before item.mux. Callers must not hold item.mux.
 func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string, stop <-chan struct{}) bool {
-	item.mux.Lock()
-	if item.memlocked > 0 {
-		item.mux.Unlock()
-		dlog(always, "MemLockWait called on already memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
-		return true
-	}
-	item.mux.Unlock()
-
 	GCounter.Incr("MemLockWait")
 	defer GCounter.Decr("MemLockWait")
 
-	m.mux.Lock()
-	if m.memdata[item] {
-		dlog(always, "ERROR ! MemLimit tried to lock an item already in mem! seg.Id='%s' who='%s'", item.segment.Id, who)
-		os.Exit(1) // this is a bug! we should never try to lock an item already in mem!
+	for {
+		m.mux.Lock()
+		if m.memdata[item] {
+			m.mux.Unlock()
+			dlog(cfg.opt.DebugMemlim, "MemLockWait called on already memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
+			return true
+		}
+		other := m.pending[item]
+		if other == nil {
+			break // we wait for the slot, still holding m.mux
+		}
+		m.mux.Unlock()
+		// someone else is already waiting for a slot for this item: wait for them, then look again
+		dlog(always, "MemLockWait: seg.Id='%s' is already waiting for a slot, who='%s' waits for it", item.segment.Id, who)
+		select {
+		case <-other:
+		case <-stop:
+			return false
+		}
 	}
-	m.memdata[item] = true // flag as in mem
-	dlog(cfg.opt.DebugMemlim, "MemLockWait avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, m.waiting, who)
-	m.waiting++
+	done := make(chan struct{})
+	m.pending[item] = done
+	waiting := m.waiting.Add(1)
+	dlog(cfg.opt.DebugMemlim, "MemLockWait avail=%d/%d m.waiting=%d who='%s'", len(m.memchan), m.mem_max, waiting, who)
 	m.mux.Unlock()
 
 	// take a free slot right away if there is one, so a closed stop never wins over a free slot
@@ -110,45 +130,42 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string, stop <-chan 
 		}
 	}
 
+	m.mux.Lock()
+	m.waiting.Add(-1)
+	delete(m.pending, item)
+	if got {
+		m.memdata[item] = true
+		item.mux.Lock()
+		item.memlocked = 1
+		item.mux.Unlock()
+	}
+	close(done)
+	m.mux.Unlock()
+
 	if !got {
-		// roll back, or the next MemLockWait on this item hits the os.Exit above
-		m.mux.Lock()
-		m.waiting--
-		delete(m.memdata, item)
-		m.mux.Unlock()
 		GCounter.Incr("TOTAL_MemLockAborted")
 		dlog(cfg.opt.DebugMemlim, "MemLockWait aborted by stop seg.Id='%s' who='%s'", item.segment.Id, who)
 		return false
 	}
-
-	item.mux.Lock()
-	item.memlocked++
-	item.mux.Unlock()
 	GCounter.Incr("TOTAL_MemLock")
-
-	m.mux.Lock()
-	m.waiting--
-	dlog(cfg.opt.DebugMemlim, "NewMemLock gotSLOT seg.Id='%s' m.waiting=%d who='%s'", item.segment.Id, m.waiting, who)
-	m.mux.Unlock()
+	dlog(cfg.opt.DebugMemlim, "NewMemLock gotSLOT seg.Id='%s' who='%s'", item.segment.Id, who)
 	return true
 } // end func memlim.MemLockWait
 
-// MemReturn removes the item from mem and returns the slot to the chan
-// it is called after the item has been uploaded or written to cache
-// it is also called if no upload and is written to cache
+// MemReturn gives the item's slot back. It is called after the item has been
+// uploaded, written to cache, or retired. Calling it for an item that holds no
+// slot (or calling it twice) is logged and does nothing.
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
-	//dlog(cfg.opt.DebugMemlim, "MemReturn free seg.Id='%s' who='%s'", item.segment.Id, who)
-	item.mux.RLock()
-	if item.memlocked == 0 {
+	m.mux.Lock()
+	if !m.memdata[item] {
+		m.mux.Unlock()
 		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
-		item.mux.RUnlock()
 		return // not memlocked, nothing to do
 	}
-	item.mux.RUnlock()
-
-	// remove map entry from mem
-	m.mux.Lock()
 	delete(m.memdata, item)
+	item.mux.Lock()
+	item.memlocked = 0
+	item.mux.Unlock()
 	m.mux.Unlock()
 
 	// return the slot
@@ -156,12 +173,8 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	case m.memchan <- struct{}{}: // return mem slot into chan
 		GCounter.Incr("TOTAL_MemReturned")
 	default:
-		// wtf chan is full?? that's a bug!
-		// this is a bug! we should never return a slot to a full chan!
-		log.Fatalf("ERROR on MemReturn chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
+		// only one owner per slot, so the chan can't be full here
+		dlog(always, "BUG: MemReturn: slot chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
 	}
-	item.mux.Lock()
-	item.memlocked--
-	item.mux.Unlock()
 	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.Id, who)
 } // end func memlim.MemReturn

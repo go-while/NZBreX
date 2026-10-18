@@ -226,7 +226,7 @@ type segmentChanItem struct {
 	flaginYenc  bool                             // if true, item is in writing to yenc cache
 	flagisYenc  bool                             // if true, item has been written to yenc cache
 	flagCache   bool                             // if true, item is cached
-	memlocked   int                              // counts up if item is memlocked
+	memlocked   int                              // 1 while the item holds a mem slot; only MemLimiter sets it, under its mux
 	checkedOn   int                              // counts up if item has been checked on a provider
 	pushedDL    int                              // a counter for debugging
 	pushedUP    int                              // a counter for debugging
