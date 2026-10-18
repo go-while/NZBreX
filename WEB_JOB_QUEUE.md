@@ -1,112 +1,115 @@
-# NZBreX Web Server Job Queue Implementation
+# NZBreX Web Server Job Queue
 
 ## Overview
-The web server now includes a job queue system that allows users to upload NZB files, configure processing options, and manage job execution.
+With `-web`, NZBreX runs a small web server: upload NZB files, queue them, start
+and stop them, and watch progress and provider statistics.
+
+Jobs run **one at a time**, oldest first. Every job runs with the settings
+NZBreX was started with (see "Per-job settings" below).
 
 ## Features
+- **Queue:** upload NZB files (`.nzb`, `.nzb.gz`, max 128 MiB); each becomes a queued job.
+- **Control:** start one job or all queued jobs, stop a running job, cancel a
+  waiting one, delete queued or finished jobs.
+- **Progress:** live article counts per job, provider statistics.
+- **Login:** HTTP basic auth against its own passwd file (`-webpasswd`).
 
-### Job Queue System
-- **Queue Management**: Upload NZB files and add them to a processing queue
-- **Job Configuration**: Set per-job options for processing
-- **Job Control**: Start, stop, and delete jobs
-- **Status Tracking**: Monitor job progress and status
+### Per-job settings (not supported yet)
+The jobs page shows a per-job and a default settings dialog (Check Only, Check
+First, CRC32, yEnc test mode, yEnc CPU threads, cache directory). They are
+**read-only**: every job runs with the startup flags (`-checkonly`,
+`-checkfirst`, `-crc32`, `-yenctest`, `-yenccpu`, `-cd`, ...). The dialogs and
+each job's `Config` show those values.
 
-### Configurable Options (Per Job)
-- `-checkonly`: Check article availability only (no download/upload)
-- `-checkfirst`: Check all articles before starting downloads
-- `-crc32`: Enable CRC32 verification for articles
-- `-yenctest`: Select yenc decoding mode (1-4)
-- `-yenccpu`: Set CPU threads for yenc processing
-- `-cd`: Cache directory path
+The config endpoints return `501 Not Implemented` (with the startup settings in
+the body), and `/upload` ignores config fields in the form and says so in a
+`note` field of its response. Applying settings per job is planned; it needs the
+engine to stop reading the process-wide configuration first.
 
-## API Endpoints
+## Job states
 
-### Web Pages
-- `GET /` - Upload page with file drop zone
-- `GET /jobs` - Job queue management page
-- `GET /stats` - Statistics dashboard
+```
+queued ──start──▶ waiting ──(runner)──▶ running ──▶ completed
+   │                 │                     │    └─▶ failed (error, or "stopped")
+   │                 └──stop──▶ failed ("canceled before it started")
+   └──delete
+```
 
-### API Routes
-- `POST /upload` - Upload NZB file and add to queue
-- `GET /api/jobs` - List all jobs (queued + running)
-- `POST /api/jobs/:id/start` - Start a queued job
-- `DELETE /api/jobs/:id` - Delete a queued job
-- `PATCH /api/jobs/:id/config` - Update job configuration
-- `GET /api/stats` - Get statistics (JSON)
+- `queued`: uploaded, not started.
+- `waiting`: started, waiting for the job before it to finish.
+- `running`: its session is running. Only one job runs at a time.
+- `completed` / `failed`: finished. `Error` says why a job failed; a stopped job
+  fails with `stopped`.
 
-## Data Structures
+Queued, completed and failed jobs can be deleted; waiting and running ones must
+be stopped first (`409 Conflict` otherwise). At most 1000 queued/waiting jobs
+are accepted (`503` after that); only the newest 50 finished jobs are kept.
 
-### JobQueue
-Manages all queued and running jobs with thread-safe operations.
+An uploaded NZB is deleted when its job finishes or is deleted. Uploads go to a
+private temporary directory (mode 0700), removed on shutdown.
 
-### QueuedJob
+## API
+
+### Pages
+- `GET /`: upload page
+- `GET /jobs`: job queue (refreshes every 3 s)
+- `GET /stats`: statistics (refreshes every 5 s)
+- `GET /static/...`: CSS and JS (served locally, no CDN)
+
+### Routes
+| Method | Path | |
+|---|---|---|
+| `POST` | `/upload` | upload an NZB (form field `file`), returns the job ID |
+| `GET` | `/api/jobs` | all jobs: `{"jobs": [...]}` (running, waiting, queued, finished) |
+| `POST` | `/api/jobs/:id/start` | start a queued job (it becomes `waiting`) |
+| `POST` | `/api/jobs/start-all` | start every queued job; returns `count` |
+| `POST` | `/api/jobs/:id/stop` | stop a running job, cancel a waiting one |
+| `DELETE` | `/api/jobs/:id` | delete a queued or finished job |
+| `PATCH` | `/api/jobs/:id/config` | `501` (per-job settings not supported) |
+| `GET`/`PUT` | `/api/jobs/default-config` | `501` (same) |
+| `GET` | `/api/stats` | statistics (JSON) |
+
+Errors: `404` unknown job, `409` wrong state, `503` queue full, `413` upload too
+large, `400` not an NZB or an NZB that doesn't parse.
+
+### Job JSON
 ```go
 type QueuedJob struct {
-    ID         string        // Unique job identifier
-    NZBPath    string        // Path to uploaded NZB file
-    NZBName    string        // Original filename
-    Config     JobConfig     // Job-specific configuration
-    Status     string        // "queued", "running", "completed", "failed"
-    AddedAt    time.Time     // When job was added
-    StartedAt  time.Time     // When job started processing
-    FinishedAt time.Time     // When job finished
-    Error      string        // Error message if failed
-    Progress   float64       // Progress percentage (0-100)
+    ID                string    // "job-1", "job-2", ...
+    NZBPath           string    // the uploaded file (deleted when the job finishes)
+    NZBName           string    // original file name
+    Config            JobConfig // the settings it runs with: always the startup flags
+    Status            string    // queued, waiting, running, completed, failed
+    AddedAt           time.Time
+    StartedAt         time.Time // when it began running
+    FinishedAt        time.Time
+    Error             string    // why it failed
+    Progress          float64   // 0..1: articles_processed / total_articles
+    TotalArticles     uint64    `json:"total_articles"`
+    ArticlesProcessed uint64    `json:"articles_processed"` // ok on all providers, dead, or nowhere to upload
+    ArticlesDone      uint64    `json:"articles_done"`      // ok on all providers, or uploaded
+    ArticlesCached    uint64    `json:"articles_cached"`
+    ArticlesDead      uint64    `json:"articles_dead"`
+    TotalSize         int64     `json:"total_size"` // bytes
+    SessionID         uint64    `json:"session_id"` // the job's session, once it ran
 }
-```
 
-### JobConfig
-```go
 type JobConfig struct {
-    CheckOnly  bool   // Only check availability
-    CheckFirst bool   // Check all before downloading
-    YencCRC    bool   // Enable CRC32 verification
-    YencTest   int    // Yenc mode (1-4)
-    YencCpu    int    // CPU threads (0=auto)
-    Cachedir   string // Cache directory
+    CheckOnly, CheckFirst, YencCRC bool
+    YencTest, YencCpu              int
+    Cachedir                       string
 }
 ```
 
-## Workflow
+The counters update while the job runs and keep their final values afterwards.
 
-### 1. Upload NZB File
-User uploads an NZB file via web interface:
-- File is validated (.nzb or .nzb.gz)
-- File is saved to temporary directory
-- Job is created with default or specified configuration
-- Job is added to queue with status="queued"
-- Job ID is returned to user
+`/api/stats` lists the providers of the running job's session, with its
+connection and article counts. While no job runs, it lists the providers loaded
+at startup.
 
-### 2. Configure Job (Optional)
-User can modify job configuration before starting:
-- Update any config options via API
-- Configuration is validated
-- Only queued jobs can be configured
+## Usage
 
-### 3. Start Job
-User starts a queued job:
-- Job moves from queue to running state
-- Processor launches session with job-specific config
-- Job runs in background goroutine
-- Status updates to "running"
-
-### 4. Monitor Progress
-User can view job status:
-- Auto-refreshing job list (3 second intervals)
-- Status badges (queued/running/completed/failed)
-- Configuration summary displayed
-- Error messages shown if failed
-
-### 5. Job Completion
-When job finishes:
-- Status updates to "completed" or "failed"
-- Job is removed from running map
-- Timestamp recorded
-- Original config restored
-
-## Usage Examples
-
-### Start Web Server
+### Start the web server
 ```bash
 # local only, no login (allowed only on a loopback address; a warning is logged)
 ./NZBreX -web -webaddr "127.0.0.1:11911" -cd /cache -provider provider.json
@@ -117,17 +120,30 @@ When job finishes:
 ```
 
 Without `-webpasswd` the server refuses to start on anything but a loopback
-address. To reach it from elsewhere, set `-webpasswd`, prefer `-webssl` (TLS 1.2+),
-and list the host names it is reached by in `-webhosts`. Exposing it directly on
-the internet is not recommended: it drives your provider accounts.
+address. To reach it from elsewhere, set `-webpasswd`, prefer `-webssl` (TLS 1.2+,
+`-webssl-crt`, `-webssl-key`), and list the host names it is reached by in
+`-webhosts`. Exposing it directly on the internet is not recommended: it drives
+your provider accounts.
+
+User names and passwords need at least 10 characters; `-webadduser 'auto|auto'`
+generates both and prints them. Users added with `-webadduser` (or edits to the
+file) are picked up while the server runs. Web users don't expire unless their
+ExpireAt field is set by hand.
+
+`-web` can't be combined with `-nzbdir` or the proxy (`-proxytcp`/`-proxytls`);
+NZBreX exits with an error. With `-log`, each job writes its own log file
+(`<logdir>/<upload number>-<name>.log`). The log is process-wide, so web server lines
+logged while a job runs land in that job's log.
+
+On SIGINT/SIGTERM the server stops accepting requests, stops the running job,
+cancels waiting ones and exits (a second signal exits at once).
 
 ### API (cURL)
 Every request that changes something (POST, PUT, PATCH, DELETE) needs the header
 `X-NZBreX-Request: 1`; browsers can't send it cross-site, which blocks CSRF.
 With a login, add `-u user:password`.
 ```bash
-# Upload (max 128 MiB). Per-job settings are not supported yet: jobs run with
-# the startup settings, and config fields in the form are ignored.
+# Upload (max 128 MiB). Config fields in the form are ignored (see above).
 curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" \
   -F "file=@myfile.nzb" http://127.0.0.1:11911/upload
 
@@ -138,64 +154,45 @@ curl -u webadmin01:a-long-password http://127.0.0.1:11911/api/jobs
 curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X POST http://127.0.0.1:11911/api/jobs/job-1/start
 curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X POST http://127.0.0.1:11911/api/jobs/start-all
 
+# Stop a running job / cancel a waiting one
+curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X POST http://127.0.0.1:11911/api/jobs/job-1/stop
+
 # Delete a queued or finished job
 curl -u webadmin01:a-long-password -H "X-NZBreX-Request: 1" -X DELETE http://127.0.0.1:11911/api/jobs/job-1
 ```
 
-## Web Interface Features
+## Web pages
 
-### Upload Page (/)
-- Drag-and-drop file upload
-- File validation (.nzb, .nzb.gz)
-- Upload progress indicator
-- Links to job queue and statistics
+### Upload (`/`)
+Drag-and-drop or file picker for `.nzb` / `.nzb.gz`, upload progress, links to
+the queue and statistics.
 
-### Job Queue Page (/jobs)
-- Table view of all jobs
-- Status badges with color coding
-- Configuration summary per job
-- Action buttons:
-  - ▶ Start (queued jobs only)
-  - ⚙ Config (queued jobs only)
-  - 🗑 Delete (queued jobs only)
-- Auto-refresh every 3 seconds
-- Modal dialog for configuration
+### Job queue (`/jobs`)
+A table of all jobs: name, article counts and size, status badge, timeline
+(added / started / finished), settings. Per job:
+- ▶ Start (queued)
+- ■ Stop (waiting or running)
+- 🗑 Delete (queued or finished)
+- ⚙ Settings: shown disabled (not supported yet)
 
-### Statistics Page (/stats)
-- Real-time provider statistics
-- Bandwidth visualization
-- Job progress tracking
-- Auto-refresh every 5 seconds
+"Start All Queued Jobs" starts every queued job; "Default Job Config" shows the
+startup settings read-only.
 
-## Thread Safety
-- All job queue operations use mutex locks
-- Safe concurrent access to job data
-- Original config is restored after job completion
-- Job-specific sessions prevent conflicts
+### Statistics (`/stats`)
+Provider connections, article counts and speeds, bandwidth, and the running
+job's progress.
 
-## Error Handling
-- File upload validation
-- Job not found errors
-- Cannot delete running jobs
-- Cannot configure non-queued jobs
-- Configuration validation
-- Session launch errors captured
+## Thread safety
+- One mutex guards all job fields. The API returns copies, never shared pointers.
+- One runner goroutine runs jobs in queue order, because sessions still share
+  process-wide settings and limiters.
+- Each job runs in its own session; its progress counters are atomics the page
+  reads without locking the session.
 
-## Files Modified/Created
-
-### Modified
-- `webserver.go` - Added job queue system and handlers
-- `Flags.go` - Added SSL/TLS flags for web server
-- `web/templates/index.html` - Added job queue link
-- `web/templates/stats.html` - Added job queue link
-
-### Created
-- `web/templates/jobs.html` - Job queue management page
-
-## Benefits
-1. **Better Control**: Queue jobs and start them when ready
-2. **Per-Job Configuration**: Different settings for different NZBs
-3. **Monitoring**: Track job status and progress
-4. **Safety**: Can't accidentally overload system with simultaneous jobs
-5. **Flexibility**: Mix check-only and full processing jobs
-6. **Reliability**: Failed jobs don't block the queue
+## Files
+- `webserver.go`: server, routes, handlers, statistics
+- `webjobs.go`: job queue and runner
+- `webauth.go`: login, Host check, CSRF guard
+- `passwd.go`: passwd file format (shared with the proxy)
+- `web/templates/index.html`, `jobs.html`, `stats.html`: pages
+- `web/static/`: `style.css`, Bootstrap 5.3.5 (`bootstrap.min.css`, `bootstrap.bundle.min.js`)

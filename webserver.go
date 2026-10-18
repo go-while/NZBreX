@@ -38,10 +38,11 @@ var (
 	webServerSSL     bool
 	webServerCert    string
 	webServerKey     string
-	webProcessor     *PROCESSOR   // set by StartWebServer before the server serves
-	jobQueue         *JobQueue    // set by StartWebServer before the server serves
-	webSrv           *http.Server // the running server, for Shutdown
-	webUploadDir     string       // private dir (0700) for uploaded NZBs, made at start
+	webProcessor     *PROCESSOR              // set by StartWebServer before the server serves
+	jobQueue         *JobQueue               // set by StartWebServer before the server serves
+	webSrv           *http.Server            // the running server, for Shutdown
+	webBaseSession   atomic.Pointer[SESSION] // set in main: the providers-only session behind -web
+	webUploadDir     string                  // private dir (0700) for uploaded NZBs, made at start
 	webUploadSeq     atomic.Uint64
 )
 
@@ -527,6 +528,16 @@ func collectStats() WebStats {
 				}
 			}
 		}()
+		if len(providerLists) == 0 {
+			// no job running: show the providers the web session loaded at startup
+			// (it never boots workers, so it is never active; plan 6.3)
+			if base := webBaseSession.Load(); base != nil {
+				base.mux.RLock()
+				providerList := base.providerList
+				base.mux.RUnlock()
+				providerLists = append(providerLists, providerList)
+			}
+		}
 		for _, providerList := range providerLists {
 			for _, prov := range providerList {
 				// KillConnPool sets prov.ConnPool = nil and the workers update the

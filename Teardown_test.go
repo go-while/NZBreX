@@ -51,7 +51,7 @@ func TestSessionTeardownClosesEachChannelOnce(t *gotesting.T) {
 		}
 	}()
 
-	s.makeSegmentChans()
+	s.makeSegmentChans(cfg.opt.ChanSize)
 	if len(s.segmentChansCheck) != 2 || len(s.segmentChansDowns) != 2 || len(s.segmentChansReups) != 2 {
 		t.Fatalf("want one channel per group (2), got check=%d downs=%d reups=%d",
 			len(s.segmentChansCheck), len(s.segmentChansDowns), len(s.segmentChansReups))
@@ -122,7 +122,7 @@ func TestFeederClosesWhenCheckersGone(t *gotesting.T) {
 	for i := 0; i < 10; i++ { // more items than the channel holds: the feeder blocks on send
 		s.segmentList = append(s.segmentList, testItem(string(rune('a'+i))))
 	}
-	s.makeSegmentChans()
+	s.makeSegmentChans(cfg.opt.ChanSize)
 	if got := s.checkers["b"].left.Load(); got != 3 {
 		t.Fatalf("group b: want 3 check routines, got %d", got)
 	}

@@ -648,21 +648,34 @@ func RotateLogFiles(name string, maxVersions int) error {
 	return nil
 } // end func RotateFiles (written by AI: GPT-4.1)
 
+// logFile is the file LogToFile last opened, closed when the log is switched
+// again (each -log session leaked one file descriptor before).
+var (
+	logFileMu sync.Mutex
+	logFile   *os.File
+)
+
 func SetLogToTerminal() {
 	// Reset log output to the terminal
+	logFileMu.Lock()
 	log.SetOutput(os.Stdout)
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
+	logFileMu.Unlock()
 	dlog(cfg.opt.Debug, "output reset to os.Stdout")
 } // end func SetLogToTerminal (written by AI: GPT-4.1)
 
 func LogToFile(filename string, append bool) (err error) {
 	// Set log output to the specified file
-	var logFile *os.File
+	var f *os.File
 	if append {
 		// Open the file in append mode
-		logFile, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	} else {
 		// Open the file in overwrite mode
-		logFile, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		f, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	}
 	if err != nil {
 		dlog(always, "ERROR LogToFile: failed to open log file '%s': %v", filename, err)
@@ -672,7 +685,13 @@ func LogToFile(filename string, append bool) (err error) {
 		SetLogToTerminal()
 		dlog(always, "LogToFile: log output set to '%s'", filename)
 	}
-	log.SetOutput(logFile)
+	logFileMu.Lock()
+	log.SetOutput(f)
+	if logFile != nil {
+		logFile.Close()
+	}
+	logFile = f
+	logFileMu.Unlock()
 	return
 } // end func LogToFile (written by AI: GPT-4.1)
 

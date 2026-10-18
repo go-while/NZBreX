@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -193,8 +192,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	s.preBoot = true
 	s.mux.Unlock()
 
-	// create log file: /path/nzb.log
-	if cfg.opt.Log {
+	// create log file: /path/nzb.log. Only for NZB sessions: the proxy and web
+	// sessions have no NZB (they wrote to logs/.log) and never return to restore it.
+	// The log is process-wide: while a web job runs, the web server logs there too.
+	if cfg.opt.Log && !s.proxy && s.nzbPath != "" {
 		logFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".log"
 		logPath := filepath.Join(cfg.opt.LogDir, logFileName)
 		if cfg.opt.LogDir != "" && cfg.opt.LogDir != "." && !DirExists(cfg.opt.LogDir) {
@@ -322,7 +323,8 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	// setup mem limiter
 	if memlim == nil {
 		memMax := cfg.opt.MemMax
-		// sets memory slots once globally!
+		// sets memory slots once globally, sized by the first session's providers
+		// (for -web that is the web session at startup; later jobs share it)
 		if memMax <= 0 && totalMaxConns > 0 {
 			if memMax != totalMaxConns*2 {
 				memMax = totalMaxConns * 2
@@ -331,29 +333,8 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		memlim = NewMemLimiter(memMax)
 	}
 
-	// limits crc32 and yenc processing
-	if cfg.opt.YencCRC {
-		if cfg.opt.YencCpu <= 0 {
-			cfg.opt.YencCpu = runtime.NumCPU()
-		}
-		if cfg.opt.YencAsyncCpu <= 0 {
-			cfg.opt.YencAsyncCpu = runtime.NumCPU()
-		}
-		if core_chan == nil || cap(core_chan) != cfg.opt.YencCpu {
-			core_chan = make(chan struct{}, cfg.opt.YencCpu)
-			for i := 1; i <= cfg.opt.YencCpu; i++ {
-				core_chan <- struct{}{} // fill chan with empty structs to suck out and return
-			}
-			dlog(always, "LaunchSession: core_chan=%d", cfg.opt.YencCpu)
-		}
-		if async_core_chan == nil || cap(async_core_chan) != cfg.opt.YencAsyncCpu {
-			async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
-			for i := 1; i <= cfg.opt.YencAsyncCpu; i++ {
-				async_core_chan <- struct{}{} // fill chan with empty structs to suck out and return
-			}
-			dlog(always, "LaunchSession: async_core_chan=%d", cfg.opt.YencAsyncCpu)
-		}
-	}
+	// core_chan / async_core_chan are set up once by ParseFlags (setupCoreLimiters):
+	// resizing them here while another session holds tokens lost or blocked tokens.
 	globalmux.Unlock()
 
 	if s.proxy {
@@ -466,8 +447,8 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 		nzbHashedname:        SHA256str(filepath.Base(nzbName)),
 		nzbPath:              filepath.Join(p.nzbDir, nzbName),
 		fileStat:             make(filesStatistic),
-		WorkDividerChan:      make(chan *WrappedItem, cfg.opt.ChanSize),
-		stopChan:             make(chan struct{}, 1), // stopChan is used to stop the session/routines
+		WorkDividerChan:      make(chan *WrappedItem, max(cfg.opt.ChanSize, 0)), // -chansize may be <= 0
+		stopChan:             make(chan struct{}, 1),                            // stopChan is used to stop the session/routines
 	}
 
 	// add session to processor map

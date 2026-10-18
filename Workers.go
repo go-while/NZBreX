@@ -39,11 +39,14 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 		dlog(always, "Cached: %d/%d", cached, len(s.segmentList))
 	}
 
-	if cfg.opt.ChanSize <= 0 {
-		cfg.opt.ChanSize = len(s.segmentList)
+	// -chansize <= 0 sizes the channels to this NZB. Kept local: writing it
+	// back to cfg.opt fixed the first job's size for every later job (plan 6.2).
+	chanSize := cfg.opt.ChanSize
+	if chanSize <= 0 {
+		chanSize = len(s.segmentList)
 	}
 
-	s.makeSegmentChans()
+	s.makeSegmentChans(chanSize)
 
 	// loop over the providerList and boot up anonymous workers for each provider
 	for _, provider := range s.providerList {
@@ -127,7 +130,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 // afterwards (they used to be written by each provider's boot goroutine while
 // other groups' workers already read them: fatal concurrent map read and write).
 // provider.Group is defaulted to provider.Name in loadProviderList.
-func (s *SESSION) makeSegmentChans() {
+func (s *SESSION) makeSegmentChans(chanSize int) {
 	check := make(map[string]chan *segmentChanItem)
 	downs := make(map[string]chan *segmentChanItem)
 	reups := make(map[string]chan *segmentChanItem)
@@ -143,10 +146,10 @@ func (s *SESSION) makeSegmentChans() {
 		if check[provider.Group] != nil {
 			continue
 		}
-		dlog(cfg.opt.Debug, "Creating chans for group '%s' cfg.opt.ChanSize=%d", provider.Group, cfg.opt.ChanSize)
-		check[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-		downs[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
-		reups[provider.Group] = make(chan *segmentChanItem, cfg.opt.ChanSize)
+		dlog(cfg.opt.Debug, "Creating chans for group '%s' chanSize=%d", provider.Group, chanSize)
+		check[provider.Group] = make(chan *segmentChanItem, chanSize)
+		downs[provider.Group] = make(chan *segmentChanItem, chanSize)
+		reups[provider.Group] = make(chan *segmentChanItem, chanSize)
 	}
 	s.mux.Lock()
 	s.segmentChansCheck = check

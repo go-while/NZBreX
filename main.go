@@ -126,6 +126,8 @@ func main() {
 			stopChan: make(chan struct{}), // closed only by s.stop()
 			proxy:    true,                // Set proxy flag to initialize providers without processing NZB
 		}
+		// /api/stats lists its providers while no job runs
+		webBaseSession.Store(s)
 		wg.Add(1) // waitSession
 		go func(wg *sync.WaitGroup) {
 			if err := thisProcessor.LaunchSession(s, "", wg); err != nil {

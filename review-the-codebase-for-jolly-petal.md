@@ -546,6 +546,13 @@ The jobs page has a per-job settings dialog and a "default settings" dialog, wit
 - `memlim` is created by the long-lived web session at startup (`Session.go:302-312`), not by the first job. `Session.go:313-322` sets `YencCpu`/`YencAsyncCpu` and resizes `core_chan` process-wide.
 - `Session.go:180-197` redirects the process-wide `log` output into the job's log file, but only with `-log`. (Dropped: "gin's access log included"; gin writes to stdout directly.) **(new)** With `-log`, the web session itself redirects to `logs/.log` (from `filepath.Base("")`) and never restores it.
 
+**Result (2026-10-18):**
+- `-chansize <= 0` is resolved per session (`GoBootWorkers` → `makeSegmentChans(chanSize)`); `cfg.opt.ChanSize` is no longer written. A negative `-chansize` no longer panics in `newSession`.
+- `core_chan`/`async_core_chan` and the `YencCpu`/`YencAsyncCpu` defaults are set once in `ParseFlags` (`setupCoreLimiters`). `LaunchSession` no longer writes `cfg.opt` or resizes the channels, which would have dropped the tokens a running session held. `-yencasync < 0` is rejected.
+- `memlim` stays global, sized by the first session's providers (with `-web` that is the startup session); documented. Per-session limiters belong to 6.1.
+- The log is redirected only for NZB sessions (not proxy/web, which have no NZB and never return). `LogToFile`/`SetLogToTerminal` close the previous file (each `-log` session leaked one descriptor). The log stays process-wide while a job runs; documented.
+- Checked under `-race` (`-web -log -chansize=0`, two jobs): no `logs/.log`, one log per job, open files 7 before and after, 0 races. The Phase 5 build wrote and held `logs/.log`.
+
 ### 6.3 `WEB_JOB_QUEUE.md` corrections
 
 - Stop/cancel doesn't exist (`:11`).
@@ -556,6 +563,8 @@ The jobs page has a per-job settings dialog and a "default settings" dialog, wit
 - `webserver.go` is new, not modified (`:193`); `base.html` and `style.css` are undocumented.
 - Uploads are never cleaned up; `SessionID` is never assigned.
 - `collectStats` filters on `session.active` (`webserver.go:854`), but the web session blocks at `Session.go:341` before `GoBootWorkers` sets `active = true`, so `/api/stats` shows no providers when no job is running.
+
+**Result (2026-10-18):** `WEB_JOB_QUEUE.md` rewritten from the code: states (incl. `waiting`) and transitions, every route with its status codes, the full job JSON, `Progress` as 0..1, per-job settings marked not supported (D2), stop/cancel, upload cleanup, login/Host/CSRF, D3, `-log` behaviour, shutdown, files. Earlier phases had already fixed the stop route, `SessionID`, upload cleanup and the `YencTest` clamp (config is no longer accepted at all). `/api/stats` now falls back to the startup web session's providers when no job runs (`webBaseSession`); checked: `['local-a', 'local-b']` while idle, `[]` on the Phase 5 build.
 
 ---
 
@@ -600,7 +609,7 @@ All three answered by the user on 2026-10-17.
 - Fix `WEB_JOB_QUEUE.md:105`/`:179` to say per-job settings are planned, not active.
 - Fix `jobs.html:231-235` so the button state is deliberate (disabled), not an accident of the `<!-- -->` comment (4.6).
 
-**Partial result (2026-10-18), with 4.2:** the three endpoints return 501 with the startup settings in the body; `/upload` ignores the config fields and says so (`note`); the default-config dialog shows the startup settings read-only with a note; both dialogs have disabled fields and Save buttons; the ⚙ button is rendered disabled on purpose; the dead `processJob` block and the queue's `defaultConfig` are gone. Each job's `Config` shows the startup settings it runs with. **Still open:** `WEB_JOB_QUEUE.md` (with 6.3).
+**Partial result (2026-10-18), with 4.2:** the three endpoints return 501 with the startup settings in the body; `/upload` ignores the config fields and says so (`note`); the default-config dialog shows the startup settings read-only with a note; both dialogs have disabled fields and Save buttons; the ⚙ button is rendered disabled on purpose; the dead `processJob` block and the queue's `defaultConfig` are gone. Each job's `Config` shows the startup settings it runs with. `WEB_JOB_QUEUE.md` done with 6.3.
 - The real implementation (6.1 refactor) stays a separate later change, after Phases 2–3.
 
 **D3: Startup mode combinations. DECIDED: reject with a clear error.**

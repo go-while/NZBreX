@@ -262,10 +262,11 @@ func ParseFlags() {
 			dlog(always, "Using rapidyenc for yenc decoding!")
 		}
 
-		if cfg.opt.YencCpu < 0 {
-			dlog(always, "ERROR: you can not use -yenccpu=%d because it must be >= 0 (default: 0)", cfg.opt.YencCpu)
+		if cfg.opt.YencCpu < 0 || cfg.opt.YencAsyncCpu < 0 {
+			dlog(always, "ERROR: -yenccpu=%d and -yencasync=%d must be >= 0", cfg.opt.YencCpu, cfg.opt.YencAsyncCpu)
 			os.Exit(1)
 		}
+		setupCoreLimiters()
 
 		if (cfg.opt.YencWrite || cfg.opt.YencMerge) && !cacheON {
 			dlog(always, "ERROR: you can not use -yencout=true or -yencmerge=true without -cd=/path/to/cache/dir because it needs a cache dir!")
@@ -475,6 +476,27 @@ func addWebUser(spec string) {
 // startupModeError rejects mode combinations that don't work (D3). Exactly one
 // of -nzb, -web or -proxytcp/-proxytls runs; with none, the default -nzb runs.
 // -nzbdir is unfinished (processorThread is a stub) and is refused for now.
+// setupCoreLimiters fills core_chan and async_core_chan once at startup.
+// LaunchSession used to do this and resize them when the size differed,
+// dropping the tokens other sessions still held (plan 6.2).
+func setupCoreLimiters() {
+	if cfg.opt.YencCpu <= 0 {
+		cfg.opt.YencCpu = runtime.NumCPU()
+	}
+	if cfg.opt.YencAsyncCpu <= 0 {
+		cfg.opt.YencAsyncCpu = runtime.NumCPU()
+	}
+	core_chan = make(chan struct{}, cfg.opt.YencCpu)
+	for range cfg.opt.YencCpu {
+		core_chan <- struct{}{}
+	}
+	async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
+	for range cfg.opt.YencAsyncCpu {
+		async_core_chan <- struct{}{}
+	}
+	dlog(cfg.opt.Verbose, "core_chan=%d async_core_chan=%d", cfg.opt.YencCpu, cfg.opt.YencAsyncCpu)
+}
+
 func startupModeError(nzbSet bool, nzbDir string, web, proxy bool) error {
 	if nzbDir != "" {
 		switch {
