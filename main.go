@@ -82,29 +82,34 @@ func main() {
 	}
 	// -nzbdir is refused in ParseFlags until directory processing works (D3)
 	if proxy {
-		// boot proxy server
+		// boot proxy server: a session that only loads the providers and runs their pools
+		s := &SESSION{
+			proc:     thisProcessor,
+			mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYSESSION"},
+			stopChan: make(chan struct{}), // closed only by s.stop()
+			proxy:    true,
+			ready:    make(chan struct{}),
+		}
+		ProxyParent = s // written before any listener goroutine starts
+		go GoCliRxTxCounter()
+		launchErr := make(chan error, 1)
 		wg.Add(1) // waitSession
 		go func(wg *sync.WaitGroup) {
-			globalmux.Lock()
-			// set up a session as like for nzb files
-			// but only join launch the session to load the providerlist
-			// to establish connections to the providers and have pools running
-			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: proxy server")
-			s := &SESSION{
-				proc:     thisProcessor,
-				mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYSESSION"},
-				stopChan: make(chan struct{}), // closed only by s.stop()
-				proxy:    true,
-			}
-			ProxyParent = s // set global proxy session so proxy has access to provider list and pools
-			go GoCliRxTxCounter()
-			globalmux.Unlock()
-			go StartProxyServers(cfg.opt)
-			if err := thisProcessor.LaunchSession(s, "", wg); err != nil {
-				dlog(always, "ERROR NewProcessor Boot Proxy Server: err='%v'", err)
-				os.Exit(1)
-			}
+			launchErr <- thisProcessor.LaunchSession(s, "", wg)
 		}(wg)
+		// start listening only once providerList is loaded: handlers read it without a
+		// lock, and an early client saw no providers (plan 5.2)
+		select {
+		case <-s.ready:
+		case err := <-launchErr:
+			dlog(always, "ERROR NewProcessor Boot Proxy Server: err='%v'", err)
+			os.Exit(1)
+		}
+		if err := StartProxyServers(cfg.opt); err != nil {
+			dlog(always, "ERROR StartProxyServers: %v", err)
+			os.Exit(1)
+		}
+		proxyShutdownOnSignal()
 		dlog(cfg.opt.Debug, "main: wg.Wait()")
 		wg.Wait()
 	} else if webServerEnabled {

@@ -475,6 +475,16 @@ The proxy runs alone in its own mode (see Context), so its bugs affect only prox
 - **Unbounded negative cache** (`ProxyHelper.go:428-439`; entries only cleared on lookup at `:406`). Numeric requests are keyed by bare article number (`Server.go:359-363`), so a miss in one group poisons the same number in every group for 60 s. Every `Set` also logs a line. **Fix:** size cap and janitor; key numeric entries by group + number.
 - **Accept loop** (`Proxy.go:140-150`) compares an error string and spins at 100% CPU on `EMFILE`. Use `errors.Is(err, net.ErrClosed)` plus exponential backoff. Nothing ever closes the listener today, so the shutdown branch is unreachable; wire it to shutdown.
 
+**Result (2026-10-18):** all fixed.
+- **Client deadlines:** read deadline per command: 60 s from connecting to log in, then 5 min idle (capped at account expiry); write deadline 5 min per response. A timed-out client gets `400` before the close. More than 64 connections not logged in yet get `400` at accept. `IsExpired`/`Close` (dead code) removed.
+- **Command lines:** read with `readCommandLine` (bounded `ReadSlice`, 512 bytes incl. CRLF); a longer line is dropped to its end and answered `501`, the connection stays. `cliTp` is used only for writing.
+- **Slow clients:** every multi-line upstream reply goes through `upstreamBlock`, which parks (or closes) the upstream conn before anything is written to the client; replies are capped at 64 MiB (`readDotLinesLimited`, 503 and conn closed above it).
+- **NEXT/LAST:** any upstream code is forwarded (421/422/423...), code 0 tries the next provider.
+- **XOVER** ranges other than `n`, `n-`, `n-m` get 501; **LIST** keeps its arguments and forwards the upstream status line; **XHDR**/**HDR** expect 221/225 respectively.
+- **Negative cache:** `group:number` keys for requests by number, a 100 000-entry cap, a janitor every 30 s, no log line per entry.
+- **Accept loop:** `errors.Is(err, net.ErrClosed)` ends it; other errors back off 5 ms → 1 s. SIGINT/SIGTERM closes the listeners and exits.
+- Verified with `-race` against the local servers: 70 idle connections → 64 greeted, 6 got `400`. With `ulimit -n 48` and 60 clients the old build used 3 cores and wrote 1.9 M log lines (190 MB) in 8 s; the new one used no measurable CPU and logged 67 lines. Tests: `TestReadCommandLineLimit`, `TestReadDotLinesLimited`, `TestNegCacheCapPurgeAndGroupKeys`, `TestProxyLoginTimeout`.
+
 ### 5.2 Correctness
 
 - **Errors disconnect the client** (`Server.go:397-399` returns `502` plus an error; `:115-122` breaks the loop; same for syntax errors at `:332/:338/:403` and the pre-login `501` paths). RFC 3977 §3.2.1: unknown command → `500`, syntax error → `501`, and if the server does close, it must send `400` first.
@@ -501,6 +511,19 @@ The proxy runs alone in its own mode (see Context), so its bugs affect only prox
 - `log.Fatalf` in the listener (`Proxy.go:117/126/133`) at startup only. It doesn't take an NZB session with it (the modes are separate), but a TLS failure kills the TCP listener too. Return an error instead.
 - Two `bufio.Writer`s on one connection (`Server.go:235-236`). Use `ps.CliTp.W` for article data.
 - **(new)** `ProxyParent` is published (`main.go:103`) and the proxy listener started (`:106`) before `LaunchSession` fills `providerList` (`Session.go:289`, `Utils.go:203`). Handlers read `providerList` without a lock: a data race, and an early client sees no providers. Start the listener after providers are loaded.
+
+**Result (2026-10-18):** all fixed (`Server.go` and `Proxy.go` largely rewritten).
+- **Fatal vs non-fatal:** `handleRequest` returns an error only to close the connection: QUIT, an expired login, a failed client write. Syntax errors get 501, unknown commands 500, and the connection stays; before login too (`MODE FOO`, `AUTHINFO USER` without a name, ...). A failed login still disconnects.
+- **Client writes:** all go through `ps.reply`/`ps.writeDotBlock`/`LinesWriter`; the first failed write closes the connection (`LinesWriter` returns its flush error, which used to be only logged). Article data goes through `ps.CliTp.W` (one writer per connection).
+- **ARTICLE/HEAD/BODY/STAT without argument** act on the current article (412/420 when there is none).
+- **Dead conns** are never parked (GROUP included).
+- **Truncation (shared `NetConn.go`):** a broken yEnc article now returns `99932` (the check moved out of the `!brokenYenc` block). Download workers then mark it bad CRC on that group, as for a CRC mismatch: wanted, they used to keep an empty article. In mode 4 a plain-text article (no `=ybegin`) used to fail rapidyenc and come back empty; it is now delivered as it is. The proxy answers `99932` by trying the next provider (`430` if none has it intact). Verified: a truncated and a bad-CRC article via the proxy with `-crc32`: old build `220` with 0 lines for both, new build `430` (from B, which doesn't have them). `TestReadDotLinesBrokenYencIsBadCrc`.
+- **Relayed articles unchanged:** `Path: not-for-mail` and the `-cleanhdr` stripping only apply to re-uploads (`!proxy`). Verified: HEAD through the proxy is identical to HEAD from the server; re-uploads still get their new `Date:`/`Path:`.
+- **RFC:** GROUP sets the current article to the first one (0 for an empty group); message-ID requests no longer reset the group (a local `byNumber` replaces the `Group != "" && MsgNum > 0` test); `MsgNum` moves only on success; numeric replies use the upstream's number and message-ID (from the `Message-ID:` header if the upstream leaves it out, as the local nntp-server does); cached numeric misses answer 423. `DATE` answers `yyyymmddhhmmss` (RFC 3977 §7.1; it sent RFC 1123). `CAPABILITIES` lists `AUTHINFO USER`.
+- `ProxySessions`, `ps.Password`, `ps.Writer`, `cmdmux` removed. `AUTHINFO PASS` with extra arguments gets 501 (`pw junk` used to log in as `pw`).
+- **Listeners:** `listenNNTP` returns errors (no `log.Fatalf`): a TLS failure is logged and the TCP listener still runs; startup fails only if none starts. TLS `MinVersion` 1.2.
+- **Startup order:** the proxy session closes `s.ready` once its providers are loaded; `main` starts the listeners only then.
+- Verified against the local servers and a small fake server (`fakenntp.py`, scratchpad) for NEXT/LAST, which the local nntp-server can't do (it doesn't support `STAT <number>`): GROUP → `STAT` 223 1; LAST 422; NEXT 223 2, 223 3, 421; ARTICLE by message-ID keeps the pointer at 3; HEAD 2 moves it to 2; BODY 9 forwards 423; GROUP of an unknown group keeps the old one. `TestProxyErrorsKeepTheConnection`.
 
 ---
 

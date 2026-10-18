@@ -360,6 +360,8 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 	}
 	var decoder *yenc.Decoder
 	var parseHeader, ignoreNextContinuedLine, gotYencHeader, gotMultipart, brokenYenc bool // = false, false, false, false
+	var sawYbegin bool                                                                     // mode 4: a "=ybegin " body line was seen, so the article is yEnc
+	var notYenc bool                                                                       // mode 4: rapidyenc failed on an article without =ybegin
 	if command == cmdARTICLE || command == cmdHEAD {
 		parseHeader = true
 	}
@@ -522,14 +524,13 @@ readlines:
 			// reading header ends here
 			parseHeader = false
 			if !proxy {
-				// add new headers for ignored ones
+				// add new headers for ignored ones (re-uploads only: the proxy relays
+				// articles unchanged, plan 5.2)
 				now := time.Now().Format(time.RFC1123Z)
 				datestr := fmt.Sprintf("Date: %s", now)
 				content = append(content, datestr)
-			} else {
-				//content = append(content, "X-NZBreX: "+appVersion)
+				content = append(content, "Path: not-for-mail")
 			}
-			content = append(content, "Path: not-for-mail")
 		}
 
 		// found final dot in line, break here
@@ -548,14 +549,10 @@ readlines:
 				continue readlines
 			}
 
-			if cfg.opt.CleanHeaders {
-				// ignore headers from cleanHeader slice
+			if cfg.opt.CleanHeaders && !proxy {
+				// ignore headers from cleanHeader slice. Only for re-uploads: the proxy
+				// relays articles unchanged (stripping broke signatures over those headers).
 				for _, key := range cleanHeader {
-					if proxy && key == "Date:" {
-						// if we are a proxy, we do not want to clean the Date header
-						// because we want to keep the original Date header from the article
-						continue
-					}
 					if strings.HasPrefix(line, key) {
 						ignoreNextContinuedLine = true
 						dlog(cfg.opt.DebugARTICLE, "cleanHeader: seg.ID='%s' ignore key='%s'", item.segment.Id, key)
@@ -600,6 +597,9 @@ readlines:
 					ydat = append(ydat, &line) // as []*string line per line needs less mem allocs
 				case 4:
 					// rapidyenc test 4
+					if !sawYbegin && strings.HasPrefix(line, "=ybegin ") {
+						sawYbegin = true
+					}
 					//ydec = append(ydec, line+CRLF...) // append the line to the byte buffer
 					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
 					if _, err := pipeWriter.Write([]byte(line + CRLF)); err != nil {
@@ -706,7 +706,12 @@ readlines:
 		pipeWriter.Close() // <-- THIS IS CRUCIAL!
 		err = <-ryDoneChan // wait for decoder to finish
 
-		if err != nil {
+		if err != nil && !sawYbegin {
+			// not a yEnc article (plain text): nothing to check, deliver it as it is
+			dlog(cfg.opt.DebugRapidYenc, "readDotLines: seg.Id='%s' has no =ybegin line, skipping the yEnc check", item.segment.Id)
+			notYenc = true
+			err = nil
+		} else if err != nil {
 			dlog(always, "ERROR readDotLines: rapidyenc.Read: err='%v'", err)
 			brokenYenc = true
 			content = nil // reset content to nil if we got an error
@@ -716,7 +721,20 @@ readlines:
 	}
 	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), command)
 
-	if cfg.opt.YencCRC && !brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
+	if cfg.opt.YencCRC && brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
+		// A broken yEnc article counts as bad crc. This check used to sit inside the
+		// "!brokenYenc" block below, so it never fired: readDotLines returned success
+		// with content == nil (an empty 220 to proxy clients, an empty article to workers).
+		if item.mux != nil {
+			item.mux.Lock()
+			item.badcrc++
+			item.mux.Unlock()
+		}
+		dlog(always, "ERROR readDotLines broken yEnc seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+		return 99932, rxb, nil, nil // 99932 is a custom code for bad crc32
+	}
+
+	if cfg.opt.YencCRC && !brokenYenc && !notYenc && (command == cmdARTICLE || command == cmdBODY) {
 		yencstart := time.Now()
 		var startReadSignals time.Time
 		var isBadCrc bool

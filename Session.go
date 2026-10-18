@@ -74,6 +74,7 @@ type SESSION struct {
 	checkers          map[string]*checkerGroup         // live check routines per provider.Group, built with the channels
 	workDone          atomic.Uint64                    // items finished by any check/downs/reups routine, ok or not (divider watchdog)
 	progress          sessionProgress                  // counts published by GoWorkDivider for the web UI
+	ready             chan struct{}                    // proxy/web base sessions: closed once the providers are loaded (nil: not used)
 	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
 	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
 	preBoot               bool              // true from LaunchSession until GoBootWorkers starts the workers; guarded by mux
@@ -360,6 +361,9 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		// waiting on workerWGconnReady (one Add per provider in loadProviderList)
 		for range s.providerList {
 			workerWGconnReady.Done()
+		}
+		if s.ready != nil {
+			close(s.ready) // providers and pools are up: the proxy may start its listeners
 		}
 		// infinite block here for proxy server. if a wg is supplied it will never be released
 		_, ok := <-s.stopChan

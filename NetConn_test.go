@@ -115,3 +115,62 @@ func TestReadDotLinesEarlyReturnStopsDecoder(t *gotesting.T) {
 		}
 	}
 }
+
+func readArticle(t *gotesting.T, mode int, body string) (int, *segmentChanItem) {
+	t.Helper()
+	cli, srv := net.Pipe()
+	defer cli.Close()
+	go func() {
+		srv.Write([]byte(body))
+		srv.Write([]byte(".\r\n"))
+	}()
+	defer srv.Close()
+	prov := &Provider{Name: "fake", mux: &loggedrwmutex.LoggedSyncRWMutex{Name: "fake"}}
+	connitem := &ConnItem{c: &ConnPool{provider: prov}, conn: cli, srvtp: textproto.NewConn(cli), writer: bufio.NewWriter(cli)}
+	item := testItem("<a@b>")
+	type res struct {
+		code int
+		err  error
+	}
+	done := make(chan res, 1)
+	go func() {
+		code, _, _, err := readDotLines(connitem, item, cmdARTICLE)
+		done <- res{code, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("yenctest=%d: readDotLines err=%v", mode, r.err)
+		}
+		return r.code, item
+	case <-time.After(3 * time.Second):
+		t.Fatalf("yenctest=%d: readDotLines blocked", mode)
+	}
+	return 0, nil
+}
+
+// Plan 5.2: a broken yEnc article set content = nil, but the 99932 (bad crc)
+// return sat inside "if !brokenYenc", so readDotLines returned success with
+// no content: the proxy sent an empty 220, a download worker an empty article.
+// A plain-text article (no =ybegin) in mode 4 was "broken" too and came back empty.
+func TestReadDotLinesBrokenYencIsBadCrc(t *gotesting.T) {
+	testCfg()
+	old := *cfg.opt
+	defer func() { *cfg.opt = old }()
+	cfg.opt.YencCRC, cfg.opt.MaxArtSize, cfg.opt.RapidYencBufSize, cfg.opt.YencTest = true, 1<<20, 4096, 4
+	if async_core_chan == nil { // LaunchSession sets it up
+		async_core_chan = make(chan struct{}, 1)
+		async_core_chan <- struct{}{}
+	}
+
+	// =ybegin and =ypart, but no =yend: rapidyenc fails
+	code, item := readArticle(t, 4, "Subject: x\r\n\r\n=ybegin part=1 total=1 line=128 size=3 name=x\r\n=ypart begin=1 end=3\r\nabc\r\n")
+	if code != 99932 {
+		t.Fatalf("broken yEnc article: code=%d len(article)=%d, want 99932 (bad crc)", code, len(item.article))
+	}
+
+	code, item = readArticle(t, 4, "Subject: plain\r\n\r\nhello world\r\nsecond line\r\n")
+	if code == 99932 || len(item.article) == 0 {
+		t.Fatalf("plain text article: code=%d len(article)=%d, want its content", code, len(item.article))
+	}
+}

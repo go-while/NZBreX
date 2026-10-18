@@ -6,68 +6,44 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func LinesWriter(cliwriter *bufio.Writer, conn net.Conn, code int, item *segmentChanItem) (txb uint64, err error) {
-	defer func() {
-		if cliwriter != nil {
-			err := cliwriter.Flush() // Ensure all buffered data is written to the client
-			if err != nil {
-				log.Printf("Error in DotWriter: %v", err)
-			}
-		}
-	}()
-	var lines *[]string // lines to be sent to the client
-	switch code {
-	case 220:
-		lines = &item.article
-	case 221:
-		lines = &item.head
-	case 222: // Valid response codes for ARTICLE, HEAD, BODY
-		lines = &item.body
-		// These codes indicate successful retrieval of article, header, or body
-	}
-	// code Num <messageID>
-	n, err := io.WriteString(cliwriter, fmt.Sprintf("%d 0 %s", code, item.segment.Id)+CRLF)
-	txb += uint64(n)
-	if err != nil {
-		return txb, fmt.Errorf("error DotWriter WriteString writer @ '%s' err='%v'", conn.RemoteAddr(), err)
-	}
-	// Write lines to the client connection using our own buffered dot writer
-	for _, line := range *lines {
-		// dot-stuffing when sending to client
-		if strings.HasPrefix(line, ".") {
-			line = "." + line // prepend a dot to the line
-		}
-		n, err := io.WriteString(cliwriter, line+CRLF)
+// LinesWriter sends status and the article lines (dot-stuffed, dot-terminated)
+// and flushes. The flush error is returned: it used to be only logged.
+func LinesWriter(w *bufio.Writer, status string, lines []string) (txb uint64, err error) {
+	write := func(s string) bool {
+		n, werr := io.WriteString(w, s)
 		txb += uint64(n)
-		if err != nil {
-			return txb, fmt.Errorf("error DotWriter WriteString writer err='%v'", err)
+		err = werr
+		return werr == nil
+	}
+	if !write(status + CRLF) {
+		return txb, err
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, ".") {
+			line = "." + line // dot-stuffing
 		}
-
+		if !write(line + CRLF) {
+			return txb, err
+		}
 	}
-	// final sequence
-	n, err = io.WriteString(cliwriter, DOT+CRLF)
-	txb += uint64(n)
-	if err != nil {
-		return txb, fmt.Errorf("error DotWriter WriteString writer err='%v'", err)
+	if !write(DOT + CRLF) {
+		return txb, err
 	}
-	return txb, nil
+	return txb, w.Flush()
 } // end func LinesWriter
 
 func (ps *ProxySession) printCapabilities() {
-	// Respond with server capabilities (RFC 3977 Section 5.3)
-	ps.CliTp.PrintfLine("101 Capability list:")
-	dw := ps.CliTp.DotWriter()
-	fmt.Fprintln(dw, "VERSION 2")          // Indicates RFC 3977 support
-	fmt.Fprintln(dw, "READER")             // Indicates MODE READER support
-	fmt.Fprintln(dw, "AUTHINFO USER PASS") // Supports AUTHINFO USER and AUTHINFO PASS
-	// Add other capabilities like LIST, IHAVE, POST, etc., as implemented
-	dw.Close()
+	// RFC 3977 §5.2
+	ps.writeDotBlock("101 Capability list:", []string{
+		"VERSION 2",
+		"READER",
+		"AUTHINFO USER", // RFC 4643 §2.1: the argument is the list of mechanisms ("USER" for USER/PASS)
+	})
 }
 
 // loadPasswdFile merges filename.new.* into filename and loads the proxy users.
@@ -133,38 +109,6 @@ func generateRandomHexCredentials() (username string, password string, err error
 	return username, password, nil
 }
 
-func (ps *ProxySession) Close() {
-	ps.mux.Lock()
-	defer ps.mux.Unlock()
-	if ps.CliTp != nil {
-		ps.CliTp.Close() // Close the textproto connection
-		ps.CliTp = nil   // Clear textproto connection to avoid dangling pointer
-	}
-	if ps.Conn != nil {
-		ps.Conn.Close() // Close the network connection
-		ps.Conn = nil   // Clear the connection to avoid dangling pointer
-	}
-	ps.Authed = false       // Mark session as unauthenticated
-	ps.Username = ""        // Clear username to avoid dangling pointer
-	ps.Password = ""        // Clear username to avoid dangling pointer
-	ps.ExpireAt = 0         // Clear expiration time
-	username := ps.Username // Store username for logging
-	ps.Username = ""        // Clear username to avoid dangling pointer
-	ps.Password = ""        // Clear username to avoid dangling pointer
-	ps.ExpireAt = 0         // Clear expiration time
-	log.Printf("Closed session for user '%s'", username)
-}
-
-func (ps *ProxySession) IsExpired() (isExpired bool) {
-	ps.mux.RLock()
-	isExpired = ps.ExpireAt > 0 && time.Now().Unix() > ps.ExpireAt
-	ps.mux.RUnlock()
-	if isExpired {
-		ps.Close() // Close the session if it has expired
-	}
-	return
-} // end func IsExpired
-
 func GoCliRxTxCounter() {
 	// GoCliRxTxCounter starts a goroutine to periodically log received and sent bytes per user
 	go func() {
@@ -228,50 +172,56 @@ func GoCliRxTxCounter() {
 	}()
 }
 
-func IsArticleNotFoundAtProviderGroup(messageId string, providerGroup string) bool {
-	// Check if the article is not found at the provider group
+// IsArticleNotFoundAtProviderGroup reports a fresh negative-cache entry.
+func IsArticleNotFoundAtProviderGroup(key string, providerGroup string) bool {
 	articleNotFound.mux.RLock()
 	defer articleNotFound.mux.RUnlock()
-	if providerGroupMap, exists := articleNotFound.Map[providerGroup]; exists {
-		if a430, found := providerGroupMap[messageId]; found {
-			if time.Now().Before(a430.expires) {
-				log.Printf("cache: a430 isflag messageId '%s' not found at provider group '%s'", messageId, providerGroup)
-				return true // messageId flaged as not found and entry not expired
+	exp, ok := articleNotFound.Map[providerGroup][key]
+	return ok && time.Now().Before(exp) // expired entries go in the janitor's next run
+}
+
+// SetArticleNotFoundAtProviderGroup caches a miss for negCacheTTL. A full cache
+// (negCacheMax entries) caches nothing more until the janitor frees room.
+func SetArticleNotFoundAtProviderGroup(key string, providerGroup string) {
+	articleNotFound.mux.Lock()
+	defer articleNotFound.mux.Unlock()
+	m := articleNotFound.Map[providerGroup]
+	if m == nil {
+		m = make(map[string]time.Time)
+		articleNotFound.Map[providerGroup] = m
+	}
+	if _, exists := m[key]; !exists {
+		if articleNotFound.n >= negCacheMax {
+			return
+		}
+		articleNotFound.n++
+	}
+	m[key] = time.Now().Add(negCacheTTL)
+}
+
+// purgeNegCache drops expired entries.
+func purgeNegCache(now time.Time) {
+	articleNotFound.mux.Lock()
+	defer articleNotFound.mux.Unlock()
+	for group, m := range articleNotFound.Map {
+		for key, exp := range m {
+			if !now.Before(exp) {
+				delete(m, key)
+				articleNotFound.n--
 			}
-			log.Printf("cache: a430 expired messageId '%s' at provider group '%s'", messageId, providerGroup)
-			go ClearArticleNotFoundAtProviderGroup(messageId, providerGroup) // Clear expired article not found entry
 		}
-	}
-	return false // not cached
-}
-
-func ClearArticleNotFoundAtProviderGroup(messageId string, providerGroup string) {
-	// Clear the article not found at the provider group
-	articleNotFound.mux.Lock()
-	defer articleNotFound.mux.Unlock()
-	if providerGroupMap, exists := articleNotFound.Map[providerGroup]; exists {
-		if _, found := providerGroupMap[messageId]; found {
-			delete(providerGroupMap, messageId) // Remove the article not found entry
-			log.Printf("Cleared article not found for message ID '%s' at provider group '%s'", messageId, providerGroup)
-		} else {
-			log.Printf("Article '%s' not found at provider group '%s' (nothing to clear)", messageId, providerGroup)
+		if len(m) == 0 {
+			delete(articleNotFound.Map, group)
 		}
-	} else {
-		log.Printf("Provider group '%s' does not exist in article not found map", providerGroup)
 	}
 }
 
-func SetArticleNotFoundAtProviderGroup(messageId string, providerGroup string) {
-	// Set the article not found at the provider group
-	articleNotFound.mux.Lock()
-	defer articleNotFound.mux.Unlock()
-	if _, exists := articleNotFound.Map[providerGroup]; !exists {
-		articleNotFound.Map[providerGroup] = make(map[string]*A430)
+// negCacheJanitor purges the negative cache every 30 s. Entries used to be
+// removed only when looked up again, so the map only grew.
+func negCacheJanitor() {
+	for range time.Tick(negCacheTTL / 2) {
+		purgeNegCache(time.Now())
 	}
-	articleNotFound.Map[providerGroup][messageId] = &A430{
-		expires: time.Now().Add(1 * time.Minute), // Set expiration to 1 minute from now
-	}
-	log.Printf("Set article not found for message ID '%s' at provider group '%s'", messageId, providerGroup)
 }
 
 // isValidMessageID checks if the provided message ID is valid according to NNTP standards.

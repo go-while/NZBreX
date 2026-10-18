@@ -3,14 +3,17 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"log"
-	mrand "math/rand"
+	"io"
 	"net"
 	"net/textproto"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -21,29 +24,37 @@ var (
 	// this is a global flag. if user/passwd config does not allow posting. user will not be able to post, even if this is true.
 	globalAllowPosting = true
 
-	CID = uint64(0) // Global connection ID counter, can be used for session tracking - currently unused
+	CID = uint64(0) // Global connection ID counter, guarded by proxyMutex
 
-	proxyMutex      = &sync.RWMutex{}                                          // proxyMutex is used to synchronize access to passwdMap, ProxySessions and CountConns
-	proxyCron       = time.Now()                                               // reload passwdMap every minute
-	passwdMap       = make(map[string]*UserData)                               // passwdMap holds user credentials (k is username, v is UserData)
-	ProxySessions   = make(map[string]*ProxySession)                           // ProxySessions map to hold active user sessions (k is username, v is ProxySession)
-	CountConns      = make(map[string]int)                                     // CountConns keeps track of active connections per user (k is username, v is count)
-	ProxyParent     *SESSION                                                   // ProxyParent is the parent session for the proxy, used to link sessions to the main loop
-	CliRxTxCounter  = make(map[string]*Counter_uint64)                         // RxTxCounter is a global counter for received and sent bytes (used for statistics)
-	CliRxTxMux      = &sync.RWMutex{}                                          // CliRxTxMux is used to synchronize access to CliRxTxCounter
-	statsChan       = make(chan *statsItem, 1000)                              // statsChan is used to send segment items for statistics processing
-	articleNotFound = &ArticleNotFound{Map: make(map[string]map[string]*A430)} // Global variable to track articles not found by provider
+	proxyMutex      = &sync.RWMutex{}                                              // proxyMutex is used to synchronize access to passwdMap, CountConns and CID
+	proxyCron       = time.Now()                                                   // reload passwdMap every minute
+	passwdMap       = make(map[string]*UserData)                                   // passwdMap holds user credentials (k is username, v is UserData)
+	CountConns      = make(map[string]int)                                         // CountConns keeps track of active connections per user (k is username, v is count)
+	ProxyParent     *SESSION                                                       // the proxy's session: its providers and pools. Set, and its providers loaded, before any listener starts
+	CliRxTxCounter  = make(map[string]*Counter_uint64)                             // RxTxCounter is a global counter for received and sent bytes (used for statistics)
+	CliRxTxMux      = &sync.RWMutex{}                                              // CliRxTxMux is used to synchronize access to CliRxTxCounter
+	statsChan       = make(chan *statsItem, 1000)                                  // statsChan is used to send segment items for statistics processing
+	articleNotFound = &ArticleNotFound{Map: make(map[string]map[string]time.Time)} // negative cache: not found at a provider group
+
+	proxyListeners   []net.Listener // closed on shutdown
+	proxyListenersMu sync.Mutex
 )
 
-// ArticleNotFound is a map to track articles not found by provider (k is provider group, v is map of message IDs)
+const (
+	proxyMaxReplyBytes = 64 << 20 // LIST/XOVER/XHDR replies are buffered: cap them
+	negCacheTTL        = time.Minute
+	negCacheMax        = 100000 // entries over all provider groups
+)
+
+// ArticleNotFound is the negative cache: provider group → key → expiry. Keys
+// are message-IDs, or "group:number" for requests by number (a bare number
+// used to poison that number in every group).
 type ArticleNotFound struct {
-	mux sync.RWMutex                // Mutex to protect access to the map
-	Map map[string]map[string]*A430 // Map of provider groups to message IDs not found
+	mux sync.RWMutex
+	Map map[string]map[string]time.Time
+	n   int // entries in Map
 }
 
-type A430 struct {
-	expires time.Time // Expiration time for the A430 article not found
-}
 type statsItem struct {
 	username string // Username of the client
 	rxbytes  uint64 // Received bytes
@@ -62,20 +73,15 @@ type UserData struct {
 	Posting  bool   // Optional: indicates if the user is allowed to post articles
 }
 
-// ProxySession represents an active user session (currently a placeholder, expand as needed)
+// ProxySession is one client connection. Only its own goroutine uses it.
 type ProxySession struct {
-	id       uint64        // Unique session ID, can be used for tracking
-	mux      sync.RWMutex  // Mutex for session data access
-	cmdmux   sync.RWMutex  // Mutex for command handling
-	Authed   bool          // Indicates if the user is authenticated
-	Username string        // Username of the authenticated user
-	Password string        // password for the session, can be used for re-authentication
-	ExpireAt int64         // session expiration time (Unix timestamp)
-	Conn     net.Conn      // The user's network connection
-	Writer   *bufio.Writer // bufio writer for the client connection to send articles, headers, bodies, list, xover, xhdr, ... (big data)
-	//tpReader         *textproto.Reader // textproto reader for easier command handling
-	//tpWriter         *textproto.Writer // textproto writer for easier command handling
-	CliTp            *textproto.Conn // textproto connection for easier command handling
+	id               uint64          // Unique session ID
+	Authed           bool            // Indicates if the user is authenticated
+	Username         string          // Username of the authenticated user
+	ExpireAt         int64           // session expiration time (Unix timestamp)
+	Conn             net.Conn        // The user's network connection
+	CliTp            *textproto.Conn // writes to the client (commands are read with readCommandLine)
+	writeErr         error           // first failed write to the client: the connection is closed
 	tmpRXBytes       uint64          // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in last 60 seconds
 	RXBytes          uint64          // proxy has RECEIVED this amount of bytes FROM CLIENT via POST/IHAVE/TAKETHIS in total this session
 	tmpTXBytes       uint64          // proxy has SENT this amount of bytes TO CLIENT via ARTICLE/HEAD/BODY in last 60 seconds
@@ -83,710 +89,529 @@ type ProxySession struct {
 	ConnectedAt      time.Time       // Timestamp when the session was created
 	LastCmd          time.Time       // Timestamp of the last command received
 	Group            string          // current group the user is in (used by GROUP command)
-	MsgNum           int64           // current message number in the group (used by STAT, ARTICLE, etc. commands)
-	Cron             time.Time       // last run of periodic tasks, e.g., checking session expiration
+	MsgNum           int64           // current article number in the group (0 = invalid)
+	Cron             time.Time       // last run of periodic tasks
 	selectedProvider *Provider       // The provider selected for this session, used for routing commands
-	// Add other session-specific data here, e.g., current group, article pointer, etc.
 }
 
-// StartNNTPServer initializes and starts the NNTP server.
-// addr is the listen address (e.g., ":1119").
-// passwdFilePath is the path to the .passwd file.
-// certFile is the path to the TLS certificate file (optional).
-// keyFile is the path to the TLS private key file (optional).
-func StartNNTPServer(addr string, passwdFilePath string, certFile string, keyFile string) {
-	time.Sleep(time.Duration(mrand.Intn(128)) * time.Millisecond) // Random delay to simulate server startup
-	err := loadPasswdFile(passwdFilePath)
-	if err != nil {
-		// Decide if server should start if passwd file is missing/corrupt.
-		// For this example, it logs a warning and continues (no users will be able to auth).
-		dlog(always, "WARNING: Could not find passwd file '%s': %v. Server starting without users.", passwdFilePath, err)
-		dlog(always, "To manually add users, use the '-proxyadduser' command or craft a new .passwd file manually")
-		dlog(always, "Example -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d\" creates a user with 5 conns and 42 days to expiration")
-
-	} else if proxyUserCount() == 0 {
-		dlog(always, "Warning: Passwd file '%s' loaded, but no users found or all entries were invalid.", passwdFilePath)
-	}
-
-	var listener net.Listener
-
+// listenNNTP opens one proxy listener. TLS when certFile and keyFile are set.
+func listenNNTP(addr, certFile, keyFile string) (net.Listener, error) {
 	if certFile != "" && keyFile != "" {
-		dlog(always, "Attempting to start TLS NNTP server on %s", addr)
 		cer, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			log.Fatalf("Failed to load TLS key pair: %v. Falling back to non-TLS or specify valid cert/key.", err)
-			// As a fallback, could attempt non-TLS, but for now, we exit if TLS is configured but fails to load.
-			// To fallback, you might set a flag and then proceed to the non-TLS listener block.
-			return // Or handle fallback more gracefully
+			return nil, fmt.Errorf("TLS NNTP proxy on %s: load key pair: %w", addr, err)
 		}
-
-		config := &tls.Config{Certificates: []tls.Certificate{cer}}
-		listener, err = tls.Listen("tcp", addr, config)
+		ln, err := tls.Listen("tcp", addr, &tls.Config{Certificates: []tls.Certificate{cer}, MinVersion: tls.VersionTLS12})
 		if err != nil {
-			log.Fatalf("Failed to start TLS NNTP server on %s: %v", addr, err)
+			return nil, fmt.Errorf("TLS NNTP proxy on %s: %w", addr, err)
 		}
 		dlog(always, "TLS NNTP server listening on %s", addr)
-	} else {
-		dlog(always, "Starting non-TLS NNTP server on %s", addr)
-		listener, err = net.Listen("tcp", addr)
-		if err != nil {
-			log.Fatalf("Failed to start non-TLS NNTP server on %s: %v", addr, err)
-		}
-		dlog(always, "Non-TLS NNTP server listening on %s", addr)
+		return ln, nil
 	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("NNTP proxy on %s: %w", addr, err)
+	}
+	dlog(always, "Non-TLS NNTP server listening on %s", addr)
+	return ln, nil
+}
 
-	defer listener.Close()
-
+// serveNNTP accepts clients until the listener is closed.
+func serveNNTP(ln net.Listener) {
+	var backoff time.Duration
 	for {
-		conn, err := listener.Accept()
+		conn, err := ln.Accept()
 		if err != nil {
-			// Check if the error is due to the listener being closed.
-			if opError, ok := err.(*net.OpError); ok && opError.Err.Error() == "use of closed network connection" {
-				dlog(always, "Listener closed, shutting down accept loop.")
-				break // Exit loop if listener is closed
+			if errors.Is(err, net.ErrClosed) {
+				dlog(always, "NNTP server on %s stopped.", ln.Addr())
+				return
 			}
-			dlog(always, "Error accepting connection: %v", err)
-			continue // Continue to try accepting other connections
+			// e.g. EMFILE: back off instead of spinning (it used to retry at once, at 100% CPU)
+			backoff = min(max(2*backoff, 5*time.Millisecond), time.Second)
+			dlog(always, "Error accepting connection: %v (retry in %v)", err, backoff)
+			time.Sleep(backoff)
+			continue
 		}
-		globalmux.RLock() // Lock the global mutex to ensure thread-safe access to ProxyParent
-		if ProxyParent != nil {
-			go handleConnection(conn) // Handle each client in a new goroutine
-		} else {
-			log.Printf("No ProxyParent available / not booted ... closing connection from %s", conn.RemoteAddr())
-			conn.Close() // If ProxyParent is nil, we cannot handle this connection, so close it
+		backoff = 0
+		if n := proxyPreAuthConns.Add(1); n > proxyMaxPreAuth {
+			proxyPreAuthConns.Add(-1)
+			conn.SetWriteDeadline(time.Now().Add(time.Second))
+			io.WriteString(conn, "400 Too many connections, try again later\r\n")
+			conn.Close()
+			continue
 		}
-		globalmux.RUnlock() // Unlock the global mutex after checking ProxyParent
-	} // end for listener.Accept()
-	dlog(always, "NNTP server on %s stopped.", addr)
-} // end func StartNNTPServer
+		go handleConnection(conn) // decrements proxyPreAuthConns at login or close
+	}
+}
 
-// StartProxyServers launches the NNTP server on configured TCP and/or TLS ports.
-// It uses the global cfg variable for configuration parameters.
-func StartProxyServers(appOpt *CFG) {
+// StartProxyServers loads the proxy users and starts the TCP and/or TLS
+// listeners. ProxyParent's providers must be loaded already. A listener that
+// fails is logged; it is an error only if none starts.
+func StartProxyServers(appOpt *CFG) error {
 	if appOpt == nil {
-		dlog(always, "CRITICAL: Application configuration (appOpt) is nil. Cannot start proxy servers.")
-		return
+		return errors.New("proxy: no configuration")
 	}
 	if globalAllowPosting {
 		welcomeCode = 200 // If posting is allowed, use 200
 	}
-	started := false
-
-	if appOpt.ProxyTCP > 0 {
-		tcpAddr := fmt.Sprintf(":%d", appOpt.ProxyTCP)
-		dlog(always, "Attempting to start non-TLS NNTP proxy on port %d", appOpt.ProxyTCP)
-		go StartNNTPServer(tcpAddr, appOpt.ProxyPasswdFile, "", "")
-		started = true
-	} else {
-		dlog(always, "Non-TLS NNTP proxy (ProxyTCP) not configured or port is 0, skipping.")
+	if err := loadPasswdFile(appOpt.ProxyPasswdFile); err != nil {
+		dlog(always, "WARNING: Could not load passwd file '%s': %v. Server starting without users.", appOpt.ProxyPasswdFile, err)
+		dlog(always, "To add users, use the '-proxyadduser' command or craft a new .passwd file manually")
+		dlog(always, "Example -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d|nopost\" creates a user with 5 conns and 42 days to expiration")
+	} else if proxyUserCount() == 0 {
+		dlog(always, "Warning: Passwd file '%s' loaded, but no users found or all entries were invalid.", appOpt.ProxyPasswdFile)
 	}
+	go negCacheJanitor()
 
+	var errs []error
+	start := func(addr, cert, key string) {
+		ln, err := listenNNTP(addr, cert, key)
+		if err != nil {
+			dlog(always, "ERROR %v", err)
+			errs = append(errs, err)
+			return
+		}
+		proxyListenersMu.Lock()
+		proxyListeners = append(proxyListeners, ln)
+		proxyListenersMu.Unlock()
+		go serveNNTP(ln)
+	}
+	if appOpt.ProxyTCP > 0 {
+		start(fmt.Sprintf(":%d", appOpt.ProxyTCP), "", "")
+	}
 	if appOpt.ProxyTLS > 0 {
 		if appOpt.TLSCertPem == "" || appOpt.TLSPrivKey == "" {
-			dlog(always, "TLS NNTP proxy (ProxyTLS) configured for port %d, but TLSCertPem or TLSPrivKey is missing. Skipping TLS proxy.", appOpt.ProxyTLS)
+			err := fmt.Errorf("TLS NNTP proxy on port %d: -tlscrt and -tlskey are needed", appOpt.ProxyTLS)
+			dlog(always, "ERROR %v", err)
+			errs = append(errs, err)
 		} else {
-			tlsAddr := fmt.Sprintf(":%d", appOpt.ProxyTLS)
-			dlog(always, "Attempting to start TLS NNTP proxy (NNTPS) on port %d", appOpt.ProxyTLS)
-			go StartNNTPServer(tlsAddr, appOpt.ProxyPasswdFile, appOpt.TLSCertPem, appOpt.TLSPrivKey)
-			started = true
+			start(fmt.Sprintf(":%d", appOpt.ProxyTLS), appOpt.TLSCertPem, appOpt.TLSPrivKey)
 		}
-	} else {
-		dlog(always, "TLS NNTP proxy (ProxyTLS) not configured or port is 0, skipping.")
 	}
+	proxyListenersMu.Lock()
+	started := len(proxyListeners)
+	proxyListenersMu.Unlock()
+	if started == 0 {
+		if len(errs) == 0 {
+			return errors.New("no NNTP proxy listener configured")
+		}
+		return errors.Join(errs...)
+	}
+	return nil
+}
 
-	if !started {
-		dlog(always, "No NNTP proxy servers were started (neither ProxyTCP nor ProxyTLS were configured with valid ports/settings).")
-	}
-} // end func StartProxyServers
+// proxyShutdownOnSignal closes the listeners on SIGINT/SIGTERM and exits.
+// Connected clients are cut off with the process.
+func proxyShutdownOnSignal() {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigs
+		dlog(always, "Proxy: got %v, closing listeners", sig)
+		proxyListenersMu.Lock()
+		for _, ln := range proxyListeners {
+			ln.Close()
+		}
+		proxyListenersMu.Unlock()
+		os.Exit(0)
+	}()
+}
 
 // GroupInfo holds information about a newsgroup
 type GroupInfo struct {
-	Name        string // Group name
-	Description string // Group description
-	Count       int    // Article count
-	Low         int64  // Low water mark (oldest article number)
-	High        int64  // High water mark (newest article number)
-	Posting     bool   // Posting allowed flag
+	Name  string // Group name
+	Count int    // Article count
+	Low   int64  // Low water mark (oldest article number)
+	High  int64  // High water mark (newest article number)
 }
 
-// ArticleOverview holds fields for the XOVER/OVER response
-type ArticleOverview struct {
-	Number      int64             // Article number
-	Subject     string            // Subject header
-	From        string            // From header
-	Date        string            // Date header
-	MessageID   string            // Message-ID header
-	References  string            // References header
-	Bytes       int               // Size in bytes
-	Lines       int               // Lines count
-	ExtraFields map[string]string // Additional fields
+// upstreamCmd sends one command and reads its status line. code 0 means the
+// conn is broken (write or read failed): close it, don't park it.
+func upstreamCmd(connitem *ConnItem, format string, args ...any) (int, string, error) {
+	id, err := connitem.srvtp.Cmd(format, args...)
+	if err != nil {
+		return 0, "", err
+	}
+	connitem.srvtp.StartResponse(id)
+	defer connitem.srvtp.EndResponse(id)
+	code, msg, err := connitem.srvtp.ReadCodeLine(0) // 0: any code, err only for I/O or a malformed line
+	if err != nil {
+		return 0, "", err
+	}
+	return code, msg, nil
+}
+
+var errReplyTooLarge = errors.New("upstream reply too large")
+
+// readDotLinesLimited reads a dot-terminated block of at most max bytes.
+// On any error the block was not read to its end: close the conn.
+func readDotLinesLimited(r *textproto.Reader, max int64) ([]string, error) {
+	lr := &io.LimitedReader{R: r.DotReader(), N: max + 1}
+	br := bufio.NewReader(lr)
+	var lines []string
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) > 0 {
+			lines = append(lines, strings.TrimRight(line, "\r\n"))
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if lr.N <= 0 {
+		return nil, errReplyTooLarge
+	}
+	return lines, nil
+}
+
+// upstreamBlock sends a command that answers with a dot-terminated block on
+// okCode. It returns the code and message, and the lines on okCode. The conn
+// is parked or closed here, before the caller writes to the client: a slow
+// client must not hold an upstream conn. code 0: try another provider.
+func upstreamBlock(provider *Provider, connitem *ConnItem, okCode int, format string, args ...any) (int, string, []string) {
+	id, err := connitem.srvtp.Cmd(format, args...)
+	if err != nil {
+		provider.ConnPool.CloseConn(connitem, nil)
+		return 0, "", nil
+	}
+	connitem.srvtp.StartResponse(id)
+	code, msg, err := connitem.srvtp.ReadCodeLine(0)
+	if err != nil {
+		connitem.srvtp.EndResponse(id)
+		provider.ConnPool.CloseConn(connitem, nil)
+		return 0, "", nil
+	}
+	if code != okCode {
+		connitem.srvtp.EndResponse(id)
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+		return code, msg, nil
+	}
+	lines, err := readDotLinesLimited(&connitem.srvtp.Reader, proxyMaxReplyBytes)
+	connitem.srvtp.EndResponse(id)
+	if err != nil {
+		dlog(always, "ERROR proxy reading '%s' reply @ '%s': %v", strings.Fields(format)[0], provider.Name, err)
+		provider.ConnPool.CloseConn(connitem, nil)
+		if errors.Is(err, errReplyTooLarge) {
+			return 503, "Reply too large", nil
+		}
+		return 0, "", nil
+	}
+	provider.ConnPool.ParkConn(0, connitem, "proxy")
+	return code, msg, lines
+}
+
+// readerProviders returns the providers to try for newsreader commands:
+// the session's selected one if set, else every one that allows it.
+func (ps *ProxySession) readerProviders() []*Provider {
+	var out []*Provider
+	for _, provider := range ProxyParent.providerList {
+		if provider.NoDownload || !provider.Newsreader {
+			continue
+		}
+		if ps.selectedProvider != nil && provider != ps.selectedProvider {
+			continue
+		}
+		out = append(out, provider)
+	}
+	return out
+}
+
+// selectGroup sends GROUP ps.Group on connitem. ok false: the conn was handled
+// (closed, or parked with the client answered). answered: the client got a reply.
+func (ps *ProxySession) selectGroup(provider *Provider, connitem *ConnItem) (ok, answered bool) {
+	code, msg, _ := upstreamCmd(connitem, "GROUP %s", ps.Group)
+	if code == 0 {
+		provider.ConnPool.CloseConn(connitem, nil)
+		return false, false
+	}
+	if code != 211 {
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+		ps.reply("%d %s", code, msg)
+		return false, true
+	}
+	return true, false
 }
 
 // handleGroupCommand processes the GROUP command by selecting a newsgroup
-func (ps *ProxySession) handleGroupCommand(args []string) error {
-	if len(args) < 1 {
-		ps.CliTp.PrintfLine("501 Syntax error: GROUP <group>")
-		return nil
+func (ps *ProxySession) handleGroupCommand(args []string) {
+	if len(args) != 1 {
+		ps.reply("501 Syntax error: GROUP <group>")
+		return
 	}
 	groupName := args[0]
-
-	// Find a provider that has this group
 	var group *GroupInfo
-
 	for _, provider := range ProxyParent.providerList {
 		if provider.NoDownload || !provider.Newsreader {
-			continue // Skip providers that don't allow downloads
+			continue
 		}
-
 		connitem, err := provider.ConnPool.GetConn()
 		if err != nil {
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
-			continue // Try next provider
+			continue
 		}
-
-		id, err := connitem.srvtp.Cmd("GROUP %s", groupName)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue // Try next provider
+		code, msg, _ := upstreamCmd(connitem, "GROUP %s", groupName)
+		if code == 0 {
+			provider.ConnPool.CloseConn(connitem, nil) // it used to be parked even when dead
+			continue
 		}
-
-		connitem.srvtp.StartResponse(id)
-		code, msg, err := connitem.srvtp.ReadCodeLine(211)
-		connitem.srvtp.EndResponse(id)
-
-		// 211 count low high group_name
-		if err == nil && code == 211 {
-			parts := strings.Fields(msg)
-			if len(parts) >= 4 {
-				count, _ := strconv.Atoi(parts[0])
-				low, _ := strconv.ParseInt(parts[1], 10, 64)
-				high, _ := strconv.ParseInt(parts[2], 10, 64)
-
-				group = &GroupInfo{
-					Name:  groupName,
-					Count: count,
-					Low:   low,
-					High:  high,
-				}
-
-				ps.selectedProvider = provider // Set the selected provider for this session when requesting GROUP
-				provider.ConnPool.ParkConn(0, connitem, "proxy")
-				break
-			}
-		}
-
 		provider.ConnPool.ParkConn(0, connitem, "proxy")
+		parts := strings.Fields(msg) // 211 count low high group_name
+		if code != 211 || len(parts) < 4 {
+			continue
+		}
+		count, _ := strconv.Atoi(parts[0])
+		low, _ := strconv.ParseInt(parts[1], 10, 64)
+		high, _ := strconv.ParseInt(parts[2], 10, 64)
+		group = &GroupInfo{Name: groupName, Count: count, Low: low, High: high}
+		ps.selectedProvider = provider // Set the selected provider for this session when requesting GROUP
+		break
 	}
-
 	if group == nil {
-		ps.selectedProvider = nil // Reset selected provider if no group found
-		ps.CliTp.PrintfLine("411 No such newsgroup")
-		return nil
+		ps.selectedProvider = nil
+		ps.reply("411 No such newsgroup")
+		return
 	}
-
-	// Update the session with the selected group info
 	ps.Group = group.Name
-	ps.MsgNum = group.High // Set to the high water mark as default
-
-	// Return a successful GROUP response: 211 count low high group_name
-	ps.CliTp.PrintfLine("211 %d %d %d %s",
-		group.Count, group.Low, group.High, group.Name)
-
-	dlog(always, "%s | Selected group: %s (articles: %d, range: %d-%d)",
-		ps.Username, group.Name, group.Count, group.Low, group.High)
-
-	return nil
+	// RFC 3977 §6.1.1: the current article is the first one (it was set to High);
+	// an empty group has none
+	ps.MsgNum = 0
+	if group.Count > 0 {
+		ps.MsgNum = group.Low
+	}
+	ps.reply("211 %d %d %d %s", group.Count, group.Low, group.High, group.Name)
+	dlog(cfg.opt.Debug, "%s | Selected group: %s (articles: %d, range: %d-%d)", ps.Username, group.Name, group.Count, group.Low, group.High)
 }
 
-// handleListCommand processes the LIST command
-func (ps *ProxySession) handleListCommand(args []string) error {
-	var variant string
+// handleListCommand processes the LIST command, with all its arguments
+// (LIST ACTIVE <wildmat> used to fetch the full list).
+func (ps *ProxySession) handleListCommand(args []string) {
+	command := "LIST"
 	if len(args) >= 1 {
-		variant = strings.ToUpper(args[0])
+		command += " " + strings.ToUpper(args[0])
+		if len(args) > 1 {
+			command += " " + strings.Join(args[1:], " ")
+		}
 	}
-	// Find a suitable provider
-	selected := false // Track if we found a provider for this session
-	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload || !provider.Newsreader {
-			continue
-		}
-		if ps.selectedProvider != nil && provider != ps.selectedProvider {
-			continue // Skip if this provider is not the selected one for this session
-		}
-
+	for _, provider := range ps.readerProviders() {
 		connitem, err := provider.ConnPool.GetConn()
 		if err != nil {
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
 			continue
 		}
-
-		// Different LIST variants
-		var command string
-		if variant == "" {
-			command = "LIST"
-		} else {
-			command = fmt.Sprintf("LIST %s", variant)
-		}
-
-		id, err := connitem.srvtp.Cmd("%s", command)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
+		code, msg, lines := upstreamBlock(provider, connitem, 215, "%s", command)
+		if code == 0 {
 			continue
 		}
-
-		connitem.srvtp.StartResponse(id)
-		code, _, err := connitem.srvtp.ReadCodeLine(215)
-		if err != nil || code != 215 {
-			connitem.srvtp.EndResponse(id)
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		// Read the dot-delimited response directly into a list of strings
-		lines, err := connitem.srvtp.ReadDotLines()
-		connitem.srvtp.EndResponse(id)
-
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-		provider.ConnPool.ParkConn(0, connitem, "proxy")
-		selected = true
 		if ps.selectedProvider == nil {
-			ps.selectedProvider = provider // Set the selected provider for this session when requesting LIST
+			ps.selectedProvider = provider
 		}
-
-		// Start our response to the client
-		ps.CliTp.PrintfLine("215 List of newsgroups follows")
-		dw := ps.CliTp.DotWriter()
-
-		// Pass through the lines
-		for _, line := range lines {
-			fmt.Fprintln(dw, line)
+		if code == 215 {
+			ps.writeDotBlock("215 "+msg, lines)
+		} else {
+			ps.reply("%d %s", code, msg)
 		}
-
-		dw.Close()
-		return nil
+		return
 	}
-
-	// If we couldn't find any provider or all failed
-	if !selected {
-		if ps.selectedProvider != nil {
-			ps.selectedProvider = nil
-		}
-		ps.CliTp.PrintfLine("503 No providers available for LIST command")
-		return nil
-	}
-	return nil
+	ps.selectedProvider = nil
+	ps.reply("503 No providers available for LIST command")
 }
 
 // handleXOverCommand processes the XOVER/OVER command
-func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) error {
-	// Must have a selected group first
+func (ps *ProxySession) handleXOverCommand(args []string, isXOVER bool) {
 	if ps.Group == "" {
-		ps.CliTp.PrintfLine("412 No newsgroup selected")
-		return nil
+		ps.reply("412 No newsgroup selected")
+		return
 	}
-
 	var rangeArg string
-	if len(args) >= 1 {
-		rangeArg = args[0]
-	} else {
-		// If no range specified, use current article number
+	switch len(args) {
+	case 0:
 		if ps.MsgNum <= 0 {
-			ps.CliTp.PrintfLine("420 No current article selected")
-			return nil
+			ps.reply("420 Current article number is invalid")
+			return
 		}
-		rangeArg = fmt.Sprintf("%d", ps.MsgNum)
+		rangeArg = strconv.FormatInt(ps.MsgNum, 10)
+	case 1:
+		rangeArg = args[0]
+	default:
+		ps.reply("501 Syntax error: OVER [range]")
+		return
 	}
-
-	// Process the range argument
-	var startNum, endNum int64
-
-	if strings.Contains(rangeArg, "-") {
-		parts := strings.Split(rangeArg, "-")
-		if len(parts) == 2 {
-			var err error
-			startNum, err = strconv.ParseInt(parts[0], 10, 64)
-			if err != nil {
-				ps.CliTp.PrintfLine("501 Invalid article range")
-				return nil
-			}
-
-			if parts[1] == "" {
-				// Format like "1000-" means "1000 to the end"
-				endNum = 0 // Will be handled as "to the end" by the server
-			} else {
-				endNum, err = strconv.ParseInt(parts[1], 10, 64)
-				if err != nil {
-					ps.CliTp.PrintfLine("501 Invalid article range")
-					return nil
-				}
-			}
-		}
-	} else {
-		var err error
-		startNum, err = strconv.ParseInt(rangeArg, 10, 64)
-		if err != nil {
-			ps.CliTp.PrintfLine("501 Invalid article number")
-			return nil
-		}
-		endNum = startNum // Just one article
+	// range: n, n-, or n-m. "1-2-3" used to be sent upstream as "0-".
+	parts := strings.Split(rangeArg, "-")
+	if len(parts) > 2 {
+		ps.reply("501 Invalid article range")
+		return
 	}
-
-	// Find provider with this group
-	selected := false // Track if we found a provider for this session
-	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload || !provider.Newsreader {
-			continue
+	if _, err := strconv.ParseInt(parts[0], 10, 64); err != nil {
+		ps.reply("501 Invalid article range")
+		return
+	}
+	if len(parts) == 2 && parts[1] != "" {
+		if _, err := strconv.ParseInt(parts[1], 10, 64); err != nil {
+			ps.reply("501 Invalid article range")
+			return
 		}
-		if ps.selectedProvider != nil && provider != ps.selectedProvider {
-			continue // Skip if this provider is not the selected one for this session
-		}
+	}
+	command := "OVER"
+	if isXOVER {
+		command = "XOVER"
+	}
+	for _, provider := range ps.readerProviders() {
 		connitem, err := provider.ConnPool.GetConn()
 		if err != nil {
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
 			continue
 		}
-
-		// Select the group first (required before XOVER/OVER)
-		id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
+		if ok, answered := ps.selectGroup(provider, connitem); !ok {
+			if answered {
+				return
+			}
 			continue
 		}
-
-		connitem.srvtp.StartResponse(id)
-		code, _, err := connitem.srvtp.ReadCodeLine(211)
-		connitem.srvtp.EndResponse(id)
-
-		if err != nil || code != 211 {
-			provider.ConnPool.CloseConn(connitem, nil)
+		code, msg, lines := upstreamBlock(provider, connitem, 224, "%s %s", command, rangeArg)
+		if code == 0 {
 			continue
 		}
-
-		// Now run the XOVER/OVER command
-		var command string
-		if isXOVER {
-			command = "XOVER"
+		if code == 224 {
+			ps.writeDotBlock("224 "+msg, lines)
 		} else {
-			command = "OVER"
+			ps.reply("%d %s", code, msg)
 		}
-
-		if endNum > 0 {
-			command = fmt.Sprintf("%s %d-%d", command, startNum, endNum)
-		} else if endNum == 0 {
-			command = fmt.Sprintf("%s %d-", command, startNum)
-		} else {
-			command = fmt.Sprintf("%s %d", command, startNum)
-		}
-
-		id, err = connitem.srvtp.Cmd("%s", command)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		connitem.srvtp.StartResponse(id)
-		code, _, err = connitem.srvtp.ReadCodeLine(224)
-		if err != nil || code != 224 {
-			connitem.srvtp.EndResponse(id)
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		// Read the dot-delimited response
-		lines, err := connitem.srvtp.ReadDotLines()
-		connitem.srvtp.EndResponse(id)
-
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-		selected = true // We found a provider that can handle this command
-		// Start our response to the client
-		ps.CliTp.PrintfLine("224 Overview information follows")
-		dw := ps.CliTp.DotWriter()
-
-		// Pass through the lines
-		for _, line := range lines {
-			fmt.Fprintln(dw, line)
-		}
-
-		dw.Close()
-		provider.ConnPool.ParkConn(0, connitem, "proxy")
-		return nil
+		return
 	}
-	if !selected {
-		if ps.selectedProvider != nil {
-			ps.selectedProvider = nil
-		}
-		ps.CliTp.PrintfLine("503 No providers have the selected group")
-		return nil
-	}
-	return nil
+	ps.selectedProvider = nil
+	ps.reply("503 No providers have the selected group")
 }
 
 // handleXHdrCommand processes the XHDR/HDR command
-func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) error {
-	if len(args) < 1 {
-		ps.CliTp.PrintfLine("501 Syntax error: XHDR <header> [range|<message-id>]")
-		return nil
+func (ps *ProxySession) handleXHdrCommand(args []string, isXHDR bool) {
+	if len(args) < 1 || len(args) > 2 {
+		ps.reply("501 Syntax error: HDR <header> [range|<message-id>]")
+		return
 	}
-
-	// Must have a selected group first, unless message-id is specified
-	if ps.Group == "" && !strings.HasPrefix(args[len(args)-1], "<") {
-		ps.CliTp.PrintfLine("412 No newsgroup selected")
-		return nil
-	}
-
-	headerField := args[0]
-
-	// Get the message ID or range
-	var messageID string
-	var rangeSpec string
-
-	if len(args) >= 2 {
+	var messageID, rangeSpec string
+	if len(args) == 2 {
 		if strings.HasPrefix(args[1], "<") {
-			// It's a message ID
 			messageID = args[1]
 		} else {
-			// It's a range spec
 			rangeSpec = args[1]
 		}
-	} else {
-		// If no range/msgid specified, use current article number
-		if ps.MsgNum <= 0 {
-			ps.CliTp.PrintfLine("420 No current article selected")
-			return nil
-		}
-		rangeSpec = fmt.Sprintf("%d", ps.MsgNum)
 	}
-
-	// Find provider with this group
-	selected := false // Track if we found a provider for this session
-	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload || !provider.Newsreader {
-			continue
+	if messageID == "" && ps.Group == "" {
+		ps.reply("412 No newsgroup selected")
+		return
+	}
+	if messageID == "" && rangeSpec == "" {
+		if ps.MsgNum <= 0 {
+			ps.reply("420 Current article number is invalid")
+			return
 		}
-		if ps.selectedProvider != nil && provider != ps.selectedProvider {
-			continue // Skip if this provider is not the selected one for this session
-		}
-
+		rangeSpec = strconv.FormatInt(ps.MsgNum, 10)
+	}
+	command := "HDR"
+	if isXHDR {
+		command = "XHDR"
+	}
+	target := rangeSpec
+	if messageID != "" {
+		target = messageID
+	}
+	okCode := 225 // HDR (RFC 3977 §8.5)
+	if isXHDR {
+		okCode = 221 // XHDR (RFC 2980)
+	}
+	for _, provider := range ps.readerProviders() {
 		connitem, err := provider.ConnPool.GetConn()
 		if err != nil {
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
 			continue
 		}
-
-		// Select the group first if using an article number range
 		if messageID == "" {
-			id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
-			if err != nil {
-				provider.ConnPool.CloseConn(connitem, nil)
-				continue
-			}
-
-			connitem.srvtp.StartResponse(id)
-			code, _, err := connitem.srvtp.ReadCodeLine(211)
-			connitem.srvtp.EndResponse(id)
-
-			if err != nil || code != 211 {
-				provider.ConnPool.CloseConn(connitem, nil)
+			if ok, answered := ps.selectGroup(provider, connitem); !ok {
+				if answered {
+					return
+				}
 				continue
 			}
 		}
-
-		// Now run the XHDR/HDR command
-		var command string
-		if isXHDR {
-			command = "XHDR"
+		code, msg, lines := upstreamBlock(provider, connitem, okCode, "%s %s %s", command, args[0], target)
+		if code == 0 {
+			continue
+		}
+		if code == okCode {
+			ps.writeDotBlock(fmt.Sprintf("%d %s", code, msg), lines)
 		} else {
-			command = "HDR"
+			ps.reply("%d %s", code, msg)
 		}
-
-		if messageID != "" {
-			command = fmt.Sprintf("%s %s %s", command, headerField, messageID)
-		} else {
-			command = fmt.Sprintf("%s %s %s", command, headerField, rangeSpec)
-		}
-
-		id, err := connitem.srvtp.Cmd("%s", command)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		connitem.srvtp.StartResponse(id)
-		code, _, err := connitem.srvtp.ReadCodeLine(221)
-		if err != nil || code != 221 {
-			connitem.srvtp.EndResponse(id)
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		// Read the dot-delimited response
-		lines, err := connitem.srvtp.ReadDotLines()
-		connitem.srvtp.EndResponse(id)
-
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-		selected = true
-		// Start our response to the client
-		ps.CliTp.PrintfLine("221 Header follows")
-		dw := ps.CliTp.DotWriter()
-
-		// Pass through the lines
-		for _, line := range lines {
-			fmt.Fprintln(dw, line)
-		}
-
-		dw.Close()
-		provider.ConnPool.ParkConn(0, connitem, "proxy")
-		return nil
+		return
 	}
-	if !selected {
-		if ps.selectedProvider != nil {
-			ps.selectedProvider = nil
-		}
-		ps.CliTp.PrintfLine("503 No providers have the selected group or article")
-		return nil
-	}
-	// If we couldn't find any provider or all failed
-	return nil
+	ps.selectedProvider = nil
+	ps.reply("503 No providers have the selected group or article")
 }
 
-// handleNextOrLastCommand processes the NEXT/LAST command
-func (ps *ProxySession) handleNextOrLastCommand(isNext bool) error {
-	// Must have a selected group first
+// handleNextOrLastCommand processes the NEXT/LAST command. Any upstream reply
+// is forwarded (it used to answer nothing for 422 or an I/O error, and "421 No
+// previous" for LAST); a broken conn tries the next provider.
+func (ps *ProxySession) handleNextOrLastCommand(isNext bool) {
 	if ps.Group == "" {
-		ps.CliTp.PrintfLine("412 No newsgroup selected")
-		return nil
+		ps.reply("412 No newsgroup selected")
+		return
 	}
-
-	// Must have a current article selected
 	if ps.MsgNum <= 0 {
-		ps.CliTp.PrintfLine("420 No current article selected")
-		return nil
+		ps.reply("420 Current article number is invalid")
+		return
 	}
-
-	// Find provider with this group
-	selected := false // Track if we found a provider for this session
-	for _, provider := range ProxyParent.providerList {
-		if provider.NoDownload || !provider.Newsreader {
-			continue
-		}
-		if ps.selectedProvider != nil && provider != ps.selectedProvider {
-			continue // Skip if this provider is not the selected one for this session
-		}
-
+	command := "LAST"
+	if isNext {
+		command = "NEXT"
+	}
+	for _, provider := range ps.readerProviders() {
 		connitem, err := provider.ConnPool.GetConn()
 		if err != nil {
 			dlog(always, "ERROR GetConn for provider %s: %v", provider.Name, err)
 			continue
 		}
-
-		// Select the group first
-		id, err := connitem.srvtp.Cmd("GROUP %s", ps.Group)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		connitem.srvtp.StartResponse(id)
-		code, _, err := connitem.srvtp.ReadCodeLine(211)
-		connitem.srvtp.EndResponse(id)
-
-		if err != nil {
-			if code > 0 {
-				provider.ConnPool.ParkConn(0, connitem, "proxy")
-			} else {
-				provider.ConnPool.CloseConn(connitem, nil)
+		if ok, answered := ps.selectGroup(provider, connitem); !ok {
+			if answered {
+				return
 			}
 			continue
 		}
-
-		// Set the current article
-		id, err = connitem.srvtp.Cmd("STAT %d", ps.MsgNum)
-		if err != nil {
+		// set the upstream's current article to ours, then move it
+		code, msg, _ := upstreamCmd(connitem, "STAT %d", ps.MsgNum)
+		if code == 0 {
 			provider.ConnPool.CloseConn(connitem, nil)
 			continue
 		}
-
-		connitem.srvtp.StartResponse(id)
-		code, _, err = connitem.srvtp.ReadCodeLine(223)
-		connitem.srvtp.EndResponse(id)
-
-		if err != nil {
-			if code > 0 {
-				provider.ConnPool.ParkConn(0, connitem, "proxy")
-			} else {
-				provider.ConnPool.CloseConn(connitem, nil)
-			}
-			continue
-		}
-
-		// Now run the NEXT/LAST command
-		var command string
-		if isNext {
-			command = "NEXT"
-		} else {
-			command = "LAST"
-		}
-
-		id, err = connitem.srvtp.Cmd("%s", command)
-		if err != nil {
-			provider.ConnPool.CloseConn(connitem, nil)
-			continue
-		}
-
-		connitem.srvtp.StartResponse(id)
-		code, msg, err := connitem.srvtp.ReadCodeLine(223)
-		connitem.srvtp.EndResponse(id)
-		if code > 0 {
-			selected = true
+		if code != 223 {
 			provider.ConnPool.ParkConn(0, connitem, "proxy")
-		} else {
+			ps.reply("%d %s", code, msg)
+			return
+		}
+		code, msg, _ = upstreamCmd(connitem, "%s", command)
+		if code == 0 {
 			provider.ConnPool.CloseConn(connitem, nil)
+			continue
 		}
-		if err != nil || code != 223 {
-			if code == 421 {
-				// No next/previous article in the group
-				var which string
-				if isNext {
-					which = "next"
-				} else {
-					which = "previous"
-				}
-				ps.CliTp.PrintfLine("421 No %s article to retrieve", which)
-				return nil
+		provider.ConnPool.ParkConn(0, connitem, "proxy")
+		if code == 223 {
+			parts := strings.Fields(msg) // 223 n <message-id>
+			if len(parts) < 2 {
+				ps.reply("503 Invalid response from server")
+				return
 			}
-		} else {
-			// 223 article_number message_id
-			parts := strings.Fields(msg)
-			if len(parts) >= 2 {
-				newNum, _ := strconv.ParseInt(parts[0], 10, 64)
-				messageID := parts[1]
-
-				// Update the current article pointer
-				ps.MsgNum = newNum
-
-				// Return successful response
-				ps.CliTp.PrintfLine("223 %d %s", newNum, messageID)
-			} else {
-				ps.CliTp.PrintfLine("503 Invalid response from server")
+			if n, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+				ps.MsgNum = n
 			}
+			ps.reply("223 %s %s", parts[0], parts[1])
+			return
 		}
-		return nil
+		ps.reply("%d %s", code, msg) // 421 no next, 422 no previous, ...
+		return
 	}
-	if !selected {
-		if ps.selectedProvider != nil {
-			ps.selectedProvider = nil
-		}
-		ps.CliTp.PrintfLine("503 No providers have the selected group")
-		return nil
-	}
-	return nil
+	ps.selectedProvider = nil
+	ps.reply("503 No providers have the selected group")
 }
