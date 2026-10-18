@@ -657,6 +657,19 @@ func (item *segmentChanItem) FlagDLFailed(providerList []*Provider, providerGrou
 // hasUploadTarget reports whether some provider the item is missing on could
 // still take an upload for it (same rules as pushUP; a pending retry counts).
 // The caller holds item.mux (read or write).
+// onAllProviders reports whether every provider has the item: confirmed
+// there (availableOn, from STAT/download) or uploaded there by this session
+// (uploadedTo). availableOn stays "confirmed": pushDL picks download sources
+// from it, and a fresh upload may not be visible yet. Caller holds item.mux.
+func (s *SESSION) onAllProviders(item *segmentChanItem) bool {
+	for pid := range s.providerList {
+		if !item.availableOn[pid] && !item.uploadedTo[pid] {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *SESSION) hasUploadTarget(item *segmentChanItem) bool {
 	for pid, miss := range item.missingOn {
 		if !miss {
@@ -1060,9 +1073,11 @@ forever:
 				doContinue = true
 			}
 
-			if len(item.missingOn) == 0 && len(item.availableOn) == providersCnt {
-				// this segment is on all providers or should be ...
-				// we add provider.pid to item.availableOn after re-upload
+			if len(item.missingOn) == 0 && s.onAllProviders(item) {
+				// on every provider: confirmed there, or uploaded there by us.
+				// (An upload sets uploadedTo, not availableOn, so this used to
+				// count uploaded items as "no upload target" and the run only
+				// ended through close case #8.)
 				allOk++
 				done++
 				doContinue = true

@@ -230,12 +230,11 @@ func (j *QueuedJob) setProgress(p *sessionProgress) {
 	if total == 0 {
 		return // NZB not loaded yet: keep the counts from AddJob
 	}
-	// The divider's "done" never counts uploaded items (an upload sets uploadedTo, not
-	// availableOn); they end up in notarget instead. ok = on every provider, or uploaded.
+	// done = on every provider, confirmed or uploaded by the session
 	done, dead, notarget := p.done.Load(), p.dead.Load(), p.notarget.Load()
 	finished := min(done+dead+notarget, total)
 	j.TotalArticles = total
-	j.ArticlesDone = min(done+p.uploaded.Load(), total)
+	j.ArticlesDone = min(done, total)
 	j.ArticlesProcessed = finished
 	j.ArticlesCached = p.cached.Load()
 	j.ArticlesDead = dead

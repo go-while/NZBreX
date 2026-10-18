@@ -81,6 +81,7 @@ func TestJobProgressFromItsSession(t *gotesting.T) {
 		t.Fatalf("running job: progress=%v processed=%d total=%d, want 0.5 2 4", got.Progress, got.ArticlesProcessed, got.TotalArticles)
 	}
 	s.progress.done.Store(3)
+	s.progress.uploaded.Store(2) // uploaded items are part of done: not added again
 	jq.mu.Lock()
 	jq.finishLocked(job, nil)
 	jq.mu.Unlock()
