@@ -4,14 +4,14 @@ import (
 	gotesting "testing" // Workers.go declares a const named testing
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
 
 func testItem(id string) *segmentChanItem {
 	return &segmentChanItem{
 		mux:     &loggedrwmutex.LoggedSyncRWMutex{Name: "TEST-ITEM-" + id},
-		segment: &nzbparser.NzbSegment{Id: id},
+		segment: &nzbparser.NzbSegment{ID: id},
 	}
 }
 

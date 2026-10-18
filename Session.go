@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
 
 // PROCESSOR manages NZB file processing.
@@ -74,8 +74,8 @@ type SESSION struct {
 	workDone          atomic.Uint64                    // items finished by any check/downs/reups routine, ok or not (divider watchdog)
 	progress          sessionProgress                  // counts published by GoWorkDivider for the web UI
 	ready             chan struct{}                    // proxy/web base sessions: closed once the providers are loaded (nil: not used)
-	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
-	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
+	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.ID]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
+	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.ID]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
 	preBoot               bool              // true from LaunchSession until GoBootWorkers starts the workers; guarded by mux
 	active                bool              // true while the workers run (GoBootWorkers until closeSession); guarded by mux
 	preparationStartTime  time.Time         // flag // time when the session was started
@@ -259,10 +259,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 				}
 				// filling s.segmentList
 				for _, segment := range file.Segments {
-					dlog(cfg.opt.BUG, "append nzb to segmentList: Id='%s' file='%s'", segment.Id, file.Filename)
+					dlog(cfg.opt.BUG, "append nzb to segmentList: Id='%s' file='%s'", segment.ID, file.Filename)
 					// If you add more fields to the 'segmentChanItem' struct, the compiler will catch missing initializations here and crash on compilation.
 					// mux := new(sync.RWMutex)
-					segmux := &loggedrwmutex.LoggedSyncRWMutex{Name: "segment-" + segment.Id} // use a logged sync mutex to log locking and unlocking
+					segmux := &loggedrwmutex.LoggedSyncRWMutex{Name: "segment-" + segment.ID} // use a logged sync mutex to log locking and unlocking
 					// create a new segmentChanItem for each segment
 					item := &segmentChanItem{
 						segmux, s, &segment, &file, // sync.RWMutex, *SESSION, *nzbparser.Segment, *nzbparser.File
@@ -282,14 +282,14 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 						[]string{}, []string{}, []string{}, // []string fields
 						false, false, false, false, false, false, false, false, false, // bool fields
 						0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // int fields
-					if len(segment.Id) < 3 { // a@a
-						dlog(always, "ERROR LaunchSession: segment.Id='%s' is too short! file='%s'", segment.Id, file.Filename)
+					// "<id>" on the wire. The id goes into NNTP command lines as is, so it
+					// must be a valid message-id: anything else is skipped, not sent.
+					item.segment.ID = "<" + strings.TrimSuffix(strings.TrimPrefix(segment.ID, "<"), ">") + ">"
+					if !validMessageID(item.segment.ID) {
+						dlog(always, "ERROR LaunchSession: skipping segment %d of file '%s': invalid message-id %q", segment.Number, file.Filename, item.segment.ID)
 						continue
 					}
-					if !strings.HasPrefix(segment.Id, "<") && !strings.HasSuffix(segment.Id, ">") {
-						item.segment.Id = "<" + segment.Id + ">" // ensure segment.Id is always in the format "<Id>" for consistency
-					}
-					item.hashedId = SHA256str(item.segment.Id)
+					item.hashedId = SHA256str(item.segment.ID)
 					segmentList = append(segmentList, item)
 				}
 			}

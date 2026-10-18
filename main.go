@@ -12,7 +12,7 @@ package main
  *     github.com/go-while/go-cpu-mem-profiler        (MIT License)
  *
  * Foreign Includes:
- *     github.com/Tensai75/nzbparser#commit:a1e0d80   (MIT License)
+ *     github.com/javi11/nzbparser (fork of Tensai75/nzbparser) (MIT License)
  *     github.com/Tensai75/cmpb#commit:16fb79f        (MIT License)
  *     github.com/fatih/color#commit:4c0661           (MIT License)
  *

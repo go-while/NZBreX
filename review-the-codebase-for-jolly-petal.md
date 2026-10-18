@@ -630,6 +630,13 @@ Independent of Phases 1–7; can run in parallel.
   - `Session.go` sized the segment list with `nzbfile.TotalSegments`, the count the subjects claim. `(1/9999999999999999999)` → `panic: makeslice: cap out of range`, a plausible `(1/2000000000)` would allocate ~16 GB. Now sized by the segments in the NZB (`nzbfile.Segments`); the web job count too.
   - `-yencmerge` wrote to `filepath.Join(cache, hash, "yenc", <filename from the subject>)`: `"../../../escape-test.bin"` wrote outside the cache (shown with a local run: the file appeared in `run/`). Now only the last path element is used (`safeFileName`, `/` and `\` both separators; `..`, `.`, "" refused); part files use it too (they used `filepath.Base` already).
 
+## Dependency review: nzbparser (2026-10-18)
+
+`github.com/Tensai75/nzbparser` (last change 2024-06) is superseded by `github.com/javi11/nzbparser` (active, tests, its own subject parser; fixes subject-based dedupe and unescapes ids). NZBreX now uses javi11's fork with fixes on branch `review-fixes` in `../nzbparser` (local clone of `go-while/nzbparser`, branched from `javi11/main`, not pushed), via `replace github.com/javi11/nzbparser => ../nzbparser`. The subjectparser fork is no longer imported.
+- **Fixed on the branch (tests for each; five fail on javi11/main):** `Write` after `Parse` produced malformed XML when an id contained `&` (ids unescaped, then written raw); ids/meta/groups kept the whitespace of pretty-printed NZBs; overflowing subject numbers became the largest int; `Basefilename` was never set; the comment grew by two spaces per round trip and meta came out in map order; unstable sort; `ParseSubject` compiled ~11 regexps per call (81 → 28 µs, 249 → 22 allocations); the parse error is wrapped.
+- **Not changed:** duplicate meta types still collapse into the `Meta` map (an API change for the maintainer).
+- **NZBreX:** segment ids are normalised to `<…>` and checked against RFC 3977 3.6 (printable ASCII, no spaces, ≤ 250 bytes) before they go into command lines; invalid ones are skipped with an error. The old check wrapped only ids with neither bracket.
+
 ## Decisions
 
 All three answered by the user on 2026-10-17.

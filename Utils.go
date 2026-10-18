@@ -23,9 +23,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
+
+// validMessageID reports whether id is a message-id as RFC 3977 3.6 allows:
+// "<", 1 to 248 printable US-ASCII characters other than ">", then ">".
+// Spaces, control characters (CR, LF) and 8-bit bytes are not allowed.
+func validMessageID(id string) bool {
+	if len(id) < 3 || len(id) > 250 || id[0] != '<' || id[len(id)-1] != '>' {
+		return false
+	}
+	for i := 1; i < len(id)-1; i++ {
+		if c := id[i]; c < 0x21 || c > 0x7e || c == '>' {
+			return false
+		}
+	}
+	return true
+}
 
 // safeFileName returns the last element of a filename taken from an article
 // subject, for use in a path, and false if nothing usable is left. Both '/'
@@ -61,10 +76,10 @@ nzbfile=&nzbparser.Nzb{Comment:"", Meta:map[string]string{},
 	nzbparser.NzbFile{
 		Groups:[]string{"alt.binaries.gougouland"},
 		Segments:nzbparser.NzbSegments{
-			nzbparser.NzbSegment{Bytes:729047, Number:1, Id:"b9c5260e93724cd7a76d1b951b2c8717@ngPost"},
-			nzbparser.NzbSegment{Bytes:729047, Number:1, Id:"a2f343f81b514fecbc7fbcb88b0e67bb@ngPost"},
-			nzbparser.NzbSegment{Bytes:729184, Number:2, Id:"9dbcd79527b449deb1f686b3ad795c49@ngPost"},
-			nzbparser.NzbSegment{Bytes:737522, Number:567, Id:"e27a7c05651e4880ab62328445bdc40a@ngPost"}
+			nzbparser.NzbSegment{Bytes:729047, Number:1, ID:"b9c5260e93724cd7a76d1b951b2c8717@ngPost"},
+			nzbparser.NzbSegment{Bytes:729047, Number:1, ID:"a2f343f81b514fecbc7fbcb88b0e67bb@ngPost"},
+			nzbparser.NzbSegment{Bytes:729184, Number:2, ID:"9dbcd79527b449deb1f686b3ad795c49@ngPost"},
+			nzbparser.NzbSegment{Bytes:737522, Number:567, ID:"e27a7c05651e4880ab62328445bdc40a@ngPost"}
 			},
 		Poster:"32V49ZAnrYOCS@ngPost.com",
 		Date:1681138800,
@@ -529,7 +544,7 @@ func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps flo
 
 func SHA256str(astr string) string {
 	// string hash func works only with cacheON!
-	// only used to create hashs of segment.Id
+	// only used to create hashs of segment.ID
 	// no cache no hash!
 	if !cacheON {
 		return ""

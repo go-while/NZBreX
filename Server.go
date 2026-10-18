@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
 
 const (
@@ -410,7 +410,7 @@ func (ps *ProxySession) handleArticleCommand(command string, args []string) {
 		cacheKey = ps.Group + ":" + id // a number only means something in its group
 	}
 	item := &segmentChanItem{
-		segment: &nzbparser.NzbSegment{Id: id},
+		segment: &nzbparser.NzbSegment{ID: id},
 		mux:     &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYITEM"}, // readDotLines locks item.mux
 	}
 

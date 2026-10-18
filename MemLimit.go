@@ -63,7 +63,7 @@ func (m *MemLimiter) Usage() (int, int) {
 func (m *MemLimiter) ViewData() (data []string) {
 	m.mux.RLock()
 	for item := range m.memdata {
-		data = append(data, item.segment.Id)
+		data = append(data, item.segment.ID)
 	}
 	m.mux.RUnlock()
 	return
@@ -95,7 +95,7 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string, stop <-chan 
 		m.mux.Lock()
 		if m.memdata[item] {
 			m.mux.Unlock()
-			dlog(cfg.opt.DebugMemlim, "MemLockWait called on already memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
+			dlog(cfg.opt.DebugMemlim, "MemLockWait called on already memlocked item seg.Id='%s' who='%s'", item.segment.ID, who)
 			return true
 		}
 		other := m.pending[item]
@@ -104,7 +104,7 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string, stop <-chan 
 		}
 		m.mux.Unlock()
 		// someone else is already waiting for a slot for this item: wait for them, then look again
-		dlog(always, "MemLockWait: seg.Id='%s' is already waiting for a slot, who='%s' waits for it", item.segment.Id, who)
+		dlog(always, "MemLockWait: seg.Id='%s' is already waiting for a slot, who='%s' waits for it", item.segment.ID, who)
 		select {
 		case <-other:
 		case <-stop:
@@ -144,11 +144,11 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string, stop <-chan 
 
 	if !got {
 		GCounter.Incr("TOTAL_MemLockAborted")
-		dlog(cfg.opt.DebugMemlim, "MemLockWait aborted by stop seg.Id='%s' who='%s'", item.segment.Id, who)
+		dlog(cfg.opt.DebugMemlim, "MemLockWait aborted by stop seg.Id='%s' who='%s'", item.segment.ID, who)
 		return false
 	}
 	GCounter.Incr("TOTAL_MemLock")
-	dlog(cfg.opt.DebugMemlim, "NewMemLock gotSLOT seg.Id='%s' who='%s'", item.segment.Id, who)
+	dlog(cfg.opt.DebugMemlim, "NewMemLock gotSLOT seg.Id='%s' who='%s'", item.segment.ID, who)
 	return true
 } // end func memlim.MemLockWait
 
@@ -159,7 +159,7 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 	m.mux.Lock()
 	if !m.memdata[item] {
 		m.mux.Unlock()
-		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.Id, who)
+		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.ID, who)
 		return // not memlocked, nothing to do
 	}
 	delete(m.memdata, item)
@@ -174,7 +174,7 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 		GCounter.Incr("TOTAL_MemReturned")
 	default:
 		// only one owner per slot, so the chan can't be full here
-		dlog(always, "BUG: MemReturn: slot chan is full seg.Id='%s' who='%s'", item.segment.Id, who)
+		dlog(always, "BUG: MemReturn: slot chan is full seg.Id='%s' who='%s'", item.segment.ID, who)
 	}
-	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.Id, who)
+	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.ID, who)
 } // end func memlim.MemReturn

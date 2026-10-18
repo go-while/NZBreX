@@ -3,18 +3,17 @@ module github.com/go-while/NZBreX
 go 1.27.2
 
 require (
-	github.com/Tensai75/nzbparser v0.1.0
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83
 	github.com/go-while/go-loggedrwmutex v0.0.0-20250601032232-b0aa20cdcb2c
 	github.com/go-while/go-yenc-simd v0.0.0
+	github.com/javi11/nzbparser v0.5.5
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.43.0
 	golang.org/x/text v0.30.0
 )
 
 require (
-	github.com/Tensai75/subjectparser v0.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic v1.14.1 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
@@ -54,6 +53,7 @@ require (
 // go-yenc-simd: local sibling checkout until it is published
 replace github.com/go-while/go-yenc-simd => ../go-yenc-simd
 
-// subjectparser: go-while's fork (review-fixes branch) until it is published
-// or merged upstream; nzbparser imports it under the upstream path
-replace github.com/Tensai75/subjectparser => ../subjectparser
+// nzbparser: javi11's fork (active, has its own subject parser) with
+// go-while's fixes (branch review-fixes in ../nzbparser) until they are
+// published or merged
+replace github.com/javi11/nzbparser => ../nzbparser

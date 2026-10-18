@@ -4,8 +4,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
 
 const UseSharedCC = true      // experimental devel flag, to test sharedConn between routines
@@ -326,9 +326,9 @@ func (item *segmentChanItem) PrintItemFlags(print bool, doLock bool, src string)
 		}
 	}
 	if len(flags) > 0 {
-		dlog(always, "src='%s' ItemFlags: '%s' seg.Id='%s'", src, flags, item.segment.Id)
+		dlog(always, "src='%s' ItemFlags: '%s' seg.Id='%s'", src, flags, item.segment.ID)
 	} else {
-		dlog(cfg.opt.BUG, "src='%s' ItemFlags: none seg.Id='%s'", src, item.segment.Id)
+		dlog(cfg.opt.BUG, "src='%s' ItemFlags: none seg.Id='%s'", src, item.segment.ID)
 	}
 } // end func segmentChanItem.PrintItemFlags
 

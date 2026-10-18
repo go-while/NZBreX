@@ -122,7 +122,7 @@ func (c *Cache) GoCacheChecker(cid int) {
 		}
 		filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
 		exists := FileExists(filename)
-		dlog(c.debug, "GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
+		dlog(c.debug, "GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.ID, item.hashedId)
 		if exists {
 			item.mux.Lock()
 			item.flagCache = true
@@ -172,17 +172,17 @@ func (c *Cache) GoYencWriter(cid int) {
 			c.yenc_writer_chan <- nil
 			return
 		}
-		dlog(c.debug, "GoYencWriter %d processing seg.Id='%s'", cid, yitem.item.segment.Id)
+		dlog(c.debug, "GoYencWriter %d processing seg.Id='%s'", cid, yitem.item.segment.ID)
 		n := c.YencWriter(yitem)
 		wrote_bytes += uint64(n)
-		dlog(c.debug, "GoYencWriter %d finished seg.Id='%s' wrote=%d bytes", cid, yitem.item.segment.Id, n)
+		dlog(c.debug, "GoYencWriter %d finished seg.Id='%s' wrote=%d bytes", cid, yitem.item.segment.ID, n)
 	}
 } // end func c.GoCacheWriter
 
 func (c *Cache) CacheReader(item *segmentChanItem) (read_bytes int) {
 	item.mux.Lock()
 	if item.hashedId == "" {
-		item.hashedId = SHA256str("<" + item.segment.Id + ">")
+		item.hashedId = SHA256str("<" + item.segment.ID + ">")
 	}
 	item.mux.Unlock()
 	filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
@@ -210,13 +210,13 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 	start := time.Now()
 	item.mux.Lock()
 	if len(item.article) == 0 {
-		dlog(always, "ERROR CacheWriter: item.article is empty seg.Id='%s'", item.segment.Id)
+		dlog(always, "ERROR CacheWriter: item.article is empty seg.Id='%s'", item.segment.ID)
 		item.mux.Unlock()
 		return 0
 	}
 
 	if item.hashedId == "" {
-		item.hashedId = SHA256str("<" + item.segment.Id + ">")
+		item.hashedId = SHA256str("<" + item.segment.ID + ">")
 	}
 	item.mux.Unlock()
 
@@ -278,7 +278,7 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 		if wrote_bytes > 0 {
 			writeSpeedinMegaBytes = float64(wrote_bytes) / 1024.0 / 1024.0 / float64(time.Since(start).Milliseconds()) * 1000
 		}
-		dlog(always, "CacheWrote seg.Id='%s' h_Id='%s' => f='%s' (b=%d) took=(%d ms) speed=(%.2f MByte/s)", item.segment.Id, item.hashedId, filename, wrote_bytes, time.Since(start).Milliseconds(), writeSpeedinMegaBytes)
+		dlog(always, "CacheWrote seg.Id='%s' h_Id='%s' => f='%s' (b=%d) took=(%d ms) speed=(%.2f MByte/s)", item.segment.ID, item.hashedId, filename, wrote_bytes, time.Since(start).Milliseconds(), writeSpeedinMegaBytes)
 	}
 	return
 } // end func c.CacheWriter
@@ -308,7 +308,7 @@ func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
 		return
 	}
 	if len(yPart.Body) == 0 {
-		dlog(always, "ERROR WriteYenc: empty Body seg.Id='%s'", item.segment.Id)
+		dlog(always, "ERROR WriteYenc: empty Body seg.Id='%s'", item.segment.ID)
 		return
 	}
 
@@ -327,7 +327,7 @@ wait:
 			break wait
 		default:
 			// chan full
-			log.Printf("WriteYenc waiting to enqueue seg.Id='%s' yenc_queue_cnt=%d channel=%d/%d", item.segment.Id, GCounter.GetValue("yencQueueCnt"), len(c.yenc_writer_chan), cap(c.yenc_writer_chan))
+			log.Printf("WriteYenc waiting to enqueue seg.Id='%s' yenc_queue_cnt=%d channel=%d/%d", item.segment.ID, GCounter.GetValue("yencQueueCnt"), len(c.yenc_writer_chan), cap(c.yenc_writer_chan))
 			time.Sleep(time.Second)
 		}
 	}
@@ -335,10 +335,10 @@ wait:
 
 func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 	defer GCounter.Decr("yencQueueCnt")
-	dlog(always, "YencWriter processing seg.Id='%s'", yitem.item.segment.Id)
+	dlog(always, "YencWriter processing seg.Id='%s'", yitem.item.segment.ID)
 	yitem.item.mux.Lock()
 	if yitem.item.hashedId == "" {
-		yitem.item.hashedId = SHA256str("<" + yitem.item.segment.Id + ">")
+		yitem.item.hashedId = SHA256str("<" + yitem.item.segment.ID + ">")
 	}
 	yitem.item.mux.Unlock()
 
