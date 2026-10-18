@@ -5,6 +5,11 @@ name: Release
 #   purego     no cgo, decoder go-yenc-simd; every target, from one runner
 #   rapidyenc  rapidyenc's C decoder; the platforms with a C toolchain here
 # and publishes them in one release with SHA256SUMS.
+#
+# The release text is: the annotated tag's message (write the changes there:
+# git tag -a v0.0.8 -F notes.txt), the commits since the previous tag, and
+# .github/release-notes.md (which file to download, how to check it). The
+# release targets testing if the tagged commit is on it, otherwise main.
 
 on:
   push:
@@ -122,21 +127,54 @@ jobs:
     permissions:
       contents: write # the only job that may write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0 # tags and branches, for the notes and the target
+          path: src
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - name: Release notes
+        working-directory: src
+        run: |
+          # --generate-notes listed unrelated PRs merged into main. The previous
+          # release is the next lower version tag ("-test" sorts before the
+          # release); older release tags may not be ancestors of this one.
+          prev=$(git -c versionsort.suffix=- tag -l 'v*' --sort=-v:refname | awk -v t="$TAG" 'found { print; exit } $0 == t { found = 1 }')
+          {
+            git tag -l --format='%(contents)' "$TAG"
+            if [ -n "$prev" ]; then
+              n=$(git rev-list --count --no-merges "$prev..$TAG")
+              echo
+              echo "<details><summary>$n commits since $prev</summary>"
+              echo
+              git log --no-merges -n 100 --format='+ %s (%h)' "$prev..$TAG" # -n, not | head: with pipefail a SIGPIPE fails the step
+              [ "$n" -gt 100 ] && echo "+ ... and $((n - 100)) more"
+              echo
+              echo "</details>"
+            fi
+            echo
+            sed -e "s/@TAG@/$TAG/g" -e "s/@VER@/${TAG#v}/g" .github/release-notes.md
+          } > ../notes.md
+          cat ../notes.md
       - name: Create or update the release
+        working-directory: src
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           prerelease=
           case "$TAG" in *-test*|*-alpha*|*-beta*|*-rc*) prerelease=--prerelease ;; esac
+          # the branch the tag is on, so "N commits since this release" counts the right one
+          target=main
+          if git merge-base --is-ancestor "$TAG^{commit}" origin/testing 2>/dev/null; then target=testing; fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+            gh release upload "$TAG" ../dist/* --clobber
+            gh release edit "$TAG" --notes-file ../notes.md --target "$target"
           else
-            gh release create "$TAG" dist/* --verify-tag --title "NZBreX $TAG" --generate-notes $prerelease
+            gh release create "$TAG" ../dist/* --verify-tag --title "NZBreX $TAG" --notes-file ../notes.md --target "$target" $prerelease
           fi
