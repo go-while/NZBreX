@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -47,16 +48,16 @@ var itemReadLineCommands = map[string]struct{}{
 }
 
 // CMD_STAT checks if the article exists on the server
-// and returns the status code or an error if it fails.
-func CMD_STAT(connitem *ConnItem, item *segmentChanItem) (int, error) {
+// and returns the status code, message and an error if it fails.
+func CMD_STAT(connitem *ConnItem, item *segmentChanItem) (int, string, error) {
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
-		return 0, fmt.Errorf("error CMD_STAT srvtp=nil")
+		return 0, "", fmt.Errorf("error CMD_STAT srvtp=nil")
 	}
 	start := time.Now()
-	id, err := connitem.srvtp.Cmd("STAT <%s>", item.segment.Id)
+	id, err := connitem.srvtp.Cmd("STAT %s", item.segment.ID)
 	if err != nil {
 		dlog(always, "ERROR checkMessageID @ '%s' srvtp.Cmd err='%v'", connitem.c.provider.Name, err)
-		return 0, err
+		return 0, "", err
 	}
 	connitem.srvtp.StartResponse(id)
 	code, msg, err := connitem.srvtp.ReadCodeLine(223)
@@ -64,68 +65,73 @@ func CMD_STAT(connitem *ConnItem, item *segmentChanItem) (int, error) {
 	switch code {
 	case 223:
 		// article exists... or should!
-		dlog(cfg.opt.DebugSTAT, "CMD_STAT +OK+ seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
-		return code, nil
+		dlog(cfg.opt.DebugSTAT, "CMD_STAT +OK+ seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
+		return code, msg, nil
 	case 430:
 		// "430 No Such Article"
-		dlog(cfg.opt.DebugSTAT, "CMD_STAT -NO- seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
-		return code, nil
+		dlog(cfg.opt.DebugSTAT, "CMD_STAT -NO- seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
+		return code, msg, nil
 	case 451:
-		dlog(cfg.opt.DebugSTAT, "CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.Id, connitem.c.provider.Name, msg)
-		return code, nil
+		dlog(cfg.opt.DebugSTAT, "CMD_STAT got DMCA code=451 seg.Id='%s' @ '%s' msg='%s'", item.segment.ID, connitem.c.provider.Name, msg)
+		return code, msg, nil
 	}
-	return code, fmt.Errorf("error CMD_STAT returned unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, connitem.c.provider.Name, time.Since(start), err)
+	return code, msg, fmt.Errorf("error CMD_STAT returned unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, connitem.c.provider.Name, time.Since(start), err)
 } // end func CMD_STAT
 
 // CMD_ARTICLE fetches the article from the server.
 // It returns the response code, message, size of the article, and any error encountered.
 // If the article is successfully fetched, it will be stored in item.article.
-func CMD_ARTICLE(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, error) {
+func CMD(connitem *ConnItem, item *segmentChanItem, command string) (int, string, uint64, error) {
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
-		return 0, "", 0, fmt.Errorf("error in CMD_ARTICLE srvtp=nil")
+		return 0, "", 0, fmt.Errorf("error in CMD srvtp=nil")
 	}
-	if debugthis {
-		return 220, "fake article", 1234, nil
+	rcode := 0
+	switch command {
+	case cmdARTICLE:
+		rcode = 220
+	case cmdHEAD:
+		rcode = 221
+	case cmdBODY:
+		rcode = 222
 	}
-
 	start := time.Now()
-	id, aerr := connitem.srvtp.Cmd("ARTICLE <%s>", item.segment.Id)
+	id, aerr := connitem.srvtp.Cmd("%s %s", command, item.segment.ID)
 	if aerr != nil {
-		dlog(always, "ERROR in CMD_ARTICLE srvtp.Cmd @ '%s' err='%v'", connitem.c.provider.Name, aerr)
+		dlog(always, "ERROR in CMD srvtp.Cmd @ '%s' err='%v'", connitem.c.provider.Name, aerr)
 		return 0, "", 0, aerr
 	}
 	connitem.srvtp.StartResponse(id)
-	code, msg, err := connitem.srvtp.ReadCodeLine(220)
+	code, msg, err := connitem.srvtp.ReadCodeLine(rcode)
 	connitem.srvtp.EndResponse(id)
 	switch code {
-	case 220:
-		// article is coming
+	case 220, 221, 222:
+		// article/head/body is coming
 		// old textproto.ReadDotLines replaced with new function: readArticleDotLines
 		// to clean up headers directly while fetching from network
 		// and decoding yenc on the fly
-		rcode, rxb, _, err := readDotLines(connitem, item, cmdARTICLE)
+		rcode, rxb, _, err := readDotLines(connitem, item, command)
 		if err != nil {
-			dlog(always, "ERROR in CMD_ARTICLE srvtp.ReadDotLines @ '%s' err='%v' code=%d rcode=%d", connitem.c.provider.Name, err, code, rcode)
+			dlog(always, "ERROR in CMD %s srvtp.ReadDotLines @ '%s' err='%v' code=%d rcode=%d", command, connitem.c.provider.Name, err, code, rcode)
 			return code, "", uint64(rxb), err
 		}
-		dlog(cfg.opt.DebugARTICLE, "CMD_ARTICLE seg.Id='%s' @ '%s' msg='%s' rxb=%d lines=%d code=%d dlcnt=%d fails=%d", item.segment.Id, connitem.c.provider.Name, msg, item.size, len(item.article), code, item.dlcnt, item.fails)
+		dlog(cfg.opt.DebugARTICLE, "CMD %s seg.Id='%s' @ '%s' msg='%s' rxb=%d lines=%d code=%d dlcnt=%d fails=%d", command, item.segment.ID, connitem.c.provider.Name, msg, item.size, len(item.article), code, item.dlcnt, item.fails)
 		if rcode == 99932 {
 			code = 99932 // bad crc32
 		}
 		return code, msg, uint64(rxb), nil
 
 	case 430:
-		dlog(cfg.opt.DebugARTICLE, "INFO CMD_ARTICLE:430 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, connitem.c.provider.Name, msg, err, item.dlcnt, item.fails)
+		dlog(cfg.opt.DebugARTICLE, "INFO CMD %s:430 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", command, item.segment.ID, connitem.c.provider.Name, msg, err, item.dlcnt, item.fails)
 		return code, msg, 0, nil // not an error, just no such article
 
 	case 451:
-		dlog((cfg.opt.Verbose || cfg.opt.Print430), "INFO CMD_ARTICLE:451 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", item.segment.Id, connitem.c.provider.Name, msg, err, item.dlcnt, item.fails)
+		dlog((cfg.opt.Verbose || cfg.opt.Print430), "INFO CMD %s:451 seg.Id='%s' @ '%s' msg='%s' err='%v' dlcnt=%d fails=%d", command, item.segment.ID, connitem.c.provider.Name, msg, err, item.dlcnt, item.fails)
 		return code, msg, 0, nil // not an error, just DMCA
 
 	default:
 		// returns the unknown code with an error!
 	}
-	return code, msg, 0, fmt.Errorf("error in CMD_ARTICLE got unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", code, msg, connitem.c.provider.Name, time.Since(start), err)
+	return code, msg, 0, fmt.Errorf("error in CMD %s got unknown code=%d msg='%s' @ '%s' reqTook='%v' err='%v'", command, code, msg, connitem.c.provider.Name, time.Since(start), err)
 } // end func CMD_ARTICLE
 
 // CMD_IHAVE sends an article to the server using the IHAVE command.
@@ -154,7 +160,7 @@ func CMD_IHAVE(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, 
 	 *    437    Transfer rejected; do not retry
 	 */
 	wireformat := false // not implemented. read below in: case true
-	id, err := connitem.srvtp.Cmd("IHAVE <%s>", item.segment.Id)
+	id, err := connitem.srvtp.Cmd("IHAVE %s", item.segment.ID)
 	if err != nil {
 		dlog(always, "ERROR CMD_IHAVE @ '%s' srvtp.Cmd err='%v'", connitem.c.provider.Name, err)
 		return 0, "", 0, err
@@ -162,25 +168,30 @@ func CMD_IHAVE(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, 
 
 	connitem.srvtp.StartResponse(id)
 	code, msg, err := connitem.srvtp.ReadCodeLine(335)
-	if err != nil {
+	// EndResponse must run on every path: textproto serves responses in order,
+	// so a skipped EndResponse makes the next command on this conn block forever
+	// in StartResponse (seen when a server answers 436 while shutting down).
+	connitem.srvtp.EndResponse(id)
+	if err != nil && code == 0 {
+		// read error, no reply line
 		dlog(always, "ERROR CMD_IHAVE srvtp.ReadCodeLine @ '%s' err='%v'", connitem.c.provider.Name, err)
 		return code, msg, 0, err
 	}
-	connitem.srvtp.EndResponse(id)
+	// a reply other than 335 (435, 436, ...) also sets err; the switch below handles it
 
 	switch code {
 	case 335:
 		// Send article to be transferred
-		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 335 sendit seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 335 sendit seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 
 	case 435:
 		// Article not wanted
-		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 435 unwanted seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, connitem.c.provider.Name, msg, err)
+		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 435 unwanted seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.ID, connitem.c.provider.Name, msg, err)
 		return code, msg, 0, nil
 
 	case 436:
 		// Transfer not possible; try again later
-		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 436 retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, connitem.c.provider.Name, msg, err)
+		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 436 retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.ID, connitem.c.provider.Name, msg, err)
 		return code, msg, 0, nil
 
 	default:
@@ -233,17 +244,17 @@ func CMD_IHAVE(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, 
 	switch code {
 	case 235:
 		//Article transferred OK
-		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 235 OK seg.Id='%s' @ '%s' msg='%s' txb=%d", item.segment.Id, connitem.c.provider.Name, msg, txb)
+		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 235 OK seg.Id='%s' @ '%s' msg='%s' txb=%d", item.segment.ID, connitem.c.provider.Name, msg, txb)
 		return code, msg, txb, nil
 
 	case 436:
 		// Transfer failed; try again later
-		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 436 transfer failed, retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, connitem.c.provider.Name, msg, err)
+		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 436 transfer failed, retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.ID, connitem.c.provider.Name, msg, err)
 		return code, msg, txb, nil
 
 	case 437:
 		//  Transfer rejected; do not retry
-		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 437 transfer rejected, no retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.Id, connitem.c.provider.Name, msg, err)
+		dlog(cfg.opt.DebugIHAVE, "CMD_IHAVE 437 transfer rejected, no retry seg.Id='%s' @ '%s' msg='%s' err='%v'", item.segment.ID, connitem.c.provider.Name, msg, err)
 		return code, msg, txb, nil
 	}
 
@@ -326,27 +337,32 @@ func CMD_POST(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, e
 // the number of bytes read (rxb), the content as a slice of strings, and any error encountered.
 // The function supports parsing headers, handling continued lines, and cleaning headers based on the configuration.
 // It also supports yenc decoding if enabled in the configuration.
+// errReadAborted closes the rapidyenc pipe when readDotLines returns early.
+var errReadAborted = errors.New("readDotLines aborted")
+
 // WARNING: TODO! Be careful when reading X/OVER or X/HDR on large groups because you may run out of memory!
-func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code int, rxb int, content []string, err error) {
+func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (code int, rxb int, content []string, err error) {
 	if connitem.conn == nil || connitem.srvtp == nil {
 		connitem.c.CloseConn(connitem, nil)
 		return 0, 0, nil, fmt.Errorf("error readArticleDotLines: conn or srvtp nil @ '%s'", connitem.c.provider.Name)
 	}
-	if !IsItemCommand(what) && !IsOtherCommand(what) {
+	if !IsItemCommand(command) && !IsOtherCommand(command) {
 		// if not an item command or other command! this is a bug!
 		// we just die here because returning an error will f***up the connection as it is already receiving lines from remote
-		log.Printf("error readArticleDotLines: invalid command '%s'", what)
+		log.Printf("error readArticleDotLines: invalid command '%s'", command)
 		os.Exit(1)
 	}
-	if IsOtherCommand(what) && item != nil {
+	if IsOtherCommand(command) && item != nil {
 		// do not submit an item for other commands! this is a bug!
 		// we just die here because returning an error will f***up the connection as it is already receiving lines from remote
-		log.Printf("error readArticleDotLines: do not submit an item for command '%s'", what)
+		log.Printf("error readArticleDotLines: do not submit an item for command '%s'", command)
 		os.Exit(1)
 	}
 	var decoder *yenc.Decoder
 	var parseHeader, ignoreNextContinuedLine, gotYencHeader, gotMultipart, brokenYenc bool // = false, false, false, false
-	if what == cmdARTICLE || what == cmdHEAD {
+	var sawYbegin bool                                                                     // mode 4: a "=ybegin " body line was seen, so the article is yEnc
+	var notYenc bool                                                                       // mode 4: rapidyenc failed on an article without =ybegin
+	if command == cmdARTICLE || command == cmdHEAD {
 		parseHeader = true
 	}
 	async, sentLinesToDecoder := false, 0 // initialize async and sentLinesToDecoder, will be set depending on -yenctest=1,2,3,4
@@ -365,15 +381,15 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 	case 4:
 		// use rapidyenc to decode the body lines
 		pipeReader, pipeWriter = io.Pipe()
-		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc AcquireDecoderWithReader for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc AcquireDecoderWithReader for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 		rydecoder = rapidyenc.AcquireDecoderWithReader(pipeReader)
 		if rydecoder == nil {
 			connitem.c.CloseConn(connitem, nil)
-			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 		}
-		rydecoder.SetSegmentId(&item.segment.Id)  // set the segment ID for the decoder
+		rydecoder.SetSegmentId(&item.segment.ID)  // set the segment ID for the decoder
 		defer rapidyenc.ReleaseDecoder(rydecoder) // release the decoder after processing
-		dlog(cfg.opt.DebugRapidYenc, "readDotLines: using rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+		dlog(cfg.opt.DebugRapidYenc, "readDotLines: using rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 		ryDoneChan = make(chan error, 1)
 		// we will read the decoded data from the decoder in a separate goroutine
 		// this allows us to decode the data asynchronously while we are reading lines from the textproto.Conn
@@ -381,6 +397,7 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 			start := time.Now()
 			decodedBuf := make([]byte, cfg.opt.RapidYencBufSize)
 			total := 0
+			var result error
 			for {
 				n, err := rydecoder.Read(decodedBuf)
 				if n > 0 {
@@ -388,22 +405,22 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 					total += n
 				}
 				if err == io.EOF {
-					done <- nil
 					break
 				}
 				if err != nil {
-					done <- err
+					result = err
 					break
 				}
 			}
 			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc decoder done for seg.Id='%s' @ '%s' decoded=%d bufsize=%d total=%d took=(%d µs)", *segId, connitem.c.provider.Name, len(*decoded), len(decodedBuf), total, time.Since(start).Microseconds())
-		}(&item.segment.Id, &decodedData, ryDoneChan)
+			done <- result // last: after this the caller may release the decoder
+		}(&item.segment.ID, &decodedData, ryDoneChan)
 
 	case 3:
 		// yenc test 3 means we parse yenc lines directly to the decoder as we read them from the textproto.Conn,
 		async = true // we will decode yenc lines asynchronously
 		decoder = yenc.NewDecoder(nil, nil, ydat, 1)
-		decoder.SegId = &item.segment.Id
+		decoder.SegId = &item.segment.ID
 		counter = NewCounter(2)
 		releaseDecoder = make(chan struct{}, 1) // channel to release the decoder after processing
 
@@ -441,7 +458,9 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 							cERR++
 							counter.Incr("ERR")
 							returnAsyncCoreLimiter()
-							break readChan
+							// keep draining (broken skips the rest): breaking here left the reader
+							// blocked on a full decodeBodyChan forever
+							continue readChan
 						}
 						returnAsyncCoreLimiter()
 
@@ -454,9 +473,28 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, what string) (code 
 				} // end for range decodeBodyChan
 				// we are done with the decodeBodyChan, now we can release the decoder (via defer)
 				dlog(cfg.opt.Debug, "END async decoder cOK=%d cERR=%d took=(%d µs) seg.Id='%s' @ '%s'", cOK, cERR, time.Since(start).Microseconds(), segId, provName)
-			}(item.segment.Id, connitem.c.provider.Name, decodeBodyChan, counter, releaseDecoder)
+			}(item.segment.ID, connitem.c.provider.Name, decodeBodyChan, counter, releaseDecoder)
 		} // end if async
 	} // end case 3
+
+	// An early return (read error, max size, write error, ...) used to leave the async
+	// decoder goroutine blocked forever: case 4 on the pipe that was never closed (and the
+	// deferred ReleaseDecoder handed the decoder back while it still read from it),
+	// case 3 on decodeBodyChan. The success path below closes them itself (finished).
+	finished := false
+	defer func() {
+		if finished {
+			return
+		}
+		if pipeWriter != nil {
+			pipeWriter.CloseWithError(errReadAborted)
+			<-ryDoneChan // the reader goroutine has stopped: ReleaseDecoder (deferred before) is safe now
+		}
+		if decodeBodyChan != nil {
+			close(decodeBodyChan)
+			<-releaseDecoder // it drains what is buffered, then exits
+		}
+	}()
 	startReadLines := time.Now()
 	i := 0
 readlines:
@@ -471,30 +509,33 @@ readlines:
 			return 0, rxb, nil, err
 		}
 		// see every line thats coming in
-		//dlog( "readArticleDotLines: seg.Id='%s' line='%s'", segment.Id, line)
+		//dlog( "readArticleDotLines: seg.Id='%s' line='%s'", segment.ID, line)
 		rxb += len(line)
-		if IsItemCommand(what) && rxb > cfg.opt.MaxArtSize {
+		if IsItemCommand(command) && rxb > cfg.opt.MaxArtSize {
 			// max article size reached, stop reading
 			// this is a DoS protection, so we do not read more than maxartsize
-			err = fmt.Errorf("error readDotLines: maxartsize=%d > rxb=%d seg.Id='%s' what='%s'", cfg.opt.MaxArtSize, rxb, item.segment.Id, what)
+			err = fmt.Errorf("error readDotLines: maxartsize=%d > rxb=%d seg.Id='%s' what='%s'", cfg.opt.MaxArtSize, rxb, item.segment.ID, command)
 			log.Print(err)
 			connitem.c.CloseConn(connitem, nil)
 			return 0, rxb, nil, err
 		}
 
+		if (parseHeader && len(line) == 0) || (command == cmdHEAD && len(line) == 1 && line == ".") {
+			// reading header ends here
+			parseHeader = false
+			if !proxy {
+				// add new headers for ignored ones (re-uploads only: the proxy relays
+				// articles unchanged, plan 5.2)
+				now := time.Now().Format(time.RFC1123Z)
+				datestr := fmt.Sprintf("Date: %s", now)
+				content = append(content, datestr)
+				content = append(content, "Path: not-for-mail")
+			}
+		}
+
 		// found final dot in line, break here
 		if len(line) == 1 && line == "." {
 			break
-		}
-
-		if parseHeader && len(line) == 0 {
-			// reading header ends here
-			parseHeader = false
-
-			// add new headers for ignored ones
-			now := time.Now().Format(time.RFC1123Z)
-			datestr := fmt.Sprintf("Date: %s", now)
-			content = append(content, datestr)
 		}
 
 		if parseHeader {
@@ -508,12 +549,13 @@ readlines:
 				continue readlines
 			}
 
-			if cfg.opt.CleanHeaders {
-				// ignore headers from cleanHeader slice
+			if cfg.opt.CleanHeaders && !proxy {
+				// ignore headers from cleanHeader slice. Only for re-uploads: the proxy
+				// relays articles unchanged (stripping broke signatures over those headers).
 				for _, key := range cleanHeader {
 					if strings.HasPrefix(line, key) {
 						ignoreNextContinuedLine = true
-						dlog(cfg.opt.DebugARTICLE, "cleanHeader: seg.ID='%s' ignore key='%s'", item.segment.Id, key)
+						dlog(cfg.opt.DebugARTICLE, "cleanHeader: seg.ID='%s' ignore key='%s'", item.segment.ID, key)
 						// will not append this and ignore any following continued spaced line(s)
 						continue readlines
 					}
@@ -522,9 +564,9 @@ readlines:
 			content = append(content, line)
 		} // end parseHeader
 
-		if !parseHeader && what != cmdHEAD {
+		if !parseHeader && command != cmdHEAD {
 			i++ // counts body lines
-			if what == cmdARTICLE || what == cmdBODY {
+			if command == cmdARTICLE || command == cmdBODY {
 				// dot-stuffing on received lines
 				/*
 					Receiver Side: How to Handle Dot-Stuffing
@@ -540,12 +582,12 @@ readlines:
 				}
 			}
 
-			if what == cmdARTICLE || what == cmdBODY || IsOtherCommand(what) {
+			if command == cmdARTICLE || command == cmdBODY || IsOtherCommand(command) {
 				// if we are in ARTICLE or BODY or any other multiline command, we store the line
 				content = append(content, line)
 			}
 
-			if cfg.opt.YencCRC && !brokenYenc && (what == cmdARTICLE || what == cmdBODY) {
+			if cfg.opt.YencCRC && !brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
 				switch cfg.opt.YencTest {
 				case 1:
 					// case 1 needs double the memory
@@ -555,6 +597,9 @@ readlines:
 					ydat = append(ydat, &line) // as []*string line per line needs less mem allocs
 				case 4:
 					// rapidyenc test 4
+					if !sawYbegin && strings.HasPrefix(line, "=ybegin ") {
+						sawYbegin = true
+					}
 					//ydec = append(ydec, line+CRLF...) // append the line to the byte buffer
 					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
 					if _, err := pipeWriter.Write([]byte(line + CRLF)); err != nil {
@@ -563,7 +608,7 @@ readlines:
 						dlog(always, "ERROR readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
 						return 0, rxb, nil, fmt.Errorf("error readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
 					}
-					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write done line=%d seg.Id='%s' @ '%s'", i, item.segment.Id, connitem.c.provider.Name)
+					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write done line=%d seg.Id='%s' @ '%s'", i, item.segment.ID, connitem.c.provider.Name)
 				case 3:
 					// case 3
 					// parse yenc lines directly and asynchronously
@@ -580,7 +625,7 @@ readlines:
 						if decoder.Multipart && !gotMultipart {
 							if err := decoder.ReadPartHeader(line); err != nil {
 								brokenYenc = true // we got a broken yenc multipart line
-								log.Printf("ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' decoder.ReadPartHeader err='%v'", item.segment.Id, connitem.c.provider.Name, err)
+								log.Printf("ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' decoder.ReadPartHeader err='%v'", item.segment.ID, connitem.c.provider.Name, err)
 								// continue reading lines, but we will not decode yenc anymore
 								continue readlines
 							}
@@ -595,7 +640,7 @@ readlines:
 							if counter.GetValue("ERR") > 0 {
 								// if we got an error, we do not decode yenc anymore
 								brokenYenc = true // we got a broken yenc body line
-								dlog(always, "ERROR async brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadBody counter.GetValue('ERR') > 0", item.segment.Id, connitem.c.provider.Name)
+								dlog(always, "ERROR async brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadBody counter.GetValue('ERR') > 0", item.segment.ID, connitem.c.provider.Name)
 								continue readlines // continue reading lines, but we will not decode yenc anymore
 							}
 							// send line to the decodeBodyChan for async processing
@@ -603,14 +648,14 @@ readlines:
 							decodeBodyChan <- &line
 							// sent line to the channel for async processing
 							sentLinesToDecoder++ // count sent lines to decoder
-							dlog(cfg.opt.BUG, "async readArticleDotLines: seg.Id='%s' @ '%s' sentLinesToDecoder=%d line='%x'", item.segment.Id, connitem.c.provider.Name, sentLinesToDecoder, line)
+							dlog(cfg.opt.BUG, "async readArticleDotLines: seg.Id='%s' @ '%s' sentLinesToDecoder=%d line='%x'", item.segment.ID, connitem.c.provider.Name, sentLinesToDecoder, line)
 
 						case false:
 							// now decode the incoming lines line by line for the yenc body
 							//if err := decoder.ReadBody(strings.TrimSpace(line), true); err != nil {
 							if err := decoder.ReadBody(line, true); err != nil {
 								brokenYenc = true // we got a broken yenc body line
-								dlog(always, "ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadBody err='%v'", item.segment.Id, connitem.c.provider.Name, err)
+								dlog(always, "ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadBody err='%v'", item.segment.ID, connitem.c.provider.Name, err)
 								// continue reading lines, but we will not decode yenc anymore
 								continue readlines
 							}
@@ -625,13 +670,13 @@ readlines:
 						// this is a yenc line, so we can parse it directly to the decoder
 						if err := decoder.ReadHeader(&line, false); err != nil {
 							brokenYenc = true // we got a broken yenc header
-							dlog(always, "ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadPartHeader err='%v'", item.segment.Id, connitem.c.provider.Name, err)
+							dlog(always, "ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadPartHeader err='%v'", item.segment.ID, connitem.c.provider.Name, err)
 							// continue reading lines, but we will not decode yenc anymore
 							continue readlines
 						}
 						if decoder.Part.Name == "" {
 							brokenYenc = true // we got a broken yenc header
-							dlog(always, "ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' empty Name field in yenc.Decoder", item.segment.Id, connitem.c.provider.Name)
+							dlog(always, "ERROR brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' empty Name field in yenc.Decoder", item.segment.ID, connitem.c.provider.Name)
 							// continue reading lines, but we will not decode yenc anymore
 							continue readlines
 						}
@@ -647,10 +692,11 @@ readlines:
 		// spammy! following dlog is for debugging purposes only and prints
 		//  the line number, length of the line, rxb
 		//   and accumulated content length while still reading lines!
-		dlog((cfg.opt.BUG && cfg.opt.DebugARTICLE), "readDotLines: seg.Id='%s' lineNum=%d len(line)=%d rxb=%d content=(%d lines)", item.segment.Id, i, len(line), rxb, len(content))
+		dlog((cfg.opt.BUG && cfg.opt.DebugARTICLE), "readDotLines: seg.Id='%s' lineNum=%d len(line)=%d rxb=%d content=(%d lines)", item.segment.ID, i, len(line), rxb, len(content))
 
 	} // end for readlines
 
+	finished = true // from here on the pipe / decodeBodyChan are closed below
 	// case 4: we are done reading lines, close the pipe writer from rapidyenc decoder
 	if pipeWriter != nil {
 		if _, err := pipeWriter.Write([]byte(DOT + CRLF)); err != nil { // write the final dot to the pipe
@@ -660,7 +706,12 @@ readlines:
 		pipeWriter.Close() // <-- THIS IS CRUCIAL!
 		err = <-ryDoneChan // wait for decoder to finish
 
-		if err != nil {
+		if err != nil && !sawYbegin {
+			// not a yEnc article (plain text): nothing to check, deliver it as it is
+			dlog(cfg.opt.DebugRapidYenc, "readDotLines: seg.Id='%s' has no =ybegin line, skipping the yEnc check", item.segment.ID)
+			notYenc = true
+			err = nil
+		} else if err != nil {
 			dlog(always, "ERROR readDotLines: rapidyenc.Read: err='%v'", err)
 			brokenYenc = true
 			content = nil // reset content to nil if we got an error
@@ -668,9 +719,22 @@ readlines:
 	} else if async && decodeBodyChan != nil { // case 3:
 		close(decodeBodyChan) // close the channel to signal we are done with reading lines
 	}
-	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.Id, rxb, len(content), time.Since(startReadLines).Microseconds(), what)
+	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.ID, rxb, len(content), time.Since(startReadLines).Microseconds(), command)
 
-	if cfg.opt.YencCRC && !brokenYenc && (what == cmdARTICLE || what == cmdBODY) {
+	if cfg.opt.YencCRC && brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
+		// A broken yEnc article counts as bad crc. This check used to sit inside the
+		// "!brokenYenc" block below, so it never fired: readDotLines returned success
+		// with content == nil (an empty 220 to proxy clients, an empty article to workers).
+		if item.mux != nil {
+			item.mux.Lock()
+			item.badcrc++
+			item.mux.Unlock()
+		}
+		dlog(always, "ERROR readDotLines broken yEnc seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
+		return 99932, rxb, nil, nil // 99932 is a custom code for bad crc32
+	}
+
+	if cfg.opt.YencCRC && !brokenYenc && !notYenc && (command == cmdARTICLE || command == cmdBODY) {
 		yencstart := time.Now()
 		var startReadSignals time.Time
 		var isBadCrc bool
@@ -681,12 +745,12 @@ readlines:
 
 			getCoreLimiter()
 			decoder := yenc.NewDecoder(nil, ydec, nil, 1)
-			decoder.SegId = &item.segment.Id
+			decoder.SegId = &item.segment.ID
 			if yPart, badcrc, err := decoder.Decode(); err != nil { // chrisfarms/yenc
-				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, len(ydec), err)
+				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(ydec), err)
 				isBadCrc = badcrc
 			} else {
-				dlog(always, "YencCRC OK mode=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
+				dlog(always, "YencCRC OK mode=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, item.segment.ID, len(yPart.Body), yPart.Number, yPart.Crc32)
 				isBadCrc = badcrc
 			}
 			returnCoreLimiter()
@@ -695,16 +759,16 @@ readlines:
 
 			getCoreLimiter()
 			decoder := yenc.NewDecoder(nil, nil, ydat, 1)
-			decoder.SegId = &item.segment.Id
+			decoder.SegId = &item.segment.ID
 			if yPart, badcrc, err := decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
 				returnCoreLimiter()
-				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydat=(%d lines) err='%v' badcrc=%t", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, len(ydat), err, badcrc)
+				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydat=(%d lines) err='%v' badcrc=%t", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(ydat), err, badcrc)
 			} else {
 				returnCoreLimiter()
 				if yPart != nil {
-					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, yenc.SimdMode, item.segment.Id, len(yPart.Body), yPart.Number, yPart.Crc32)
+					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, yenc.SimdMode, item.segment.ID, len(yPart.Body), yPart.Number, yPart.Crc32)
 				} else {
-					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart is nil", cfg.opt.YencTest, yenc.SimdMode, item.segment.Id)
+					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart is nil", cfg.opt.YencTest, yenc.SimdMode, item.segment.ID)
 					// we got a nil yPart, so we do not write it to the cache
 					break
 				}
@@ -719,7 +783,7 @@ readlines:
 
 		case 3:
 			if decoder == nil {
-				dlog(always, "error readArticleDotLines: decoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+				dlog(always, "error readArticleDotLines: decoder is nil for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 				break
 			}
 			startReadSignals = time.Now()
@@ -737,13 +801,13 @@ readlines:
 				if releaseDecoder != nil {
 					<-releaseDecoder // wait for the decoder to finish processing
 				}
-				dlog(always, "readArticleDotLines: seg.Id='%s' @ '%s' waited=(%d µs) for async decoder sentLinesToDecoder=%d", item.segment.Id, connitem.c.provider.Name, time.Since(start).Microseconds(), sentLinesToDecoder)
+				dlog(always, "readArticleDotLines: seg.Id='%s' @ '%s' waited=(%d µs) for async decoder sentLinesToDecoder=%d", item.segment.ID, connitem.c.provider.Name, time.Since(start).Microseconds(), sentLinesToDecoder)
 				/*
 					waitYenc:
 						for {
 							if counter.GetValue("ERR") > 0 {
 								// if we got an error, we do not decode yenc anymore
-								dlog(always, "ERROR async brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadBody counter.GetValue('ERR') > 0", item.segment.Id, connitem.c.provider.Name)
+								dlog(always, "ERROR async brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' yenc.ReadBody counter.GetValue('ERR') > 0", item.segment.ID, connitem.c.provider.Name)
 								break waitYenc
 							}
 							value := counter.GetValue("OK")
@@ -757,7 +821,7 @@ readlines:
 							}
 							if time.Now().After(timeout) {
 								// if we waited more than 100 milliseconds, we stop waiting
-								dlog(always, "ERROR async brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' timeout reached after 100 milliseconds", item.segment.Id, connitem.c.provider.Name)
+								dlog(always, "ERROR async brokenYenc readArticleDotLines: seg.Id='%s' @ '%s' timeout reached after 100 milliseconds", item.segment.ID, connitem.c.provider.Name)
 								break waitYenc
 							}
 							time.Sleep(time.Millisecond)
@@ -766,7 +830,7 @@ readlines:
 				if counter.GetValue("OK") != uint64(sentLinesToDecoder) {
 					// we did not process all lines, so we have a problem
 					brokenYenc = true // we got a broken yenc body line
-					dlog(always, "ERROR async brokenYenc countOK=%d sentLinesToDecoder=%d readArticleDotLines: seg.Id='%s' @ '%s'", countOK, sentLinesToDecoder, item.segment.Id, connitem.c.provider.Name)
+					dlog(always, "ERROR async brokenYenc countOK=%d sentLinesToDecoder=%d readArticleDotLines: seg.Id='%s' @ '%s'", countOK, sentLinesToDecoder, item.segment.ID, connitem.c.provider.Name)
 				} else {
 					dlog(cfg.opt.BUG, "readArticleDotLines: async yencReturnsOK countOK=%d sentLinesToDecoder=%d", countOK, sentLinesToDecoder)
 				}
@@ -776,8 +840,8 @@ readlines:
 				break // the case 3
 			}
 			// validate the yenc part
-			dlog(cfg.opt.BUG, "readArticleDotLines:try Validate yenctest=%d YencCRC seg.Id='%s' @ '%s' decoder.Part.Body=%d", cfg.opt.YencTest, item.segment.Id, connitem.c.provider.Name, len(decoder.Part.Body))
-			if err := decoder.Part.Validate(&item.segment.Id); err != nil || decoder.Part.BadCRC {
+			dlog(cfg.opt.BUG, "readArticleDotLines:try Validate yenctest=%d YencCRC seg.Id='%s' @ '%s' decoder.Part.Body=%d", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(decoder.Part.Body))
+			if err := decoder.Part.Validate(&item.segment.ID); err != nil || decoder.Part.BadCRC {
 				isBadCrc = decoder.Part.BadCRC
 				/*
 				* d.Part='&yenc.Part{
@@ -805,11 +869,11 @@ readlines:
 		case 4:
 			// rapidyenc test 4
 			if rydecoder == nil {
-				dlog(always, "error readDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+				dlog(always, "error readDotLines: rydecoder is nil for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 				break
 			}
 			// decodedData now contains the decoded yEnc body
-			dlog(len(decodedData) == 0, "ERROR readDotLines: rapidyenc.Read Num=%d seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Number, item.segment.Id, connitem.c.provider.Name, len(decodedData))
+			dlog(len(decodedData) == 0, "ERROR readDotLines: rapidyenc.Read Num=%d seg.Id='%s' @ '%s' decodedData=(%d bytes)", item.segment.Number, item.segment.ID, connitem.c.provider.Name, len(decodedData))
 
 			meta := rydecoder.Meta()
 			part := &yenc.Part{
@@ -832,9 +896,9 @@ readlines:
 				getAsyncCoreLimiter()
 				decoder = yenc.NewDecoder(nil, nil, nil, 1)
 				decoder.Part = part // assign the part to the old yenc decoder
-				decoder.SegId = &item.segment.Id
+				decoder.SegId = &item.segment.ID
 				// doublechecks crc again vs old yenc.crc !
-				if err := decoder.Part.Validate(&item.segment.Id); err != nil || decoder.Part.BadCRC {
+				if err := decoder.Part.Validate(&item.segment.ID); err != nil || decoder.Part.BadCRC {
 					returnAsyncCoreLimiter()
 					isBadCrc = decoder.Part.BadCRC
 					/*
@@ -859,18 +923,26 @@ readlines:
 					break         // the case 4
 				}
 				returnAsyncCoreLimiter()
-				dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc yenc.Part.Validate OK seg.Id='%s' @ '%s' part.Body=%d Number=%d crc32=%x", item.segment.Id, connitem.c.provider.Name, len(part.Body), part.Number, part.Crc32)
+				dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc yenc.Part.Validate OK seg.Id='%s' @ '%s' part.Body=%d Number=%d crc32=%x", item.segment.ID, connitem.c.provider.Name, len(part.Body), part.Number, part.Crc32)
 			} // end if cfg.opt.DoubleCheckRapidYencCRC
 
-			// Now write to cache
-			cache.WriteYenc(item, part)
+			// Now write to cache (only if yencout flag is enabled)
+			if cfg.opt.YencWrite && cacheON {
+				cache.WriteYenc(item, part)
+			} else {
+				// Free memory if not writing to cache
+				part.Body = nil
+				part = nil
+			}
 		} // end switch yencTest
-		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d brokenYenc=%t seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, brokenYenc, item.segment.Id, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
+		dlog(cfg.opt.DebugWorker, "readDotLines: YencCRC yenctest=%d brokenYenc=%t seg.Id='%s' @ '%s' rxb=%d content=(%d lines) Part.Validate:took=(%d µs) readDotLines:took=(%d µs) startReadSignals:took=(%d µs) cfg.opt.YencWrite=%t err='%v'", cfg.opt.YencTest, brokenYenc, item.segment.ID, connitem.c.provider.Name, rxb, len(content), time.Since(startReadLines).Microseconds(), time.Since(yencstart).Microseconds(), time.Since(startReadSignals).Microseconds(), cfg.opt.YencWrite, err)
 		if isBadCrc || brokenYenc {
-			item.mux.Lock()
-			item.badcrc++
-			item.mux.Unlock()
-			dlog(always, "ERROR readDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.Id, connitem.c.provider.Name)
+			if item.mux != nil {
+				item.mux.Lock()
+				item.badcrc++
+				item.mux.Unlock()
+			}
+			dlog(always, "ERROR readDotLines crc32 failed seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
 			return 99932, rxb, nil, nil // 99932 is a custom code for bad crc32
 		}
 	} // end if cfg.opt.YencCRC
@@ -878,12 +950,14 @@ readlines:
 	if content != nil {
 		// we have read the article or body or head or any other command that is not stored in the item
 		// so we can return the content
-		dlog(cfg.opt.DebugARTICLE, "readDotLines: seg.Id='%s' @ '%s' rxb=%d content=(%d lines)", item.segment.Id, connitem.c.provider.Name, rxb, len(content))
+		dlog(cfg.opt.DebugARTICLE, "readDotLines: seg.Id='%s' @ '%s' rxb=%d content=(%d lines)", item.segment.ID, connitem.c.provider.Name, rxb, len(content))
 
-		item.mux.Lock()
-		defer item.mux.Unlock()
+		if !proxy && item.mux != nil {
+			item.mux.Lock()
+			defer item.mux.Unlock()
+		}
 
-		switch what {
+		switch command {
 		case cmdARTICLE:
 			item.article = content
 			item.size = rxb
@@ -896,9 +970,9 @@ readlines:
 			item.headsize = rxb
 		default:
 			// handle multi-line dot-terminated command
-			if !IsOtherCommand(what) {
+			if !IsOtherCommand(command) {
 				// error unknown command
-				return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", what, connitem.c.provider.Name)
+				return 0, rxb, nil, fmt.Errorf("error readDotLines parsed unknown command '%s' @ '%s'", command, connitem.c.provider.Name)
 			}
 			// these commands are not stored in item, but will be returned as content
 			// pass
@@ -906,13 +980,13 @@ readlines:
 
 		// reaching here means we have read the article or body or head
 		// or any other command that is not stored in the item
-		if !IsOtherCommand(what) {
+		if !IsOtherCommand(command) {
 			// clears content on head, body or article
 			content = nil // clear content if not an other command
 		} // else pass
 
 	} else {
-		dlog(cfg.opt.DebugARTICLE, "readDotLines: seg.Id='%s' @ '%s' rxb=%d content is nil", item.segment.Id, connitem.c.provider.Name, rxb)
+		dlog(cfg.opt.DebugARTICLE, "readDotLines: seg.Id='%s' @ '%s' rxb=%d content is nil", item.segment.ID, connitem.c.provider.Name, rxb)
 	}
 	return 1, rxb, content, nil
 } // end func readArticleDotLines
@@ -962,10 +1036,14 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	}
 	rcode := 101 // expected
 
-	provider.mux.Lock()         // mutex #9b71 checkCapabilities
-	defer provider.mux.Unlock() // mutex #9b71 checkCapabilities
 	defer provider.ConnPool.CloseConn(connitem, nil)
+	// Swap the idle timeout for one deadline over the whole exchange, so a
+	// server that stops answering can't block the boot. The conn is closed afterwards,
+	// so the deadline never reaches a reused conn.
+	setIdleTimeout(connitem.conn, 0) // this exchange has its own deadline
+	connitem.conn.SetDeadline(time.Now().Add(connHandshakeTimeout))
 
+	// No lock is held during the network I/O (it used to hold provider.mux across both reads).
 	if !msg2srv(connitem.conn, "CAPABILITIES") {
 		return fmt.Errorf("error '%s' checkCapabilities", provider.Name)
 	}
@@ -977,24 +1055,25 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	if err != nil {
 		return fmt.Errorf("error '%s' checkCapabilities ReadDotLines err='%v'", provider.Name, err)
 	}
+	var check, ihave, post, stream bool
 	setpostProviders := 0
 	//dlog( "Read %d CAPAS from Provider %s", len(lines), provider.Name)
 	for _, capability := range lines {
 		//dlog( "CAPAS @ %s: %s", provider.Name, capability)
 		switch strings.ToLower(capability) {
 		case "check":
-			provider.capabilities.check = true
+			check = true
 		case "ihave":
-			provider.capabilities.ihave = true
+			ihave = true
 			setpostProviders++
 		case "post":
-			provider.capabilities.post = true
+			post = true
 			setpostProviders++
 		case "takethis":
-			provider.capabilities.stream = true
+			stream = true
 			setpostProviders++
 		case "streaming":
-			provider.capabilities.stream = true
+			stream = true
 			setpostProviders++
 		}
 	}
@@ -1004,8 +1083,14 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	if setpostProviders > 0 {
 		GCounter.Incr("postProviders")
 	}
+	provider.mux.Lock() // mutex #9b71 checkCapabilities
+	provider.capabilities.check = check
+	provider.capabilities.ihave = ihave
+	provider.capabilities.post = post
+	provider.capabilities.stream = stream
 	// provider.NoUpload will be set to true if none capa is available
-	provider.NoUpload = (!provider.capabilities.ihave && !provider.capabilities.post && !provider.capabilities.stream)
+	provider.NoUpload = (!ihave && !post && !stream)
+	provider.mux.Unlock()
 	// done
 	return nil
 } // end func checkCapabilities

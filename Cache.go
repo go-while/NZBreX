@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,7 +122,7 @@ func (c *Cache) GoCacheChecker(cid int) {
 		}
 		filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
 		exists := FileExists(filename)
-		dlog(c.debug, "GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.Id, item.hashedId)
+		dlog(c.debug, "GoCacheChecker exists=%t seg.Id='%s' hashedId='%s'", exists, item.segment.ID, item.hashedId)
 		if exists {
 			item.mux.Lock()
 			item.flagCache = true
@@ -156,26 +157,32 @@ func (c *Cache) GoCacheWriter(cid int) {
 		}
 		n := c.CacheWriter(item)
 		wrote_bytes += uint64(n)
+		// Memory slot already released by GoDownsRoutine before Add2Cache
 	}
 } // end func c.GoCacheWriter
 
 func (c *Cache) GoYencWriter(cid int) {
 	var wrote_bytes uint64
+	dlog(always, "GoYencWriter %d started", cid)
 	for {
+		dlog(cfg.opt.DebugCache, "GoYencWriter %d waiting for item...", cid)
 		yitem := <-c.yenc_writer_chan
 		if yitem == nil {
+			dlog(always, "YencWriter %d received nil item. closing. wrote total %d bytes", cid, wrote_bytes)
 			c.yenc_writer_chan <- nil
 			return
 		}
+		dlog(c.debug, "GoYencWriter %d processing seg.Id='%s'", cid, yitem.item.segment.ID)
 		n := c.YencWriter(yitem)
 		wrote_bytes += uint64(n)
+		dlog(c.debug, "GoYencWriter %d finished seg.Id='%s' wrote=%d bytes", cid, yitem.item.segment.ID, n)
 	}
 } // end func c.GoCacheWriter
 
 func (c *Cache) CacheReader(item *segmentChanItem) (read_bytes int) {
 	item.mux.Lock()
 	if item.hashedId == "" {
-		item.hashedId = SHA256str("<" + item.segment.Id + ">")
+		item.hashedId = SHA256str("<" + item.segment.ID + ">")
 	}
 	item.mux.Unlock()
 	filename := filepath.Join(c.cachedir, *item.nzbhashname, item.hashedId+".art")
@@ -203,13 +210,13 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 	start := time.Now()
 	item.mux.Lock()
 	if len(item.article) == 0 {
-		dlog(always, "ERROR CacheWriter: item.article is empty seg.Id='%s'", item.segment.Id)
+		dlog(always, "ERROR CacheWriter: item.article is empty seg.Id='%s'", item.segment.ID)
 		item.mux.Unlock()
 		return 0
 	}
 
 	if item.hashedId == "" {
-		item.hashedId = SHA256str("<" + item.segment.Id + ">")
+		item.hashedId = SHA256str("<" + item.segment.ID + ">")
 	}
 	item.mux.Unlock()
 
@@ -271,14 +278,18 @@ func (c *Cache) CacheWriter(item *segmentChanItem) (wrote_bytes int) {
 		if wrote_bytes > 0 {
 			writeSpeedinMegaBytes = float64(wrote_bytes) / 1024.0 / 1024.0 / float64(time.Since(start).Milliseconds()) * 1000
 		}
-		dlog(always, "CacheWrote seg.Id='%s' h_Id='%s' => f='%s' (b=%d) took=(%d ms) speed=(%.2f MByte/s)", item.segment.Id, item.hashedId, filename, wrote_bytes, time.Since(start).Milliseconds(), writeSpeedinMegaBytes)
+		dlog(always, "CacheWrote seg.Id='%s' h_Id='%s' => f='%s' (b=%d) took=(%d ms) speed=(%.2f MByte/s)", item.segment.ID, item.hashedId, filename, wrote_bytes, time.Since(start).Milliseconds(), writeSpeedinMegaBytes)
 	}
 	return
 } // end func c.CacheWriter
 
 func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp string, yencdir string, fp string, fp_tmp string) {
 	//filename = fmt.Sprintf("%s.part.%d.yenc", filepath.Base(item.file.Filename), item.segment.Number)
-	filename = fmt.Sprintf("%s.%0"+item.s.D+"d", filepath.Base(item.file.Filename), item.segment.Number)
+	base, ok := safeFileName(item.file.Filename)
+	if !ok {
+		base = SHA256str(item.file.Subject) // no usable name in the subject
+	}
+	filename = fmt.Sprintf("%s.%0"+item.s.D+"d", base, item.segment.Number)
 	filename_tmp = filename + ".tmp"
 	yencdir = filepath.Join(c.cachedir, *item.nzbhashname, "yenc")
 	fp = filepath.Join(yencdir, filename)
@@ -287,84 +298,106 @@ func (c *Cache) GetYenc(item *segmentChanItem) (filename string, filename_tmp st
 } // end func GetYenc
 
 func (c *Cache) WriteYenc(item *segmentChanItem, yPart *yenc.Part) {
+	// proxy items have no session, file or nzb name: GetYenc and the writer
+	// would dereference nil (in another goroutine, so nothing could recover it).
+	if proxy || item == nil || item.mux == nil || item.s == nil || item.file == nil || item.nzbhashname == nil {
+		return
+	}
 	if c.yenc_writer_chan == nil {
 		dlog(always, "ERROR cache.WriteYenc yenc_writer_chan is nil")
 		return
 	}
 	if len(yPart.Body) == 0 {
-		dlog(always, "ERROR WriteYenc: empty Body seg.Id='%s'", item.segment.Id)
+		dlog(always, "ERROR WriteYenc: empty Body seg.Id='%s'", item.segment.ID)
 		return
 	}
-	GCounter.Incr("yencQueueCnt")
-	GCounter.Incr("TOTAL_yencQueueCnt")
+
+	// Set flag BEFORE incrementing counter to avoid race
 	item.mux.Lock()
 	item.flaginYenc = true
 	item.mux.Unlock()
-	c.yenc_writer_chan <- &yenc_item{
-		item:  item,
-		yPart: yPart,
+
+wait:
+	for {
+		select {
+		case c.yenc_writer_chan <- &yenc_item{item: item, yPart: yPart}: // enqueue
+			// Increment counter AFTER successful enqueue
+			GCounter.Incr("yencQueueCnt")
+			GCounter.Incr("TOTAL_yencQueueCnt")
+			break wait
+		default:
+			// chan full
+			log.Printf("WriteYenc waiting to enqueue seg.Id='%s' yenc_queue_cnt=%d channel=%d/%d", item.segment.ID, GCounter.GetValue("yencQueueCnt"), len(c.yenc_writer_chan), cap(c.yenc_writer_chan))
+			time.Sleep(time.Second)
+		}
 	}
 } // emd func WriteYenc
 
 func (c *Cache) YencWriter(yitem *yenc_item) (wrote_bytes int) {
 	defer GCounter.Decr("yencQueueCnt")
-
+	dlog(always, "YencWriter processing seg.Id='%s'", yitem.item.segment.ID)
 	yitem.item.mux.Lock()
 	if yitem.item.hashedId == "" {
-		yitem.item.hashedId = SHA256str("<" + yitem.item.segment.Id + ">")
+		yitem.item.hashedId = SHA256str("<" + yitem.item.segment.ID + ">")
 	}
 	yitem.item.mux.Unlock()
 
 	_, _, yencdir, fp, fp_tmp := c.GetYenc(yitem.item)
 
 	if FileExists(fp) {
-		c.resetYencFlagsOnErr(yitem.item)
+		dlog(c.debug, "YencWriter file already exists, skipping: '%s'", fp)
+		yitem.item.mux.Lock()
+		yitem.item.flaginYenc = false
+		yitem.item.flagisYenc = true // File exists, so yenc IS done
+		yitem.item.mux.Unlock()
 		return 0
 	}
 
 	if !Mkdir(yencdir) {
+		dlog(always, "ERROR YencWriter Mkdir failed dir='%s'", yencdir)
 		c.resetYencFlagsOnErr(yitem.item)
 		return 0
 	}
 
-	dlog(c.debug, "Writing yenc part: '%s'", fp_tmp)
-	if file, err := os.OpenFile(fp_tmp, os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		defer func() {
-			if cerr := file.Close(); cerr != nil {
-				dlog(always, "ERROR YencWriter file.Close err='%v'", cerr)
-			}
-		}()
-		datawriter := bufio.NewWriterSize(file, DefaultYencWriteBuffer)
-		if n, err := datawriter.Write(yitem.yPart.Body); err != nil {
-			dlog(always, "ERROR YencWriter datawriter.Write err='%v'", err)
-			c.resetYencFlagsOnErr(yitem.item)
-			return 0
-		} else {
-			wrote_bytes += n
-		}
+	dlog(always, "DEBUG: Writing yenc part: '%s'", fp_tmp)
+	file, err := os.OpenFile(fp_tmp, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		dlog(always, "ERROR YencWriter OpenFile failed fp_tmp='%s' err='%v'", fp_tmp, err)
+		c.resetYencFlagsOnErr(yitem.item)
+		return 0
+	}
 
-		if err := datawriter.Flush(); err != nil {
-			dlog(always, "ERROR YencWriter datawriter.Flush err='%v'", err)
-			c.resetYencFlagsOnErr(yitem.item)
-			return 0
-		}
+	datawriter := bufio.NewWriterSize(file, DefaultYencWriteBuffer)
+	if n, err := datawriter.Write(yitem.yPart.Body); err != nil {
+		dlog(always, "ERROR YencWriter datawriter.Write err='%v'", err)
+		c.resetYencFlagsOnErr(yitem.item)
+		return 0
+	} else {
+		wrote_bytes += n
+	}
 
-		if err := os.Rename(fp_tmp, fp); err != nil {
-			dlog(always, "ERROR YencWriter move .tmp failed err='%v'", err)
-			c.resetYencFlagsOnErr(yitem.item)
-			return 0
-		}
+	if err := datawriter.Flush(); err != nil {
+		dlog(always, "ERROR YencWriter datawriter.Flush err='%v'", err)
+		c.resetYencFlagsOnErr(yitem.item)
+		return 0
+	}
 
-		yitem.item.mux.Lock()
-		yitem.item.flaginYenc = false
-		yitem.item.flagisYenc = true
-		/* // watch out for broken wings #99ffff!
-		if yitem.item.flaginUP {
-			doMemReturn = false
-		}
-		*/
-		yitem.item.mux.Unlock()
-	} // end OpenFile
+	if err := os.Rename(fp_tmp, fp); err != nil {
+		dlog(always, "ERROR YencWriter move .tmp failed err='%v'", err)
+		c.resetYencFlagsOnErr(yitem.item)
+		return 0
+	}
+
+	if err := file.Close(); err != nil {
+		dlog(always, "ERROR YencWriter file.Close err='%v'", err)
+		c.resetYencFlagsOnErr(yitem.item)
+		return 0
+	}
+
+	yitem.item.mux.Lock()
+	yitem.item.flaginYenc = false
+	yitem.item.flagisYenc = true
+	yitem.item.mux.Unlock()
 	yitem.yPart.Body = nil
 	yitem.yPart = nil
 	return

@@ -12,7 +12,7 @@ package main
  *     github.com/go-while/go-cpu-mem-profiler        (MIT License)
  *
  * Foreign Includes:
- *     github.com/Tensai75/nzbparser#commit:a1e0d80   (MIT License)
+ *     github.com/javi11/nzbparser (fork of Tensai75/nzbparser) (MIT License)
  *     github.com/Tensai75/cmpb#commit:16fb79f        (MIT License)
  *     github.com/fatih/color#commit:4c0661           (MIT License)
  *
@@ -55,6 +55,7 @@ var (
 	nzbfile       string    // flag
 	testmode      bool      // flag: used to test compilation
 	testrapidyenc bool      // flag: used to test rapidyenc decoder
+	proxy         bool      // flag: used to enable proxy server
 )
 
 func init() {
@@ -75,19 +76,63 @@ func main() {
 	wg := new(sync.WaitGroup)
 	thisProcessor := &PROCESSOR{}
 	go GoMutexStatus()
-
 	if err := thisProcessor.NewProcessor(); err != nil {
-		dlog(always, "ERROR NewProcessor: err='%v'", err)
+		dlog(always, "ERROR NewProcessor: proxy err='%v'", err)
 		os.Exit(1)
-	} else {
-		if cfg.opt.NzbDir != "" {
-			thisProcessor.SetDirRefresh(cfg.opt.DirRefresh)
-			dlog(cfg.opt.Debug, "// infinite wait!")
-			select {} // infinite wait!
-		}
 	}
-
-	if cfg.opt.NzbDir == "" && nzbfile != "" {
+	if cfg.opt.NzbDir != "" {
+		// directory mode: process the NZBs that appear in -nzbdir until a signal
+		w := thisProcessor.newDirWatcher(time.Duration(cfg.opt.DirRefresh) * time.Second)
+		dirShutdownOnSignal(w)
+		w.loop()
+		dlog(always, "-nzbdir: stopped")
+	} else if proxy {
+		// boot proxy server: a session that only loads the providers and runs their pools
+		s := thisProcessor.newBaseSession("PROXYSESSION")
+		s.ready = make(chan struct{})
+		ProxyParent = s // written before any listener goroutine starts
+		go GoCliRxTxCounter()
+		launchErr := make(chan error, 1)
+		wg.Add(1) // waitSession
+		go func(wg *sync.WaitGroup) {
+			launchErr <- thisProcessor.LaunchSession(s, "", wg)
+		}(wg)
+		// start listening only once providerList is loaded: handlers read it without a
+		// lock, and an early client saw no providers (plan 5.2)
+		select {
+		case <-s.ready:
+		case err := <-launchErr:
+			dlog(always, "ERROR NewProcessor Boot Proxy Server: err='%v'", err)
+			os.Exit(1)
+		}
+		if err := StartProxyServers(cfg.opt); err != nil {
+			dlog(always, "ERROR StartProxyServers: %v", err)
+			os.Exit(1)
+		}
+		proxyShutdownOnSignal()
+		dlog(cfg.opt.Debug, "main: wg.Wait()")
+		wg.Wait()
+	} else if webServerEnabled {
+		// boot web server: bind first, so a busy port or a bad cert exits right away (plan 4.1)
+		if err := StartWebServer(webServerAddr, thisProcessor); err != nil {
+			dlog(always, "ERROR StartWebServer: err='%v'", err)
+			os.Exit(1)
+		}
+		webShutdownOnSignal()
+		// a base session loads the providers for the web server, like the proxy's
+		s := thisProcessor.newBaseSession("WEBSESSION")
+		// /api/stats lists its providers while no job runs
+		webBaseSession.Store(s)
+		wg.Add(1) // waitSession
+		go func(wg *sync.WaitGroup) {
+			if err := thisProcessor.LaunchSession(s, "", wg); err != nil {
+				dlog(always, "ERROR NewProcessor Boot Web Server: err='%v'", err)
+				os.Exit(1)
+			}
+		}(wg)
+		dlog(cfg.opt.Debug, "main: wg.Wait()")
+		wg.Wait()
+	} else if cfg.opt.NzbDir == "" && nzbfile != "" {
 		wg.Add(1) // waitSession
 		go func(nzbfile string, wg *sync.WaitGroup) {
 			dlog(cfg.opt.Debug, "pre:thisProcessor.LaunchSession: nzbfile='%s'", nzbfile)

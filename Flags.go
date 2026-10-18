@@ -7,22 +7,30 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mrand "math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-while/NZBreX/rapidyenc"
 	prof "github.com/go-while/go-cpu-mem-profiler"
 )
 
+var AddUserDataToProxy string // AddUserToProxy is a flag to add user to proxy
+
 func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
 	// essentials
 	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
-	//flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "/path/to/watch/dir/for/nzbfiles")
+	flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "watch this directory: process its .nzb/.nzb.gz files one at a time, oldest first; processed files move to done/ or failed/ in it")
+	flag.Int64Var(&cfg.opt.DirRefresh, "dirrefresh", 60, "with -nzbdir: scan the directory every N seconds (minimum 15)")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
 	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
+	flag.BoolVar(&cfg.opt.DlMissing, "dlmissing", false, "[true|false] download the articles missing on any provider into the cache (-cd), also when no provider takes uploads, e.g. to re-upload them later (default: false)")
+	flag.BoolVar(&cfg.opt.DlAll, "dlall", false, "[true|false] download every article not yet in the cache (-cd): fill the cache, or get the files with -crc32 -yencout -yencmerge (default: false)")
 	flag.BoolVar(&cfg.opt.CheckFirst, "checkfirst", false, "[true|false] if false: starts downs/reups asap as segments are checked (default: false)")
 	//flag.BoolVar(&cfg.opt.ByPassSTAT, "bypassstat", false, "[true|false] true goes directly to download without checking availability with STAT first (default: false)")
 	//flag.BoolVar(&cfg.opt.UploadLater, "uploadlater", false, "[true|false] if true: starts upload if everything (available) has been downloaded to cache (default: false) !not implemented: TODO!")
@@ -43,6 +51,7 @@ func ParseFlags() {
 	flag.BoolVar(&cfg.opt.YencWrite, "yencout", false, "[true|false] writes yenc parts to cache (needs -cd=/dir/) (default: false) (experimental/testing) ")
 	flag.BoolVar(&cfg.opt.YencMerge, "yencmerge", false, "[true|false] merge yenc parts into target files (default: false) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.YencDelParts, "yencdelparts", false, "[true|false] delete .part.N.yenc files after merge (deletes parts only with -yencmerge=true) (default: false) (experimental/testing)")
+	flag.BoolVar(&cfg.opt.YencGo, "yencgo", false, "[true|false] with -yenctest=4 in a build with the C decoder (-tags rapidyenc): decode with go-yenc-simd instead. Builds without the tag always use go-yenc-simd")
 	flag.IntVar(&cfg.opt.RapidYencBufSize, "rapidyencbufsize", rapidyenc.DefaultBufSize, "set only if you know what you do! (default: 4K) (experimental/testing)")
 	flag.BoolVar(&cfg.opt.DoubleCheckRapidYencCRC, "doublecheckrapidyenccrc", false, "(experimental/testing)")
 	// debug output flags
@@ -80,6 +89,20 @@ func ParseFlags() {
 	flag.IntVar(&cfg.opt.MaxArtSize, "maxartsize", DefaultMaxArticleSize, "limits article size to 1M (mostly articles have ~700K only)")
 	flag.BoolVar(&testmode, "zzz-shr-testmode", false, "[true|false] only used to test compilation on self-hosted runners (default: false)")
 	flag.BoolVar(&testrapidyenc, "testrapidyenc", false, "[true|false] will test rapidyenc testfiles on boot and exit (default: false)")
+	flag.IntVar(&cfg.opt.ProxyTCP, "proxytcp", 0, "if set: use this port (e.g.: 1119) for TCP proxying (default: 0 = no proxy)")
+	flag.IntVar(&cfg.opt.ProxyTLS, "proxytls", 0, "if set: use this port (e.g.: 1563) for TLS proxying (default: 0 = no proxy)")
+	flag.StringVar(&cfg.opt.TLSCertPem, "tlscrt", "fullchain.pem", "path to TLS certificate file for proxy (default: fullchain.pem in current dir)")
+	flag.StringVar(&cfg.opt.TLSPrivKey, "tlskey", "privkey.pem", "path to TLS private key file for proxy (default: privkey.pem in current dir)")
+	flag.StringVar(&AddUserDataToProxy, "proxyadduser", "", "if set: adds this user to proxy ( \ne.g.: -proxyadduser='username1234|password4567|maxconns|expires|(no)post'\n ) \nPassword entered MUST be cleartext, hashing is done when writing to .passwd file!\n Expiration: you can use a 'number of days' with 'd' at the end (e.g. 7d, 30d, 365d) or 'h'  for hours (1h, 12h, ...) or 'm' minutes (1m, 30m, ...), it will be converted to a valid unixtimestamp expiring in the future from now on! (default: empty = no user added)\nExample -proxyadduser \"HelloWorld|NotAsecurePassword|5|42d|nopost\" creates a user with 5 conns and 42 days to expiration")
+	flag.StringVar(&cfg.opt.ProxyPasswdFile, "proxypasswdfile", ".proxypasswd", "if set: use this file for proxy (default: .proxypasswd in current dir)")
+	flag.BoolVar(&webServerEnabled, "web", false, "[true|false] enable HTTP web server for NZB upload and statistics (default: false)")
+	flag.StringVar(&webServerAddr, "webaddr", "127.0.0.1:11911", "web server address (e.g.: '127.0.0.1:1234' or '[::1]:1234' or public ':1234') (default: 127.0.0.1:11911)")
+	flag.BoolVar(&webServerSSL, "webssl", false, "[true|false] enable HTTPS/TLS for web server (default: false)")
+	flag.StringVar(&webServerCert, "webssl-crt", "fullchain.pem", "path to TLS certificate file for web server (default: fullchain.pem in current dir)")
+	flag.StringVar(&webServerKey, "webssl-key", "privkey.pem", "path to TLS private key file for web server (default: privkey.pem in current dir)")
+	flag.StringVar(&webPasswdFile, "webpasswd", "", "web server login: passwd file with the web users (same format as the proxy's, separate users). Without it the web server only runs on a loopback address (default: empty = no login)")
+	flag.StringVar(&webAddUser, "webadduser", "", "adds a user to the -webpasswd file and exits: 'username|password' (both at least 10 characters) or 'auto|auto' for random credentials")
+	flag.StringVar(&webHosts, "webhosts", "", "comma separated host names the web server answers to (Host header), e.g. 'nzbrex.example.org'. Always enforced without a login (localhost, 127.0.0.1, ::1 and the -webaddr host are allowed)")
 	// cosmetics: segmentBar needs fixing: only when everything else works!
 	//flag.BoolVar(&cfg.opt.Bar, "bar", false, "show progress bars")  // FIXME TODO
 	//flag.BoolVar(&cfg.opt.Colors, "colors", false, "adds colors to s")  // FIXME TODO
@@ -93,6 +116,87 @@ func ParseFlags() {
 	if runProf {
 		Prof = prof.NewProf()
 		RunProf()
+	}
+	if cfg.opt.ProxyPasswdFile == "" {
+		cfg.opt.ProxyPasswdFile = ".proxypasswd" // default passwd file for proxy
+	}
+	if AddUserDataToProxy != "" {
+		// Format: 'user|password|maxconns|expires|(no)post' (expires is unix timestamp)
+		parts := strings.SplitN(AddUserDataToProxy, "|", 5)
+		if len(parts) != 5 {
+			log.Fatalf("-proxyadduser expects format: user|password|maxconns|expires|(no)post (got: %q)", AddUserDataToProxy)
+		}
+		var username, password string
+		Ausername := strings.TrimSpace(parts[0])
+		Apassword := strings.TrimSpace(parts[1])
+		if Ausername == "auto" && Apassword == "auto" {
+			// create auto user with random password
+			username, password, _ = generateRandomHexCredentials()
+		} else {
+			username = Ausername
+			password = Apassword
+		}
+		if len(username) < 10 {
+			log.Fatalf("-proxyadduser: username must be at least 10 characters long, got %d characters", len(username))
+		}
+		if len(password) < 10 {
+			log.Fatalf("-proxyadduser: password must be at least 10 characters long, got %d characters", len(password))
+		}
+		if Ausername == "auto" && Apassword == "auto" {
+			dlog(always, "-proxyadduser: auto generated credentials: username='%s' password='%s'", username, password)
+		}
+		maxconns, err1 := strconv.Atoi(parts[2])
+		expiresStr := strings.TrimSpace(parts[3])
+		var expires int64
+		if strings.HasSuffix(expiresStr, "d") {
+			days, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "d"), 10, 64)
+			if err != nil {
+				log.Fatalf("-proxyadduser: invalid expires (days): %s", expiresStr)
+			}
+			expires = time.Now().Add(time.Duration(days) * 24 * time.Hour).Unix()
+		} else if strings.HasSuffix(expiresStr, "h") {
+			hours, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "h"), 10, 64)
+			if err != nil {
+				log.Fatalf("-proxyadduser: invalid expires (hours): %s", expiresStr)
+			}
+			expires = time.Now().Add(time.Duration(hours) * time.Hour).Unix()
+		} else if strings.HasSuffix(expiresStr, "m") {
+			minutes, err := strconv.ParseInt(strings.TrimSuffix(expiresStr, "m"), 10, 64)
+			if err != nil {
+				log.Fatalf("-proxyadduser: invalid expires (minutes): %s", expiresStr)
+			}
+			expires = time.Now().Add(time.Duration(minutes) * time.Minute).Unix()
+		} else {
+			expiresInt, err2 := strconv.ParseInt(parts[3], 10, 64)
+			if err1 != nil || err2 != nil {
+				log.Fatalf("-proxyadduser: invalid maxconns or expires: maxconns='%s' expires='%s'", parts[2], parts[3])
+			}
+			expires = expiresInt
+		}
+		if username == "" || password == "" {
+			log.Fatalf("-proxyadduser: username and password must not be empty")
+		}
+		if expires < time.Now().Unix() {
+			log.Fatalf("-proxyadduser: expires must be a future timestamp, got %d", expires)
+		}
+		// Compose new passwd file name
+		newPasswdFile := fmt.Sprintf("%s.new.%d.%d", cfg.opt.ProxyPasswdFile, time.Now().Unix(), mrand.Intn(65535))
+		userData := &UserData{
+			Username: username,
+			Password: password,
+			MaxConns: maxconns,
+			ExpireAt: expires,
+			Posting:  strings.HasPrefix(strings.ToLower(parts[4]), "post"),
+		}
+		if err := addUserToProxyPasswdFile(userData, newPasswdFile); err != nil {
+			log.Fatalf("Failed to add user to %s: %v", newPasswdFile, err)
+		}
+		// Redact password before logging
+		os.Exit(0)
+	}
+	if webAddUser != "" {
+		addWebUser(webAddUser)
+		os.Exit(0)
 	}
 	// test rapidyenc decoder
 	if testrapidyenc {
@@ -136,6 +240,19 @@ func ParseFlags() {
 		}
 	}
 
+	if (cfg.opt.DlMissing || cfg.opt.DlAll) && cfg.opt.Cachedir == "" {
+		dlog(always, "ERROR: -dlmissing and -dlall need -cd=/path/to/cache/dir: the downloads are kept there")
+		os.Exit(1)
+	}
+	if cfg.opt.DlMissing && cfg.opt.DlAll {
+		dlog(always, "ERROR: use -dlmissing or -dlall, not both (-dlall includes the missing articles)")
+		os.Exit(1)
+	}
+	if (cfg.opt.DlMissing || cfg.opt.DlAll) && cfg.opt.CheckOnly {
+		dlog(always, "ERROR: -dlmissing and -dlall download articles, -checkonly doesn't")
+		os.Exit(1)
+	}
+
 	if cfg.opt.UploadLater && cfg.opt.Cachedir == "" {
 		dlog(always, "ERROR: you can not use -uploadlater without -cd=/path/to/cache/dir because it needs a cache dir!")
 		os.Exit(1)
@@ -159,13 +276,20 @@ func ParseFlags() {
 		}
 
 		if cfg.opt.YencTest == 4 {
-			dlog(always, "Using rapidyenc for yenc decoding!")
-		}
-
-		if cfg.opt.YencCpu < 0 {
-			dlog(always, "ERROR: you can not use -yenccpu=%d because it must be >= 0 (default: 0)", cfg.opt.YencCpu)
+			if cfg.opt.YencGo {
+				rapidyenc.UseGoDecoder = true // only matters in a -tags rapidyenc build
+			}
+			dlog(always, "yenc decoding (-yenctest=4): %s", rapidyenc.Backend())
+		} else if cfg.opt.YencGo {
+			dlog(always, "ERROR: -yencgo needs -crc32 -yenctest=4")
 			os.Exit(1)
 		}
+
+		if cfg.opt.YencCpu < 0 || cfg.opt.YencAsyncCpu < 0 {
+			dlog(always, "ERROR: -yenccpu=%d and -yencasync=%d must be >= 0", cfg.opt.YencCpu, cfg.opt.YencAsyncCpu)
+			os.Exit(1)
+		}
+		setupCoreLimiters()
 
 		if (cfg.opt.YencWrite || cfg.opt.YencMerge) && !cacheON {
 			dlog(always, "ERROR: you can not use -yencout=true or -yencmerge=true without -cd=/path/to/cache/dir because it needs a cache dir!")
@@ -183,6 +307,10 @@ func ParseFlags() {
 		}
 
 	} else {
+		if cfg.opt.YencGo {
+			dlog(always, "ERROR: -yencgo needs -crc32 -yenctest=4")
+			os.Exit(1)
+		}
 		cfg.opt.YencTest = 0      // reset to 0 if not using YencCRC
 		cfg.opt.YencWrite = false // reset to false if not using YencCRC
 		cfg.opt.YencMerge = false // reset to false if not using YencCRC
@@ -215,6 +343,21 @@ func ParseFlags() {
 		dlog(always, "Loaded %d headers from '%s' ==> cleanHeader='%#v'", len(headers), cfg.opt.CleanHeadersFile, cleanHeader)
 	} else if err != nil {
 		dlog(always, "ERROR loading headers failed file='%s' err='%v'", cfg.opt.CleanHeadersFile, err)
+		os.Exit(1)
+	}
+
+	if cfg.opt.ProxyTCP > 0 || cfg.opt.ProxyTLS > 0 {
+		proxy = true
+	}
+
+	nzbSet := false // -nzb has a default value: only an explicit -nzb counts as a mode
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "nzb" {
+			nzbSet = true
+		}
+	})
+	if err := startupModeError(nzbSet, cfg.opt.NzbDir, webServerEnabled, proxy); err != nil {
+		dlog(always, "ERROR: %v", err)
 		os.Exit(1)
 	}
 
@@ -322,3 +465,82 @@ func rapidyencDecoderFilesTest() (errs []error) {
 	} // end for range files
 	return errs
 } // end func rapidyencDecoderFilesTest
+
+// addWebUser handles -webadduser 'username|password'. The user goes to a
+// <webpasswd>.new.* file, which the web server merges on its next load. Web
+// users don't expire (ExpireAt 0) and have no connection or posting rights.
+func addWebUser(spec string) {
+	if webPasswdFile == "" {
+		log.Fatalf("-webadduser needs -webpasswd to name the web passwd file")
+	}
+	parts := strings.SplitN(spec, "|", 2)
+	if len(parts) != 2 {
+		log.Fatalf("-webadduser expects format: username|password")
+	}
+	username, password := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	auto := username == "auto" && password == "auto"
+	if auto {
+		var err error
+		if username, password, err = generateRandomHexCredentials(); err != nil {
+			log.Fatalf("-webadduser: %v", err)
+		}
+	}
+	if len(username) < minUsernameLen || len(password) < 10 {
+		log.Fatalf("-webadduser: username and password must be at least 10 characters long")
+	}
+	if strings.ContainsAny(username, "|:") {
+		log.Fatalf("-webadduser: username must not contain '|' or ':'")
+	}
+	newFile := fmt.Sprintf("%s.new.%d.%d", webPasswdFile, time.Now().Unix(), mrand.Intn(65535))
+	if err := appendPasswdUser(&UserData{Username: username, Password: password}, newFile); err != nil {
+		log.Fatalf("Failed to add web user to %s: %v", newFile, err)
+	}
+	if auto {
+		dlog(always, "-webadduser: auto generated credentials: username='%s' password='%s'", username, password)
+	}
+}
+
+// setupCoreLimiters fills core_chan and async_core_chan once at startup.
+// LaunchSession used to do this and resize them when the size differed,
+// dropping the tokens other sessions still held (plan 6.2).
+func setupCoreLimiters() {
+	if cfg.opt.YencCpu <= 0 {
+		cfg.opt.YencCpu = runtime.NumCPU()
+	}
+	if cfg.opt.YencAsyncCpu <= 0 {
+		cfg.opt.YencAsyncCpu = runtime.NumCPU()
+	}
+	core_chan = make(chan struct{}, cfg.opt.YencCpu)
+	for range cfg.opt.YencCpu {
+		core_chan <- struct{}{}
+	}
+	async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
+	for range cfg.opt.YencAsyncCpu {
+		async_core_chan <- struct{}{}
+	}
+	dlog(cfg.opt.Verbose, "core_chan=%d async_core_chan=%d", cfg.opt.YencCpu, cfg.opt.YencAsyncCpu)
+}
+
+// startupModeError rejects mode combinations that don't work (D3). Exactly one
+// of -nzb, -nzbdir, -web or -proxytcp/-proxytls runs; with none, the default -nzb runs.
+func startupModeError(nzbSet bool, nzbDir string, web, proxy bool) error {
+	if nzbDir != "" {
+		switch {
+		case web:
+			return fmt.Errorf("-nzbdir can't be combined with -web")
+		case proxy:
+			return fmt.Errorf("-nzbdir can't be combined with -proxytcp/-proxytls")
+		case nzbSet:
+			return fmt.Errorf("-nzbdir can't be combined with -nzb")
+		}
+		return nil
+	}
+	if web && proxy {
+		// both would open their own pools: together they could exceed a provider account's connection limit
+		return fmt.Errorf("-web and -proxytcp/-proxytls can't run in one process")
+	}
+	if nzbSet && (web || proxy) {
+		return fmt.Errorf("-nzb can't be combined with -web or -proxytcp/-proxytls: give exactly one of them")
+	}
+	return nil
+}

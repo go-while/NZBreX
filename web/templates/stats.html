@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ NZBreX Statistics</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container my-4">
+        <div class="mb-3">
+            <a href="/" class="btn btn-outline-secondary me-2">← Back to Upload</a>
+            <a href="/jobs" class="btn btn-outline-primary">📋 Jobs</a>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h1 class="card-title mb-2">📊 Statistics</h1>
+                <p class="text-muted mb-4">Real-time processing statistics and provider information</p>
+
+                <!-- Overall Stats -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="text-muted small">Total Jobs</div>
+                                <div class="display-6" id="totalJobs">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="text-muted small">Active Providers</div>
+                                <div class="display-6" id="activeProviders">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="text-muted small">Total Upload</div>
+                                <div class="display-6" id="totalUpload">0<span class="small text-muted">MB</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center">
+                            <div class="card-body">
+                                <div class="text-muted small">Total Download</div>
+                                <div class="display-6" id="totalDownload">0<span class="small text-muted">MB</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Jobs -->
+                <div class="mb-4">
+                    <h2 class="h5 mb-3">Active Jobs</h2>
+                    <div id="jobsList">
+                        <div class="alert alert-info text-center">No active jobs</div>
+                    </div>
+                </div>
+
+                <!-- Providers -->
+                <div class="mb-4">
+                    <h2 class="h5 mb-3">Provider Statistics</h2>
+                            <div id="providersList">
+                        <div class="alert alert-info text-center">No provider data available</div>
+                    </div>
+                </div>
+
+                <div class="text-center text-muted small mt-3">
+                    Auto-refreshing every 5 seconds
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/bootstrap.bundle.min.js"></script>
+    <script>
+        let maxBandwidth = 1; // Track max bandwidth for scaling bars
+
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                updateStats(data);
+            } catch (error) {
+                console.error('Failed to fetch stats:', error);
+            }
+        }
+
+        function updateStats(data) {
+            // Update overall stats
+            document.getElementById('totalJobs').textContent = data.total_jobs || 0;
+            document.getElementById('activeProviders').textContent = data.active_providers || 0;
+            document.getElementById('totalUpload').innerHTML =
+                formatBytes(data.total_upload_bytes) + '<span class="small text-muted"></span>';
+            document.getElementById('totalDownload').innerHTML =
+                formatBytes(data.total_download_bytes) + '<span class="small text-muted"></span>';
+
+            // Update jobs list
+            const jobsList = document.getElementById('jobsList');
+            if (!data.jobs || data.jobs.length === 0) {
+                jobsList.innerHTML = '<div class="alert alert-info text-center">No active jobs</div>';
+            } else {
+                jobsList.innerHTML = data.jobs.map(job => `
+                    <div class="card mb-2">
+                        <div class="card-body">
+                            <h5 class="card-title">📦 ${escapeHtml(job.name)}</h5>
+                            <div class="row g-2">
+                                <div class="col-md-3">
+                                    <small class="text-muted">Articles:</small>
+                                    <div>${job.articles_processed || 0} / ${job.total_articles || 0}</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">Upload:</small>
+                                    <div>${formatBytes(job.upload_bytes)}</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">Download:</small>
+                                    <div>${formatBytes(job.download_bytes)}</div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">Started:</small>
+                                    <div>${formatTime(job.start_time)}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // Update providers list
+            const providersList = document.getElementById('providersList');
+            if (!data.providers || data.providers.length === 0) {
+                providersList.innerHTML = '<div class="alert alert-info text-center">No provider data available</div>';
+            } else {
+                providersList.innerHTML = `
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>Provider</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Checks</th>
+                                    <th class="text-end">Downloads</th>
+                                    <th class="text-end">Uploads</th>
+                                    <th class="text-end">↑ Speed</th>
+                                    <th class="text-end">↓ Speed</th>
+                                    <th class="text-end">↑ Total</th>
+                                    <th class="text-end">↓ Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.providers.map(provider => {
+                                    const isActive = provider.checks > 0 || provider.downloads > 0 || provider.uploads > 0;
+                                    return `
+                                        <tr>
+                                            <td><strong>${escapeHtml(provider.name)}</strong></td>
+                                            <td>
+                                                <span class="badge ${isActive ? 'bg-success' : 'bg-secondary'}">
+                                                    ${isActive ? 'Active' : 'Idle'}
+                                                </span>
+                                            </td>
+                                            <td class="text-end">${provider.checks || 0}</td>
+                                            <td class="text-end">${provider.downloads || 0}</td>
+                                            <td class="text-end">${provider.uploads || 0}</td>
+                                            <td class="text-end">${formatSpeed(provider.upload_speed)}</td>
+                                            <td class="text-end">${formatSpeed(provider.download_speed)}</td>
+                                            <td class="text-end">${formatBytes(provider.upload_bytes)}</td>
+                                            <td class="text-end">${formatBytes(provider.download_bytes)}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function formatSpeed(bytesPerSec) {
+            if (!bytesPerSec || bytesPerSec === 0) return '0 B/s';
+            const k = 1024;
+            const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+            const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
+            return Math.round(bytesPerSec / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function formatTime(timestamp) {
+            if (!timestamp) return 'N/A';
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initial fetch
+        fetchStats();
+
+        // Auto-refresh every 5 seconds
+        setInterval(fetchStats, 5000);
+    </script>
+</body>
+</html>

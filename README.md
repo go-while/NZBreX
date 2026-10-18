@@ -75,15 +75,60 @@ The tool uses the NNTP commands:
 
 ## Installation
 
-1. Compile from source or download the latest executable from the [Releases](../../releases) page.
-2. Configure `provider.json` with your Usenet provider details.
-3. Run the program from the command line:
+1. **Download pre-built binaries** from the [Releases](../../releases) page, or
+2. **Compile from source** (see Build Instructions below)
+3. Configure `provider.json` with your Usenet provider details.
+4. Run the program from the command line:
 
    ```sh
    ./nzbrex -checkonly -nzb nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz
    ./nzbrex -cd cache -checkfirst -nzb nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz
    ./nzbrex --cd=cache --checkfirst --nzb=nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz
    ```
+
+### Build Instructions
+
+NZBreX builds in two variants. They differ only in the yEnc decoder used by
+`-yenctest=4` (the default `-crc32` mode):
+
+| Variant | Build | yEnc decoder (`-yenctest=4`) |
+|---|---|---|
+| **purego** (default) | `go build .` | [go-yenc-simd](https://github.com/go-while/go-yenc-simd), pure Go |
+| **rapidyenc** | `go build -tags rapidyenc .` | rapidyenc's C code via cgo; `-yencgo` switches to go-yenc-simd |
+
+#### Pure Go (default)
+```sh
+go build .
+```
+No C compiler, no cgo. Cross-compiles to any target, e.g.
+`CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build .` or `GOOS=darwin GOARCH=arm64`.
+Built on Linux with `CGO_ENABLED=0`, the binary is static (runs on glibc and musl/Alpine).
+
+For go-yenc-simd's AVX2/AVX-512 code on amd64, build with
+`GOEXPERIMENT=simd go build .` (Go 1.27; an experiment, outside the Go 1
+compatibility promise). Without it the decoder still works, in plain Go.
+
+#### With rapidyenc's C decoder
+Needs a C/C++ compiler and cmake; the rapidyenc library is built first.
+
+```sh
+# Linux
+cd rapidyenc && ./build_rapidyenc_linux-amd64.sh && cd ..
+go build -tags rapidyenc .
+```
+
+```cmd
+REM Windows, native: Go, MinGW-w64 and CMake installed, then
+build_windows.bat
+```
+
+```sh
+# Windows, cross-compiled from Linux
+sudo apt install gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 cmake
+./local_crossbuild_windows-amd64.sh
+```
+
+The Windows executable will be statically linked and only depend on core Windows system libraries.
 
 ---
 
@@ -104,6 +149,8 @@ Run with the following arguments:
 - `-crc32` [true|false] check CRC32 of articles while downloading (default: false)
 - `-checkfirst` [true|false] if false: start downs/reups as soon as segments are checked (default: false)
 - `-uploadlater` (TODO) [true|false] needs cache! start uploads when everything is cached (default: false)
+- `-nzbdir` /path watch this directory: process its `.nzb`/`.nzb.gz` files one at a time, oldest first. A file is taken once it is unchanged between two scans; afterwards it moves to `done/` (or `failed/` if the run couldn't start) in that directory. SIGINT/SIGTERM stops the running NZB, which stays in place for the next start. Not with `-nzb`, `-web` or the proxy.
+- `-dirrefresh` seconds with `-nzbdir`: scan interval (default: 60, minimum 15)
 - `-checkonly` [true|false] check online status only: no downs/reups (default: false)
 - `-verify` [true|false] waits and tries to verify/recheck all reups (default: false)
 - `-verbose` [true|false] more output (default: true)
@@ -132,7 +179,10 @@ Run with the following arguments:
 - `-yencdelparts` [true|false] delete .part.N.yenc files after merge (only with -yencmerge)
 - `-rapidyencbufsize` "set only if you know what you do! (default: 4K) (experimental/testing)"
 - `-doublecheckrapidyenccrc` "[true|false] (experimental/testing)"
-- `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapidyenc) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
+- `-yenctest` select mode 1 (bytes), 2 (lines), or 3 (direct) or 4 (rapidyenc C or go-yenc-simd, see Build Instructions) for -crc32. Mode 2 uses less memory, 3 is experimental. (default: 4)
+- `-dlmissing` [true|false] download the articles missing on any provider into the cache (`-cd`), also when no provider takes uploads, e.g. to re-upload them later. (default: false)
+- `-dlall` [true|false] download every article not yet in the cache (`-cd`): fill the cache, or get the files with `-crc32 -yencout -yencmerge`. Without an upload provider this makes NZBreX a plain downloader. (default: false)
+- `-yencgo` [true|false] with `-yenctest=4` in a `-tags rapidyenc` build: decode with go-yenc-simd instead of the C code. Builds without the tag always use go-yenc-simd. (default: false)
 - `-yencasync` limits async parallel decoding with -crc32=true and -yenctest=3 or 4. 0 defaults to runtime.NumCPU().
 - `-debugsharedcc` debug sharedConn Chan (default: false)
 - `-debugflags` debug item flags (default: false)
@@ -207,7 +257,7 @@ Example output:
 ---
 
 ## Ideas and more TODOs
-- #0001: watchDir (processor/sessions) almost done!
+- ~~#0001: watchDir (processor/sessions)~~ done: `-nzbdir`
 - #0010: fix all todos in code!
 - #0020: better console output
 - #0030: verify uploaded articles
@@ -215,6 +265,26 @@ Example output:
 - #0060: streaming (CHECK/TAKETHIS)
 - #0080: progressbar (cosmetics)
 - ...
+
+---
+
+## Troubleshooting
+
+### Windows Executable Issues
+
+If you encounter an error like "The code execution cannot proceed because libc++.so.6.dll was not found" on Windows:
+
+1. **Download the latest release** - This issue has been fixed in recent builds
+2. **Ensure you're using the correct Windows version** - Download the Windows-specific executable from the releases page
+3. **The executable is self-contained** - No additional runtime libraries should be required
+
+The Windows executable is statically linked and only depends on core Windows system libraries that are guaranteed to be available.
+
+### Build Issues
+
+- **rapidyenc library missing** (`-tags rapidyenc` builds only): run the matching rapidyenc build script first, or build without the tag
+- **Cross-compilation fails**: build without `-tags rapidyenc` (pure Go cross-compiles anywhere), or install MinGW-w64 and cmake for the C variant
+- **Link errors**: make sure the rapidyenc library matches your target platform
 
 ---
 

@@ -19,8 +19,10 @@ import (
 	"math/rand"
 	"net"
 	"net/textproto"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -49,10 +51,50 @@ const (
 
 var (
 	//noDeadLine   time.Time                 // used as zero value!
-	readDeadConn = time.Unix(1, 0)         // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
-	ConnPools    = make(map[int]*ConnPool) // used in KillConnPool
-	PoolsLock    sync.RWMutex
+	readDeadConn = time.Unix(1, 0) // no syscall needed. value is 1 second after "0" (1970-01-01 00:00:01 UTC)
+
+	// connHandshakeTimeout bounds the greeting, login and CAPABILITIES exchange of a new conn.
+	// UseNoDeadline turns ExtendConn into a no-op, so without this a server that accepts the
+	// TCP connection and then sends nothing blocks the caller forever. A var so tests can shorten it.
+	connHandshakeTimeout = 30 * time.Second
+
+	// connIdleTimeout ends a read or write on a conn that moved no data for this
+	// long (idleConn): a provider that stops answering mid-command no longer blocks
+	// a worker forever. A var so tests can shorten it.
+	connIdleTimeout = DefaultConnReadDeadline
 )
+
+// idleConn gives every Read and Write a fresh deadline of its idle timeout, so a
+// command fails only when nothing arrives (or leaves) for that long, however
+// long a big article takes as a whole. A fixed deadline per command (ExtendConn,
+// switched off by UseNoDeadline) would cut off slow but steady transfers.
+// The timeout is 0 (off) during the handshake, which has its own absolute deadline.
+type idleConn struct {
+	net.Conn
+	idle atomic.Int64 // time.Duration; 0 = off
+}
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	if d := time.Duration(c.idle.Load()); d > 0 {
+		c.Conn.SetReadDeadline(time.Now().Add(d))
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *idleConn) Write(p []byte) (int, error) {
+	if d := time.Duration(c.idle.Load()); d > 0 {
+		c.Conn.SetWriteDeadline(time.Now().Add(d))
+	}
+	return c.Conn.Write(p)
+}
+
+// setIdleTimeout sets conn's idle timeout (0: off, for exchanges with their own
+// deadline). Conns that aren't idleConns are left alone.
+func setIdleTimeout(conn net.Conn, d time.Duration) {
+	if ic, ok := conn.(*idleConn); ok {
+		ic.idle.Store(int64(d))
+	}
+}
 
 // holds an active connection to share around
 type ConnItem struct {
@@ -71,20 +113,42 @@ type ConnPool struct {
 	openConns  int    // counter
 	nextconnId uint64 // unique connection id
 	//mux        sync.RWMutex
-	mux     *loggedrwmutex.LoggedSyncRWMutex
-	counter *Counter_uint64      // used to count connections, parked conns, etc.
-	pool    chan *ConnItem       // idle/parked conns are in here
-	poolmap map[uint64]*ConnItem // idle/parked conns are in here
-	//wait       []chan *ConnItem
-	rserver    string // "host:port"
+	mux        *loggedrwmutex.LoggedSyncRWMutex
+	Counter    *Counter_uint64 // used to count connections, parked conns, etc.
+	pool       chan *ConnItem  // idle/parked conns are in here
+	rserver    string          // "host:port"
 	wants_auth bool
 	// we have created an endless loop
 	// provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.provider.ConnPool.CloseConn(provider, connitem) xD
-	// if we want to call closeconn from outside the routine which keep a provider ptr too
-	// we cann call ConnPools[provider.id].CloseConn(provider, connitem)
 	provider *Provider // pointer to the provider which created this ConnPool and holds the config
 	s        *SESSION  // session pointer to the session which created this ConnPool (access via c.s.%%SESSIONVARIABLES%% OR provider.ConnPool.s.%%SESSIONVARIABLES%%).
+	// sessStop is the owning session's stopChan (nil: never stops). Blocking waits
+	// for a connection give up when it is closed.
+	sessStop <-chan struct{}
+	// poolStop ends the pool's own goroutines (WatchOpenConnsThread, Speedmeter).
+	// Closed once by KillConnPool; the proxy's pools are never killed, so it is not the session's.
+	poolStop     chan struct{}
+	poolStopOnce sync.Once
 }
+
+// errSessionStopped is returned by waits that gave up because the session stopped.
+var errSessionStopped = errors.New("session stopped")
+
+// errNoConn: a routine could not get a connection at all (GetConn already retried).
+var errNoConn = errors.New("no connection")
+
+// errDial: the TCP/TLS dial itself failed (refused, timeout, unreachable), not the banner or auth.
+var errDial = errors.New("dial failed")
+
+// markDown takes the provider out of this session: every routine and the divider skip it
+// from now on, instead of paying GetConn's dial retries again for every item.
+func (p *Provider) markDown(err error) {
+	if p.down.CompareAndSwap(false, true) {
+		dlog(always, "WARN provider '%s' is down for this session, skipping it from now on: %v", p.Name, err)
+	}
+}
+
+func (p *Provider) isDown() bool { return p.down.Load() }
 
 func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGroup) {
 	provider.mux.Lock()         // NewConnPool mutex #d028
@@ -125,17 +189,15 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 	wants_auth := (provider.Username != "" && provider.Password != "")
 
 	provider.ConnPool = &ConnPool{
-		counter: NewCounter(10), // used to count connections, parked conns, etc.
+		Counter: NewCounter(10), // used to count connections, parked conns, etc.
 		pool:    make(chan *ConnItem, provider.MaxConns),
-		poolmap: make(map[uint64]*ConnItem, provider.MaxConns), // use map
 		rserver: rserver, wants_auth: wants_auth,
 		provider: provider,
 		mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: fmt.Sprintf("ConnPool-%s", provider.Name)},
 		s:        s, // session pointer to the session which created this ConnPool
+		sessStop: s.stopChan,
+		poolStop: make(chan struct{}),
 	}
-	PoolsLock.Lock()
-	ConnPools[provider.id] = provider.ConnPool
-	PoolsLock.Unlock()
 	if !cfg.opt.CheckOnly {
 		go Speedmeter(s.nzbSize, provider.ConnPool, nil, workerWGconnReady) // start speed meter for this ConnPool / Provider
 	}
@@ -143,45 +205,49 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 	// no return value as we mutate the provider pointer!
 } // end func NewConnPool
 
-func KillConnPool(provider *Provider) {
-	PoolsLock.Lock()
-	defer PoolsLock.Unlock()
+// killConnPoolWait is how long KillConnPool waits for conns still in use to come back.
+// It runs after all workers have exited, so normally nothing is in use anymore.
+const killConnPoolWait = 5 * time.Second
 
-	if provider == nil || provider.ConnPool == nil {
+// KillConnPool closes the idle conns of the provider's pool, waits (bounded) for the
+// ones still in use, then drops the pool. Conns in use belong to their goroutine and
+// are not closed here (that would be a data race on the ConnItem).
+// No global lock is held while waiting (it used to hold PoolsLock for as long as it took).
+func KillConnPool(provider *Provider) {
+	if provider == nil {
 		return
 	}
-
-	provider.ConnPool.mux.RLock()
-	openConns := provider.ConnPool.openConns
-	provider.ConnPool.mux.RUnlock()
-
-	if openConns > 0 {
-		dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s'", provider.Name)
-		killed := 0
+	provider.mux.RLock()
+	c := provider.ConnPool
+	provider.mux.RUnlock()
+	if c == nil {
+		return
+	}
+	deadline := time.Now().Add(killConnPoolWait)
+	killed := 0
+	for {
+	drain:
 		for {
 			select {
-			case connitem := <-provider.ConnPool.pool:
-				provider.ConnPool.CloseConn(connitem, nil)
-
-				dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s' closed a conn", provider.Name)
-
+			case connitem := <-c.pool:
+				c.CloseConn(connitem, nil)
 				killed++
 			default:
-				// chan ran empty
+				break drain // chan ran empty
 			}
-			provider.ConnPool.mux.RLock()
-			openConns := provider.ConnPool.openConns
-			provider.ConnPool.mux.RUnlock()
-			dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s' openConns=%d killed=%d", provider.Name, openConns, killed)
-			if openConns > 0 {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
+		}
+		openConns, _ := c.GetStats()
+		if openConns <= 0 {
 			break
-		} // end for
+		}
+		if time.Now().After(deadline) {
+			dlog(always, "WARN KillConnPool '%s': %d conns still in use after %v, not waiting for them", provider.Name, openConns, killConnPoolWait)
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-
-	delete(ConnPools, provider.id)
+	dlog(cfg.opt.DebugConnPool, "KillConnPool: '%s' closed %d idle conns", provider.Name, killed)
+	c.poolStopOnce.Do(func() { close(c.poolStop) }) // ends WatchOpenConnsThread and Speedmeter
 
 	provider.mux.Lock()
 	provider.ConnPool = nil
@@ -209,11 +275,10 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 		dlog(cfg.opt.DebugConnPool, "ConnPool raw tcp.Dial took='%v' '%s'", time.Since(start), c.provider.Name)
 		if err != nil {
 			if isNetworkUnreachable(err) {
-				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
+				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s': %w: %v", c.provider.Host, c.provider.Name, errDial, err)
 			}
-			dlog(always, "ERROR connect Dial '%s' retry in %.0fs wants_ssl=%t err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), c.provider.SSL, err)
-			//time.Sleep(DefaultConnectErrSleep)
-			return nil, err
+			dlog(cfg.opt.DebugConnPool, "ERROR connect Dial '%s' no retry err='%v'", c.provider.Name, err)
+			return nil, fmt.Errorf("%w: %w", errDial, err)
 		}
 	case true:
 		conf := &tls.Config{
@@ -226,41 +291,60 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 		dlog(cfg.opt.DebugConnPool, "ConnPool raw tls.Dial took='%v' '%s'", time.Since(start), c.provider.Name)
 		if err != nil {
 			if isNetworkUnreachable(err) {
-				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
+				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s': %w: %v", c.provider.Host, c.provider.Name, errDial, err)
 			}
-			dlog(always, "ERROR connect Dial '%s' retry in %.0fs wants_ssl=%t err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), c.provider.SSL, err)
-			//time.Sleep(DefaultConnectErrSleep)
-			return nil, err
+			dlog(cfg.opt.DebugConnPool, "ERROR connect Dial '%s' no-retry err='%v'", c.provider.Name, err)
+			return nil, fmt.Errorf("%w: %w", errDial, err)
 		}
 	} // end switch
 	dlog(cfg.opt.DebugConnPool, "ConPool connect raw conn established '%s' took=(%d ms)", c.provider.Name, time.Since(start).Milliseconds())
+
+	// every read and write gets an idle timeout once the handshake is done
+	conn = &idleConn{Conn: conn}
+
+	// bound the greeting and login; cleared again once the conn is handed out
+	conn.SetDeadline(time.Now().Add(connHandshakeTimeout))
+	defer func() {
+		if err != nil && errors.Is(err, os.ErrDeadlineExceeded) {
+			// accepted but silent: as useless as a refused dial, so GetConn may mark the provider down
+			err = fmt.Errorf("%w: handshake timed out after %v: %w", errDial, connHandshakeTimeout, err)
+		}
+	}()
 
 	time0 := time.Now()
 	srvtp := textproto.NewConn(conn)
 	dlog(cfg.opt.DebugConnPool, "ConnPool connect textproto.NewConn took=(%d ms) '%s'", time.Since(time0).Milliseconds(), c.provider.Name)
 	time00 := time.Now()
-	code, msg, err := srvtp.ReadCodeLine(200)
-	dlog(cfg.opt.DebugConnPool, "ConnPool connect ReadCodeLine(20) took=(%d ms) '%s' code=%d msg='%s' err='%v'", time.Since(time00).Milliseconds(), c.provider.Name, code, msg, err)
+	// expectCode 2 accepts any 2xx. It was 200, so a "201 no posting" greeting came back
+	// with an error: NewConn then failed and the conn leaked when no login was configured.
+	code, msg, err := srvtp.ReadCodeLine(2)
+	dlog(cfg.opt.DebugConnPool, "ConnPool connect ReadCodeLine(2) took=(%d ms) '%s' code=%d msg='%s' err='%v'", time.Since(time00).Milliseconds(), c.provider.Name, code, msg, err)
 	time000 := time.Now()
 
-	if code < nntpWelcomeCodeMin || code > nntpWelcomeCodeMax { // not a valid nntp welcome code
-		if conn != nil {
-			conn.Close()
+	if err != nil || code < nntpWelcomeCodeMin || code > nntpWelcomeCodeMax { // not a valid nntp welcome code
+		conn.Close()
+		dlog(always, "ERROR in connect '%s' welcome banner code=%d err='%v'", c.provider.Name, code, err)
+		if err == nil {
+			err = fmt.Errorf("unexpected welcome banner code=%d msg='%s'", code, msg)
 		}
-		dlog(always, "ERROR connect welcome '%s' retry in %.0fs code=%d msg='%s' err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, msg, err)
-		//time.Sleep(DefaultConnectErrSleep)
-		return nil, err
+		return nil, fmt.Errorf("error connect '%s': %w", c.provider.Name, err)
 	}
 	dlog(cfg.opt.DebugConnPool, "ConnPool connect welcome '%s' time0=(%d ms) time00=(%d ms) time000=(%d ms)", c.provider.Name, time.Since(time0).Milliseconds(), time.Since(time00).Milliseconds(), time.Since(time000).Milliseconds())
 	if !c.wants_auth {
-		return &ConnItem{c: c, connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}, err
+		connitem = &ConnItem{c: c, connid: c.newconnid(), created: time.Now(), srvtp: srvtp, conn: conn, writer: bufio.NewWriter(conn)}
+	} else {
+		connitem, err = c.auth(srvtp, conn, start)
 	}
-	return c.auth(srvtp, conn, start)
+	if connitem != nil && connitem.conn != nil {
+		connitem.conn.SetDeadline(time.Time{}) // the handshake's absolute deadline is over
+		setIdleTimeout(connitem.conn, connIdleTimeout)
+	}
+	return connitem, err
 } // end func connect
 
 func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (connitem *ConnItem, err error) {
-	var code int
-	var msg string
+	//var code int
+	//var msg string
 	time1 := time.Now()
 	// send auth user sequence
 	id, err := srvtp.Cmd("AUTHINFO USER %s", c.provider.Username)
@@ -268,21 +352,19 @@ func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (
 		if conn != nil {
 			conn.Close()
 		}
-		dlog(always, "ERROR AUTH#1 Cmd(AUTHINFO USER ...) '%s' retry in %.0fs err='%v' ", c.provider.Name, DefaultConnectErrSleep.Seconds(), err)
-		//time.Sleep(DefaultConnectErrSleep)
+		//dlog(always, "ERROR AUTH#1 Cmd(AUTHINFO USER ...) '%s' no retry err='%v' ", c.provider.Name, err)
 		return nil, err
 	}
 	time2 := time.Now()
 	// await response from server
 	srvtp.StartResponse(id)
-	code, msg, err = srvtp.ReadCodeLine(nntpMoreInfoCode) // 381 is the code for "more information required"
+	_, _, err = srvtp.ReadCodeLine(nntpMoreInfoCode) // 381 is the code for "more information required"
 	srvtp.EndResponse(id)
 	if err != nil {
 		if conn != nil {
 			conn.Close()
 		}
-		dlog(always, "ERROR AUTH#2 ReadCodeLine(381) step#2 '%s' retry in %.0fs code=%d msg='%s' err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, msg, err)
-		time.Sleep(DefaultConnectErrSleep)
+		//dlog(always, "ERROR AUTH#2 ReadCodeLine(381) step#2 '%s' code=%d msg='%s' err='%v'", c.provider.Name, code, msg, err)
 		return nil, err
 	}
 	time3 := time.Now()
@@ -292,21 +374,19 @@ func (c *ConnPool) auth(srvtp *textproto.Conn, conn net.Conn, start time.Time) (
 		if conn != nil {
 			conn.Close()
 		}
-		dlog(always, "ERROR AUTH#3 Cmd(AUTHINFO PASS ...) '%s' retry in %.0fs err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), err)
-		//time.Sleep(DefaultConnectErrSleep)
+		//dlog(always, "ERROR AUTH#3 Cmd(AUTHINFO PASS ...) '%s' no retry err='%v'", c.provider.Name, err)
 		return nil, err
 	}
 	time4 := time.Now()
 	// await response from server
 	srvtp.StartResponse(id)
-	code, msg, err = srvtp.ReadCodeLine(nntpAuthSuccess) // 281 is the code for "authentication successful"
+	_, _, err = srvtp.ReadCodeLine(nntpAuthSuccess) // 281 is the code for "authentication successful"
 	srvtp.EndResponse(id)
 	if err != nil {
 		if conn != nil {
 			conn.Close()
 		}
-		dlog(always, "ERROR AUTH#4 ReadCodeLine(281) '%s' retry in %.0fs code=%d msg='%s' err='%v'", c.provider.Name, DefaultConnectErrSleep.Seconds(), code, msg, err)
-		//time.Sleep(DefaultConnectErrSleep)
+		//dlog(always, "ERROR AUTH#4 ReadCodeLine(281) '%s' no retry err='%v'", c.provider.Name, err)
 		return nil, err
 	}
 	time5 := time.Now()
@@ -323,55 +403,33 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 		// another routine was faster...
 		dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: another routine was faster! openConns=%d provider.MaxConns=%d '%s'", c.openConns, c.provider.MaxConns, c.provider.Name)
 		c.mux.Unlock() // mutex c459a
-		err = fmt.Errorf("retry getConn, not newConn! all conns are already established")
-		return
+		return nil, fmt.Errorf("retry getConn, not newConn! all conns are already established")
 	}
 	if c.openConns < c.provider.MaxConns {
 		dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: connect to '%s' openConns=%d provider.MaxConns=%d", c.provider.Name, c.openConns, c.provider.MaxConns)
-		c.openConns++
 		openConnsBefore := c.openConns
+		c.openConns++
 		c.mux.Unlock() // mutex c459a
 		start := time.Now()
 		// connect to the provider
-		if c.provider.MaxConnErrors <= 0 {
-			for {
-				connitem, err = c.connect()
-				if err != nil || connitem == nil || connitem.conn == nil {
-					continue // retry connect
-				}
-				if cfg.opt.DebugConnPool {
-					c.mux.RLock() // mutex c461
-					dlog(always, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
-					c.mux.RUnlock() // mutex c461
-				}
-				// we have a new connection!
-				GCounter.Incr("TOTAL_NewConns")
-				return // established new connection and returns connitem
-			}
-		} else {
-			for retried := 0; retried < c.provider.MaxConnErrors; retried++ {
-				connitem, err = c.connect()
-				if err != nil || connitem == nil || connitem.conn == nil {
-					continue // retry connect
-				}
-				if cfg.opt.DebugConnPool {
-					c.mux.RLock() // mutex c461
-					dlog(always, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
-					c.mux.RUnlock() // mutex c461
-				}
-				// we have a new connection!
-				GCounter.Incr("TOTAL_NewConns")
-				return // established new connection and returns connitem
-			}
+		connitem, err = c.connect()
+		if err != nil || connitem == nil || connitem.conn == nil {
+			c.mux.Lock() // mutex c460
+			c.openConns--
+			dlog(cfg.opt.DebugConnPool, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
+			c.mux.Unlock() // mutex c460
+			return nil, fmt.Errorf("error in ConnPool NewConn: connect failed '%s' err='%w'", c.provider.Name, err)
 		}
-		c.mux.Lock() // mutex c460
-		c.openConns--
-		dlog(always, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
-		c.mux.Unlock() // mutex c460
-		return
+		c.mux.RLock() // mutex c461
+		dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
+		c.mux.RUnlock() // mutex c461
+		// we have a new connection!
+		GCounter.Incr("TOTAL_NewConns")
+		go c.provider.IncrementOpenConns()
+		return connitem, nil // established new connection and returns connitem
 	}
 	c.mux.Unlock() // mutex c459a
-	return
+	return nil, fmt.Errorf("error in ConnPool NewConn: openConns=%d > provider.MaxConns", c.openConns)
 } // end func NewConn
 
 func (c *ConnPool) GetConn() (connitem *ConnItem, err error) {
@@ -427,7 +485,7 @@ getConnFromPool:
 					dlog(always, "INFO ConnPool GetConn: got long idle=(%d ms) '%s', close and get NewConn", time.Since(connitem.parktime).Milliseconds(), c.provider.Name)
 					c.CloseConn(connitem, nil)
 					connitem, err = c.NewConn()
-					if connitem == nil || err != nil {
+					if err != nil || connitem == nil || connitem.conn == nil {
 						continue getConnFromPool
 					}
 					// extend the read deadline of the new connection
@@ -464,7 +522,15 @@ getConnFromPool:
 				waiting = time.Now()
 				dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: infinite waiting for a conn '%s'", c.provider.Name)
 
-				connitem = <-c.pool
+				select {
+				case connitem = <-c.pool:
+				case <-c.sessStop:
+					return nil, fmt.Errorf("error in ConnPool GetConn '%s': %w", c.provider.Name, errSessionStopped)
+				}
+				if connitem == nil {
+					// ParkConn never parks nil, but don't hand out a nil item
+					continue getConnFromPool
+				}
 				GCounter.Incr("TOTAL_GetConns")
 				dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: released, got connid=%d age=(%v) %s: waited='%v'", connitem.connid, time.Since(connitem.parktime), c.provider.Name, time.Since(waiting))
 				return
@@ -472,19 +538,26 @@ getConnFromPool:
 			dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: try to open a new connection '%s' openConns=%d provider.MaxConns=%d", c.provider.Name, c.openConns, c.provider.MaxConns)
 			c.mux.RUnlock() // mutex c458
 
+			select {
+			case <-c.sessStop:
+				// don't dial (and retry for seconds) for a session that is over
+				return nil, fmt.Errorf("error in ConnPool GetConn '%s': %w", c.provider.Name, errSessionStopped)
+			default:
+			}
 			// try to open a new connection
 			newconnitem, aerr := c.NewConn()
-			if newconnitem == nil || aerr != nil {
+			if aerr != nil || newconnitem == nil || newconnitem.conn == nil {
 				dlog(cfg.opt.DebugConnPool, "WARN in ConnPool GetConn: NewConn failed '%s' connitem='%v' aerr='%v'", c.provider.Name, newconnitem, aerr)
 				time.Sleep(DefaultConnectErrSleep) // wait a bit before retrying
 				retried++
 				if retried >= c.provider.MaxConnErrors {
 					// we have retried too often
-					dlog(always, "ERROR in ConnPool GetConn: retried %d times to get a new conn '%s' giving up! aerr='%v'", retried, c.provider.Name, aerr)
-					//c.mux.Lock()          // mutex c457
-					//c.openConns--         // decrease open conns as we failed to get a new one
-					//c.mux.Unlock()        // mutex c457
+					dlog(cfg.opt.DebugConnPool, "ERROR in ConnPool GetConn: retried %d times to get a new conn '%s' giving up! aerr='%v'", retried, c.provider.Name, aerr)
 					err = aerr
+					if errors.Is(aerr, errDial) && c.s != nil && !c.s.proxy {
+						// the proxy's pools live as long as the process: never mark them down
+						c.provider.markDown(aerr)
+					}
 					break getConnFromPool // break out of the for loop
 				}
 				continue getConnFromPool // until chan rans empty
@@ -530,7 +603,7 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 		// parked in pool
 		//if cfg.opt.DebugConnPool && !silent {
 		GCounter.Incr("TOTAL_ParkedConns")
-		if always || cfg.opt.BUG && cfg.opt.DebugConnPool {
+		if cfg.opt.DebugConnPool && cfg.opt.DebugWorker { // only lock for the debug line (was `always ||`: a lock on every park)
 			c.mux.RLock()
 			dlog(cfg.opt.DebugConnPool && cfg.opt.DebugWorker, "ParkedConn connid=%d (wid=%d) '%s' inPool=%d cap=%d openConns=%d src='%s'", connitem.connid, wid, c.provider.Name, len(c.pool), cap(c.pool), c.openConns, src)
 			c.mux.RUnlock()
@@ -547,8 +620,27 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 // This is used to signal the routines to get a new connection from the pool.
 // If the connection is nil, it will not close it and just remove it from the pool.
 // If the connection is already closed, it will not close it again.
+// CloseConn closes connitem and gives back its slot in the pool count, once:
+// a second call on the same item (readDotLines closes on read errors, the caller
+// closes again) or a nil item only passes the token on. If sharedConnChan is given
+// a nil token is always sent, so sibling routines waiting in SharedConnGet go on.
 func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) {
+	// only the decrement is guarded: returning early would skip the token below
+	// and leave the worker's other routines blocked in SharedConnGet
+	if connitem != nil && connitem.conn != nil {
+		c.closeConnOnce(connitem)
+	}
+	// if a sharedConnChan is supplied we send a nil to the channel
+	// a nil as connitem signals the routines to get a new conn
+	// mostly because conn was closed by network, protocol error or timeout
+	if sharedConnChan != nil {
+		sharedConnChan <- nil
+	}
+} // end func CloseConn
 
+// closeConnOnce closes an open connitem and decrements the open counters.
+// The caller checked connitem.conn != nil; conn is set to nil here, so it runs once per conn.
+func (c *ConnPool) closeConnOnce(connitem *ConnItem) {
 	if cfg.opt.DebugConnPool {
 		GCounter.Incr("TOTAL_DisConns")
 	}
@@ -575,13 +667,8 @@ func (c *ConnPool) CloseConn(connitem *ConnItem, sharedConnChan chan *ConnItem) 
 	c.openConns--
 	dlog(cfg.opt.DebugConnPool, "DisConn '%s' inPool=%d open=%d", c.provider.Name, len(c.pool), c.openConns)
 	c.mux.Unlock()
-	// if a sharedConnChan is supplied we send a nil to the channel
-	// a nil as connitem signals the routines to get a new conn
-	// mostly because conn was closed by network, protocol error or timeout
-	if sharedConnChan != nil {
-		sharedConnChan <- nil
-	}
-} // end func CloseConn
+	go c.provider.DecrementOpenConns()
+} // end func closeConnOnce
 
 // GetStats returns the current stats of the connection pool.
 // It returns the number of open connections and the number of idle connections in the pool.
@@ -605,9 +692,15 @@ func (c *ConnPool) WatchOpenConnsThread(workerWGconnReady *sync.WaitGroup) {
 	dlog(cfg.opt.Debug, "WatchOpenConnsThread started for '%s' waited=%v", c.provider.Name, time.Since(start))
 	defer dlog(cfg.opt.Debug, "WatchOpenConnsThread for '%s' defer returned", c.provider.Name)
 	//tempItems := []*ConnItem{} // temporary slice to hold ConnItems
+	tick := time.NewTicker(15 * time.Second) // check every N
+	defer tick.Stop()
 forever:
 	for {
-		time.Sleep(time.Millisecond * 15000) // check every N milliseconds
+		select {
+		case <-tick.C:
+		case <-c.poolStop:
+			return // KillConnPool: it used to run (and log) forever after the session ended
+		}
 		if !loggedrwmutex.DisableLogging {
 			c.provider.mux.Lock()
 			if c.provider.ConnPool != nil {
@@ -734,16 +827,15 @@ func isNetworkUnreachable(err error) bool {
 } // end func isNetworkUnreachable (written by AI! GPT-4o)
 
 // GetNewSharedConnChannel creates a new shared connection channel.
-// The sharedCC channel is used to share connections between (anonymous) goroutines which will work on the same item.
+// The sharedCC channel is used to share connections between (anonymous) goroutines
 // which will work on the same item.
 func GetNewSharedConnChannel(wid int, provider *Provider) (sharedCC chan *ConnItem, err error) {
-	sharedCC = make(chan *ConnItem, 1)           // buffered channel with size 1
 	connitem, err := provider.ConnPool.GetConn() // get an idle or new connection from the pool
 	if err != nil {
-		dlog(always, "ERROR a GoWorker (%d) failed to connect '%s' err='%v'", wid, provider.Name, err)
+		dlog(cfg.opt.DebugWorker, "ERROR in GoWorker (%d) GetNewSharedConnChannel failed to connect '%s' err='%v'", wid, provider.Name, err)
 		return nil, err
 	}
-	//sharedCC <- nil                    // put a nil item into the channel to signal that no connection is available yet
+	sharedCC = make(chan *ConnItem, 1) // shares 1 connection between goroutines
 	sharedCC <- connitem
 	return sharedCC, nil
 }
@@ -759,7 +851,17 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	// if any routine in this worker gets a nil connitem from sharedCC:
 	//  - it will get a new connection from the provider
 	//  - and put the conn back into the sharedCC channel later
-	aconnitem := <-sharedCC
+	var aconnitem *ConnItem
+	select {
+	case aconnitem = <-sharedCC: // a waiting token wins over a closed stop
+	default:
+		select {
+		case aconnitem = <-sharedCC:
+		case <-provider.ConnPool.sessStop:
+			// we took no token, so there is nothing to put back
+			return nil, fmt.Errorf("error in SharedConnGet '%s': %w", provider.Name, errSessionStopped)
+		}
+	}
 	switch aconnitem {
 	case nil:
 		// no connection available
@@ -774,10 +876,8 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	}
 	if !needNewConn && aconnitem != nil && aconnitem.conn != nil {
 		// we have a valid connection, use it
-		if cfg.opt.BUG {
-			dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
-		}
-		provider.ConnPool.ExtendConn(connitem)
+		dlog(cfg.opt.DebugConnPool, "SharedConnGet: got shared connection '%s' aconnitem='%#v'", provider.Name, aconnitem)
+		provider.ConnPool.ExtendConn(aconnitem) // was ExtendConn(connitem), the still-nil named return
 		return aconnitem, nil
 	}
 	//provider.ConnPool.CloseConn(aconnitem, sharedCC) // close the nil connection item to reduce counter if needed and put nil back into sharedCC
@@ -787,13 +887,13 @@ func SharedConnGet(sharedCC chan *ConnItem, provider *Provider) (connitem *ConnI
 	newconnitem, err := provider.ConnPool.GetConn()
 	if err != nil || newconnitem == nil || newconnitem.conn == nil {
 		// unable to get a new connection, put nil back into sharedCC
-		dlog(always, "ERROR SharedConnGet connect failed Provider '%s' err='%v'", provider.Name, err)
+		dlog(cfg.opt.DebugConnPool, "ERROR SharedConnGet connect failed Provider '%s' err='%v'", provider.Name, err)
 		sharedCC <- nil // put nil back into sharedCC
-		return
+		return nil, err
 	}
 	connitem = newconnitem // use the new connection item
 	provider.ConnPool.ExtendConn(connitem)
-	return
+	return connitem, nil
 } // end func SharedConnGet
 
 // SharedConnReturn puts a connection back into the sharedCC channel.
@@ -850,17 +950,26 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 	case cp == nil && cnt == nil:
 		name, group, counter = "Global", "Speedmeter", GCounter
 	case cp != nil && cnt == nil:
-		name, group, counter = cp.provider.Name, cp.provider.Group, cp.counter
+		name, group, counter = cp.provider.Name, cp.provider.Group, cp.Counter
 	case cp == nil && cnt != nil:
 		name, group, counter = "Global", "Speedmeter", cnt
 	default:
 		return fmt.Errorf("error in Speedmeter: supply cp or cnt or nothing to use global counter, but not both")
 	}
 
+	var stop <-chan struct{} // nil for the global meter: runs as long as the process
+	if cp != nil {
+		stop = cp.poolStop
+	}
 	var totalTX, totalRX uint64
 	ticker := time.NewTicker(time.Second * time.Duration(PrintStats))
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
+		case <-stop:
+			return nil // KillConnPool
+		}
 		var tmpRX, tmpTX uint64
 		globalmux.Lock()
 		tmpRX, tmpTX = counter.GetReset("TMP_RXbytes"), counter.GetReset("TMP_TXbytes")
@@ -873,10 +982,19 @@ func Speedmeter(byteSize int64, cp *ConnPool, cnt *Counter_uint64, workerWGconnR
 		txSpeed, txMbps := ConvertSpeed(int64(tmpTX), PrintStats)
 		dlPerc := int(float64(totalRX) / float64(byteSize) * 100)
 		upPerc := int(float64(totalTX) / float64(byteSize) * 100)
+
+		// Store speed values in provider struct for web UI (if this is a provider-specific speedmeter)
+		if cp != nil && cp.provider != nil {
+			cp.provider.mux.Lock()
+			cp.provider.speed.downloadSpeed = float64(rxSpeed) * 1024 // convert KiB/s to bytes/sec
+			cp.provider.speed.uploadSpeed = float64(txSpeed) * 1024   // convert KiB/s to bytes/sec
+			cp.provider.speed.lastUpdated = time.Now().Unix()
+			cp.provider.mux.Unlock()
+		}
+
 		printSpeedTable(dlPerc, upPerc, totalRX, totalTX, rxSpeed, txSpeed, rxMbps, txMbps, name, group)
 
 	}
-	return nil
 }
 
 func printSpeedTable(dlPerc, upPerc int, totalRX uint64, totalTX uint64, rxSpeed int64, txSpeed int64, rxMbps float64, txMbps float64, provider string, group string) {

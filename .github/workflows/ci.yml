@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.variant }}, simd ${{ matrix.simd }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [purego, rapidyenc]
+        simd: ["on", "off"]
+    env:
+      GOEXPERIMENT: ${{ matrix.simd == 'on' && 'simd' || '' }}
+      TAGS: ${{ matrix.variant == 'rapidyenc' && 'rapidyenc' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: ${{ matrix.variant == 'rapidyenc' }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build the rapidyenc library
+        if: matrix.variant == 'rapidyenc'
+        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
+      - name: go vet
+        run: go vet -tags "$TAGS" ./...
+      - name: go test -race
+        run: go test -race -tags "$TAGS" ./...
+
+  cross:
+    name: cross-compile (purego)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build every release target
+        run: |
+          for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64; do
+            echo "== $t"
+            CGO_ENABLED=0 GOEXPERIMENT=simd GOOS=${t%/*} GOARCH=${t#*/} go build -o /dev/null .
+          done
+
+  macos:
+    name: macOS (rapidyenc, native)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build the rapidyenc library
+        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh darwin
+      - name: Test and build
+        run: |
+          go test -tags rapidyenc ./rapidyenc/
+          go build -tags rapidyenc -o /dev/null .

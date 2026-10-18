@@ -3,16 +3,15 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
 
 // PROCESSOR manages NZB file processing.
@@ -26,15 +25,11 @@ type PROCESSOR struct {
 	IsRunning bool
 	//cfg       *Config // TODO: remove from global scope?
 	//mux       sync.RWMutex
-	mux       *loggedrwmutex.LoggedSyncRWMutex
-	sessIds   uint64              // counts up
-	sessMap   map[uint64]*SESSION // map with sessions
-	nzbDir    string              // watch this dir for nzb files
-	seenFiles map[string]bool     // map to keep track of already seen/added files
-	nzbFiles  []string            // watched and added from nzbDir
-	refresh   time.Duration       // update list of nzb dir files every N seconds
+	mux     *loggedrwmutex.LoggedSyncRWMutex
+	sessIds uint64              // counts up
+	sessMap map[uint64]*SESSION // map with sessions
+	nzbDir  string              // -nzbdir: the watched directory (dirWatcher)
 	//limitA    int                 // limits amount of open sessions
-	stopChan chan struct{}
 	//waitSessionMap     map[uint64]*sync.WaitGroup
 } // end type PROCESSOR struct
 
@@ -46,27 +41,38 @@ type PROCESSOR struct {
 // It is created by the PROCESSOR when a new NZB file is detected and processed.
 type SESSION struct {
 	//mux       sync.RWMutex
-	stopChan      chan struct{} // stopChan is used to stop the session/routines
-	mux           *loggedrwmutex.LoggedSyncRWMutex
-	counter       *Counter_uint64 // private counter for every session // TODO check all GCounter if they should be private
-	proc          *PROCESSOR      // the parent where we belong to
-	sessId        uint64          // session ID
-	nzbName       string          // test.nzb
-	nzbHashedname string          // the hashed name of the full filename with .extension
-	nzbPath       string          // /path/to/nzbDir/test.nzb(.gz)
-	nzbFile       *nzbparser.Nzb  // the parsed NZB file structure
-	nzbSize       int64           // the byte size of all the files in the nzb. will be > 0 if nzbFile is loaded or has been loaded before
-	nzbGroups     []string        // informative
+	// stopChan is closed exactly once, by stop(), when the session's work is over.
+	// It is created with the session and never replaced: readers may copy it into a local.
+	stopChan       chan struct{}
+	stopOnce       sync.Once // guards close(stopChan)
+	closeChansOnce sync.Once // guards closing segmentChansDowns/Reups (see closeWorkChans)
+	mux            *loggedrwmutex.LoggedSyncRWMutex
+	counter        *Counter_uint64 // private counter for every session // TODO check all GCounter if they should be private
+	proc           *PROCESSOR      // the parent where we belong to
+	sessId         uint64          // session ID
+	nzbName        string          // test.nzb
+	nzbHashedname  string          // the hashed name of the full filename with .extension
+	nzbPath        string          // /path/to/nzbDir/test.nzb(.gz)
+	nzbFile        *nzbparser.Nzb  // the parsed NZB file structure
+	nzbSize        int64           // the byte size of all the files in the nzb. will be > 0 if nzbFile is loaded or has been loaded before
+	nzbGroups      []string        // informative
 	//lastRun               time.Time                  	   // lastRun is the time when the session was last run
 	//nextRun               time.Time                      // nextRun is the time when the session is scheduled to run next
-	segmentList       []*segmentChanItem               // list holds the segments from parsed nzbFile
+	segmentList []*segmentChanItem // list holds the segments from parsed nzbFile
+	// One channel per provider group, built once by GoBootWorkers before any worker starts,
+	// read-only while the session runs. Close owners: the group's feeder closes its check
+	// channel, closeWorkChans closes the downs/reups channels after the divider has quit.
 	segmentChansCheck map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansDowns map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansReups map[string]chan *segmentChanItem // map[provider.Group]chan
-	//memDL                 map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
-	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
-	preBoot               bool              // will be set to false before workers start
-	active                bool              // will be set to true when processing starts // REVIEW!TODO!FIXME: set to false is missing!!
+	checkers          map[string]*checkerGroup         // live check routines per provider.Group, built with the channels
+	workDone          atomic.Uint64                    // items finished by any check/downs/reups routine, ok or not (divider watchdog)
+	progress          sessionProgress                  // counts published by GoWorkDivider for the web UI
+	ready             chan struct{}                    // proxy/web base sessions: closed once the providers are loaded (nil: not used)
+	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.ID]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
+	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.ID]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
+	preBoot               bool              // true from LaunchSession until GoBootWorkers starts the workers; guarded by mux
+	active                bool              // true while the workers run (GoBootWorkers until closeSession); guarded by mux
 	preparationStartTime  time.Time         // flag // time when the session was started
 	segmentCheckStartTime time.Time         // flag // time when the segment check started
 	segmentCheckEndTime   time.Time         // flag // time when the segment check ended
@@ -82,6 +88,8 @@ type SESSION struct {
 	WorkDividerChan       chan *WrappedItem // channel to send items to the work divider
 	checkFeedDone         bool              // checkDone is set to true when the segment feeder has finished feeding to channel, check may still be activly running!
 	segcheckdone          bool              // segcheckdone is set to true when the segment check is done
+	proxy                 bool              // flag to signal proxy is used in LaunchSession
+	bootedWorkers         int               // counts how many workers have been booted
 } // end type SESSION struct
 
 func (p *PROCESSOR) NewProcessor() error {
@@ -105,16 +113,11 @@ func (p *PROCESSOR) NewProcessor() error {
 			time.Sleep(9 * time.Second) // watchdir not found, retry in
 			retries--
 		}
-		//p.refresh = time.Duration(0 * time.Second) // default. call processor.SetDirRefresh after NewProcessor
-		p.nzbDir = cfg.opt.NzbDir
-		p.seenFiles = make(map[string]bool, 128)
-		go p.watchDirThread()
+		p.nzbDir = cfg.opt.NzbDir // main runs the watcher (nzbdir.go)
 	}
-	p.sessMap = make(map[uint64]*SESSION, 128)
-	p.stopChan = make(chan struct{}, 1)
-	go p.processorThread()
+	p.sessMap = make(map[uint64]*SESSION)
 	p.IsRunning = true
-	dlog(always, "NewProcessor: nzbDir='%s' refresh=%d", p.nzbDir, p.refresh)
+	dlog(cfg.opt.Verbose, "NewProcessor: nzbDir='%s' proxy=%t", p.nzbDir, proxy)
 	return nil
 } // end func NewProcessor
 
@@ -130,35 +133,45 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		defer waitSession.Done()
 	}
 
-	// checks for the correct inputs
-	if nzbfilepath == "" && s == nil {
-		// we have no nzbfilepath and no session
-		// this is a bug in the code, we can't handle both at the same time!
-		return fmt.Errorf("error LaunchSession: need nzbfilepath or session")
+	if !proxy { // the normal case, we are processing an nzb file. don't use the session var here!
+		// not booting proxy, no session supplied, create a new session
+		// checks for the correct inputs
+		if nzbfilepath == "" && s == nil {
+			// we have no nzbfilepath and no session
+			// this is a bug in the code, we can't handle both at the same time!
+			return fmt.Errorf("error LaunchSession: need nzbfilepath or session")
 
-	} else if nzbfilepath != "" && s != nil {
-		// we have a nzbfilepath and a session
-		// this is a bug in the code, we can't handle both at the same time!
-		return fmt.Errorf("error LaunchSession: nzbfilepath and session supplied! can only take one")
+		} else if nzbfilepath != "" && s != nil {
+			// we have a nzbfilepath and a session
+			// this is a bug in the code, we can't handle both at the same time!
+			return fmt.Errorf("error LaunchSession: nzbfilepath and session supplied! can only take one")
 
-	} else if nzbfilepath != "" && s == nil {
-		// we have a nzbfilepath but no session
-		// no session supplied, create one!
-		if sessId, newsession := p.newSession(nzbfilepath); sessId <= 0 || newsession == nil {
-			return fmt.Errorf("error LaunchSession: sessId <= 0 ?! nzbfilepath='%s' newsession='%#v' err='%v'", nzbfilepath, newsession, err)
+		} else if nzbfilepath != "" && s == nil {
+			// we have a nzbfilepath but no session
+			// no session supplied, create one!
+			if sessId, newsession := p.newSession(nzbfilepath); sessId <= 0 || newsession == nil {
+				return fmt.Errorf("error LaunchSession: sessId <= 0 ?! nzbfilepath='%s' newsession='%#v' err='%v'", nzbfilepath, newsession, err)
+			} else {
+				// we have a new session
+				dlog(cfg.opt.Verbose, "LaunchSession: created new session with sessId=%d nzbfilepath='%s'", sessId, nzbfilepath)
+				s = newsession
+			}
+
+		} else if nzbfilepath == "" && s != nil {
+			// we have no nzbfilepath but a session
+			// pass: we have "s" as session!
 		} else {
-			// we have a new session
-			dlog(cfg.opt.Verbose, "LaunchSession: created new session with sessId=%d nzbfilepath='%s'", sessId, nzbfilepath)
-			s = newsession
+			return fmt.Errorf("error LaunchSession: uncatched bug in launch checks: nzbfilepath='%s' s='%#v'", nzbfilepath, s)
 		}
+	} // end if !proxy
 
-	} else if nzbfilepath == "" && s != nil {
-		// we have no nzbfilepath but a session
-		// pass: we have "s" as session!
-	} else {
-		return fmt.Errorf("error LaunchSession: uncatched bug in launch checks: nzbfilepath='%s' s='%#v'", nzbfilepath, s)
+	if s == nil {
+		return fmt.Errorf("error LaunchSession: session is nil, can't start")
 	}
-
+	if s.stopped() {
+		// sessions are single-use: their stopChan and channels are closed for good
+		return fmt.Errorf("error LaunchSession: session %d has already run, create a new session", s.sessId)
+	}
 	s.mux.Lock()
 	if s.preBoot || s.active {
 		// we are already booting or active
@@ -169,8 +182,10 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	s.preBoot = true
 	s.mux.Unlock()
 
-	// create log file: /path/nzb.log
-	if cfg.opt.Log {
+	// create log file: /path/nzb.log. Only for NZB sessions: the proxy and web
+	// sessions have no NZB (they wrote to logs/.log) and never return to restore it.
+	// The log is process-wide: while a web job runs, the web server logs there too.
+	if cfg.opt.Log && !s.proxy && s.nzbPath != "" {
 		logFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".log"
 		logPath := filepath.Join(cfg.opt.LogDir, logFileName)
 		if cfg.opt.LogDir != "" && cfg.opt.LogDir != "." && !DirExists(cfg.opt.LogDir) {
@@ -189,86 +204,103 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		defer SetLogToTerminal() // reset log output to stdout after the session is done
 	}
 
-	dlog(cfg.opt.Verbose, "LaunchSession Settings: '%#v'", *cfg.opt) //
-	s.preparationStartTime = time.Now()
-	dlog(cfg.opt.Verbose, "LaunchSession Loading NZB: '%s'", s.nzbPath)
+	if !s.proxy {
+		dlog(cfg.opt.Verbose, "LaunchSession Settings: '%#v'", *cfg.opt) //
+		s.preparationStartTime = time.Now()
+		dlog(cfg.opt.Verbose, "LaunchSession Loading NZB: '%s'", s.nzbPath)
 
-	if s.nzbFile != nil {
-		// nzbfile is still open and loaded, pass
+		if s.nzbFile != nil {
+			// nzbfile is still open and loaded, pass
 
-	} else if s.nzbFile == nil && nzbfilepath != "" {
-		// we have a nzbfilepath and no nzbFile loaded yet
-		// nzbfile has not been opened and parsed before (or has been closed)
-		nzbfile, err := loadNzbFile(s.nzbPath)
-		if err != nil || nzbfile == nil {
-			return fmt.Errorf("error unable to load file s.nzbPath='%s' err=%v'", s.nzbPath, err)
-		}
-		s.nzbFile = nzbfile
-
-		dlog(cfg.opt.Debug, "nzbfile='%#v'", s.nzbFile)
-
-		// loop through all file tags within the NZB file
-		for _, file := range nzbfile.Files {
-			if cfg.opt.Debug {
-				fmt.Printf(">> nzbfile file='%#v'\n\n", file)
+		} else if s.nzbFile == nil && s.nzbPath != "" {
+			// we have a nzbfilepath and no nzbFile loaded yet
+			// nzbfile has not been opened and parsed before (or has been closed)
+			nzbfile, err := loadNzbFile(s.nzbPath)
+			if err != nil || nzbfile == nil {
+				return fmt.Errorf("error unable to load file s.nzbPath='%s' err=%v'", s.nzbPath, err)
 			}
-			s.fileStatLock.Lock()
-			s.fileStat[file.Filename] = new(fileStatistic)
-			s.fileStat[file.Filename].available = make(providerStatistic)
-			s.fileStat[file.Filename].totalSegments = uint64(file.TotalSegments)
-			s.fileStatLock.Unlock()
-			// loop through all segment tags within each file tag
-			if cfg.opt.Debug {
-				for _, agroup := range file.Groups {
-					if agroup != "" && !slices.Contains(s.nzbGroups, agroup) {
-						s.nzbGroups = append(s.nzbGroups, agroup)
-					}
+			s.nzbFile = nzbfile
+
+			dlog(cfg.opt.Debug, "nzbfile='%#v'", s.nzbFile)
+
+			// build the segment list locally and publish it once under s.mux below
+			// sized by the segments in the NZB, not by TotalSegments: that is the
+			// count the subjects claim ("(1/9999999999)"), and it made the
+			// make() panic or allocate gigabytes
+			segmentList := make([]*segmentChanItem, 0, nzbfile.Segments)
+			// loop through all file tags within the NZB file
+			for _, file := range nzbfile.Files {
+				if cfg.opt.Debug {
+					fmt.Printf(">> nzbfile file='%#v'\n\n", file)
 				}
-				dlog(always, "NewsGroups: %v", s.nzbGroups)
+				s.fileStatLock.Lock()
+				s.fileStat[file.Filename] = new(fileStatistic)
+				s.fileStat[file.Filename].available = make(providerStatistic)
+				s.fileStat[file.Filename].totalSegments = uint64(file.TotalSegments)
+				s.fileStatLock.Unlock()
+				// loop through all segment tags within each file tag
+				if cfg.opt.Debug {
+					for _, agroup := range file.Groups {
+						if agroup != "" && !slices.Contains(s.nzbGroups, agroup) {
+							s.nzbGroups = append(s.nzbGroups, agroup)
+						}
+					}
+					dlog(always, "NewsGroups: %v", s.nzbGroups)
+				}
+				// filling s.segmentList
+				for _, segment := range file.Segments {
+					dlog(cfg.opt.BUG, "append nzb to segmentList: Id='%s' file='%s'", segment.ID, file.Filename)
+					// If you add more fields to the 'segmentChanItem' struct, the compiler will catch missing initializations here and crash on compilation.
+					// mux := new(sync.RWMutex)
+					segmux := &loggedrwmutex.LoggedSyncRWMutex{Name: "segment-" + segment.ID} // use a logged sync mutex to log locking and unlocking
+					// create a new segmentChanItem for each segment
+					item := &segmentChanItem{
+						segmux, s, &segment, &file, // sync.RWMutex, *SESSION, *nzbparser.Segment, *nzbparser.File
+						"",                                    //  string fields: 1. hashedId will be filled below
+						&s.nzbHashedname,                      // *string fields
+						make(chan int, 1), make(chan bool, 1), // chan fields
+						// map fields for segment status
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						make(map[int]bool, len(s.providerList)),
+						[]string{}, []string{}, []string{}, // []string fields
+						false, false, false, false, false, false, false, false, false, // bool fields
+						0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // int fields
+					// "<id>" on the wire. The id goes into NNTP command lines as is, so it
+					// must be a valid message-id: anything else is skipped, not sent.
+					item.segment.ID = "<" + strings.TrimSuffix(strings.TrimPrefix(segment.ID, "<"), ">") + ">"
+					if !validMessageID(item.segment.ID) {
+						dlog(always, "ERROR LaunchSession: skipping segment %d of file '%s': invalid message-id %q", segment.Number, file.Filename, item.segment.ID)
+						continue
+					}
+					item.hashedId = SHA256str(item.segment.ID)
+					segmentList = append(segmentList, item)
+				}
 			}
-			// filling s.segmentList
-			for _, segment := range file.Segments {
-				dlog(cfg.opt.BUG, "append nzb to segmentList: Id='%s' file='%s'", segment.Id, file.Filename)
-				// If you add more fields to the 'segmentChanItem' struct, the compiler will catch missing initializations here and crash on compilation.
-				// mux := new(sync.RWMutex)
-				segmux := &loggedrwmutex.LoggedSyncRWMutex{Name: "segment-" + segment.Id} // use a logged sync mutex to log locking and unlocking
-				// create a new segmentChanItem for each segment
-				item := &segmentChanItem{
-					segmux, s, &segment, &file, // sync.RWMutex, *SESSION, *nzbparser.Segment, *nzbparser.File
-					SHA256str("<" + segment.Id + ">"),     // string fields
-					&s.nzbHashedname,                      // *string fields
-					make(chan int, 1), make(chan bool, 1), // chan fields
-					// map fields for segment status
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					make(map[int]bool, len(s.providerList)),
-					[]string{}, []string{}, []string{}, // []string fields
-					false, false, false, false, false, false, false, false, false, // bool fields
-					0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // int fields
-				s.segmentList = append(s.segmentList, item)
-			}
-		}
+			s.mux.Lock()
+			s.segmentList = segmentList
+			s.mux.Unlock()
+			s.progress.total.Store(uint64(len(segmentList)))
 
-		mibsize := float64(nzbfile.Bytes) / 1024 / 1024
-		artsize := mibsize / float64(len(s.segmentList)) * 1024
-		s.nzbSize = nzbfile.Bytes // store the size of the nzb file in bytes
-		dlog(always, "%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, s.nzbName, len(s.segmentList), nzbfile.TotalSegments, mibsize, artsize)
-
-	} // end if s.nzbFile
-
-	// left-padding for log output
-	s.digStr = fmt.Sprintf("%d", len(s.segmentList))
-	s.D = fmt.Sprintf("%d", len(s.digStr))
+			mibsize := float64(nzbfile.Bytes) / 1024 / 1024
+			artsize := mibsize / float64(len(segmentList)) * 1024
+			s.nzbSize = nzbfile.Bytes // store the size of the nzb file in bytes
+			dlog(always, "%s [%s] loaded NZB: '%s' [%d/%d] ( %.02f MiB | ~%.0f KiB/segment )", appName, appVersion, s.nzbName, len(segmentList), nzbfile.TotalSegments, mibsize, artsize)
+			// left-padding for log output
+			s.digStr = fmt.Sprintf("%d", len(segmentList))
+			s.D = fmt.Sprintf("%d", len(s.digStr))
+		} // end if s.nzbFile
+	} // end if !s.proxy
 
 	// re-load the provider list
 	var workerWGconnReady sync.WaitGroup // workerWGconnReady is used to wait for all connections to be established before starting the work
-	s.providerList = nil
+	// loadProviderList replaces s.providerList and s.providerGroups under s.mux
 	if err := cfg.loadProviderList(s, &workerWGconnReady); err != nil {
 		dlog(always, "ERROR unable to load providerfile '%s' err='%v'", cfg.opt.ProvFile, err)
 		return err
@@ -284,7 +316,8 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	// setup mem limiter
 	if memlim == nil {
 		memMax := cfg.opt.MemMax
-		// sets memory slots once globally!
+		// sets memory slots once globally, sized by the first session's providers
+		// (for -web that is the web session at startup; later jobs share it)
 		if memMax <= 0 && totalMaxConns > 0 {
 			if memMax != totalMaxConns*2 {
 				memMax = totalMaxConns * 2
@@ -293,31 +326,26 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		memlim = NewMemLimiter(memMax)
 	}
 
-	// limits crc32 and yenc processing
-	if cfg.opt.YencCRC {
-		if cfg.opt.YencCpu <= 0 {
-			cfg.opt.YencCpu = runtime.NumCPU()
-		}
-		if cfg.opt.YencAsyncCpu <= 0 {
-			cfg.opt.YencAsyncCpu = runtime.NumCPU()
-		}
-		if core_chan == nil || cap(core_chan) != cfg.opt.YencCpu {
-			core_chan = make(chan struct{}, cfg.opt.YencCpu)
-			for i := 1; i <= cfg.opt.YencCpu; i++ {
-				core_chan <- struct{}{} // fill chan with empty structs to suck out and return
-			}
-			dlog(always, "LaunchSession: core_chan=%d", cfg.opt.YencCpu)
-		}
-		if async_core_chan == nil || cap(async_core_chan) != cfg.opt.YencAsyncCpu {
-			async_core_chan = make(chan struct{}, cfg.opt.YencAsyncCpu)
-			for i := 1; i <= cfg.opt.YencAsyncCpu; i++ {
-				async_core_chan <- struct{}{} // fill chan with empty structs to suck out and return
-			}
-			dlog(always, "LaunchSession: async_core_chan=%d", cfg.opt.YencAsyncCpu)
-		}
-	}
+	// core_chan / async_core_chan are set up once by ParseFlags (setupCoreLimiters):
+	// resizing them here while another session holds tokens lost or blocked tokens.
 	globalmux.Unlock()
 
+	if s.proxy {
+		// proxy/web sessions never boot workers: release the pool goroutines
+		// waiting on workerWGconnReady (one Add per provider in loadProviderList)
+		for range s.providerList {
+			workerWGconnReady.Done()
+		}
+		if s.ready != nil {
+			close(s.ready) // providers and pools are up: the proxy may start its listeners
+		}
+		// infinite block here for proxy server. if a wg is supplied it will never be released
+		_, ok := <-s.stopChan
+		if !ok {
+			dlog(always, "LaunchSession: proxy server stopChan closed, exiting LaunchSession")
+			return
+		}
+	}
 	dlog(cfg.opt.Debug, "Loaded s.providerList: %d ... preparation took '%v' | cfg.opt.MemMax=%d totalMaxConns=%d", len(s.providerList), time.Since(s.preparationStartTime).Milliseconds(), cfg.opt.MemMax, totalMaxConns)
 
 	// setup wait groups
@@ -331,7 +359,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	waitDividerDone.Add(1)
 	for _, provider := range s.providerList {
 		//waitWorker.Add(1)        // this 1 releases in GoWorker when routines have booted
-		workerWGconnReady.Add(1) // #1 for every provider
+		// workerWGconnReady: #1 for every provider was already added in loadProviderList
 		for i := 1; i <= provider.MaxConns; i++ {
 			//workerWGconnReady.Add(1) // #2 for every connection per provider
 			waitWorker.Add(3) // for the 3 routines per worker in go func will release when routines stop
@@ -345,17 +373,21 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	s.segmentCheckStartTime = time.Now()
 	// booting work divider
 	go s.GoWorkDivider(&waitDivider, &waitDividerDone)
-	dlog(cfg.opt.Debug, "sess: waitDividerDone.Wait()")
+	dlog(always, "sess: waiting on waitDividerDone.Wait()")
 	waitDividerDone.Wait()
-	dlog(cfg.opt.Debug, "sess: waitDividerDone.Wait() released")
+	dlog(always, "sess: released waitDividerDone.Wait()")
 
 	s.StopRoutines()
 
-	dlog(cfg.opt.Debug, "sess: waitWorker.Wait()")
+	dlog(always, "sess: waiting on waitWorker.Wait()")
 	waitWorker.Wait()
-	dlog(cfg.opt.Debug, "sess: waitWorker.Wait() released, waiting on waitPool.Wait()")
+	dlog(always, "sess: released waitWorker.Wait(), waiting on waitPool.Wait()")
 	waitPool.Wait()
-	dlog(cfg.opt.Debug, "sess: waitPool.Wait() released")
+	s.releaseMemSlots() // no worker is left; don't let leaked slots shrink memlim for the next session
+	dlog(always, "sess: released waitPool.Wait() closing all provider connections")
+	for _, provider := range s.providerList {
+		KillConnPool(provider) // close the connection pool for this provider
+	}
 
 	result, runtime_info := s.Results(s.preparationStartTime)
 
@@ -372,23 +404,17 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	return
 } // end func LaunchSession
 
-func (p *PROCESSOR) SetDirRefresh(seconds int64) {
-	if seconds < 0 {
-		seconds = 0
-	} else if seconds > 0 && seconds < 15 {
-		seconds = 15 // hardcoded minimum scan interval is 15 seconds!
-	}
-	p.mux.Lock()
-	p.refresh = time.Duration(seconds) * time.Second
-	p.mux.Unlock()
-	dlog(always, "SetWatchDirRefresh: seconds=%d nzbDir='%s' ", seconds, p.nzbDir)
-} // end func SetWatchDirRefresh
-
 // private PROCESSOR/SESSION functions
+
+// sessionProgress holds the counts of GoWorkDivider's last pass over the segment
+// list. The web UI reads them instead of walking segmentList under locks (plan 4.3).
+type sessionProgress struct {
+	total, checked, done, dead, cached, downloaded, uploaded, notarget atomic.Uint64
+}
 
 func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	// create session, every nzbfile will have its own session
-	// this is called from LaunchSession and watchDirThread
+	// called from LaunchSession, the web job runner and the -nzbdir watcher
 	// nzbName is the name of the nzb file, e.g. "test.nzb" or "test.nzb.gz"
 	//
 	s := &SESSION{
@@ -402,8 +428,8 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 		nzbHashedname:        SHA256str(filepath.Base(nzbName)),
 		nzbPath:              filepath.Join(p.nzbDir, nzbName),
 		fileStat:             make(filesStatistic),
-		WorkDividerChan:      make(chan *WrappedItem, cfg.opt.ChanSize),
-		stopChan:             make(chan struct{}, 1), // stopChan is used to stop the session/routines
+		WorkDividerChan:      make(chan *WrappedItem, max(cfg.opt.ChanSize, 0)), // -chansize may be <= 0
+		stopChan:             make(chan struct{}, 1),                            // stopChan is used to stop the session/routines
 	}
 
 	// add session to processor map
@@ -422,6 +448,24 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	return sessId, s
 } // end func newSession
 
+// newBaseSession makes the providers-only session behind -proxytcp/-proxytls
+// and -web: it loads the providers and runs their pools, never an NZB. It is not
+// in sessMap (it isn't a job). main used to build these by hand, leaving
+// counter, fileStat and WorkDividerChan nil (plan 7).
+func (p *PROCESSOR) newBaseSession(name string) *SESSION {
+	return &SESSION{
+		proc:                 p,
+		mux:                  &loggedrwmutex.LoggedSyncRWMutex{Name: name},
+		preparationStartTime: time.Now(),
+		providerList:         make([]*Provider, 0, 8),
+		counter:              NewCounter(10), // no sessId: not a job, job sessions keep counting from 1
+		fileStat:             make(filesStatistic),
+		WorkDividerChan:      make(chan *WrappedItem, max(cfg.opt.ChanSize, 0)),
+		stopChan:             make(chan struct{}), // closed only by s.stop()
+		proxy:                true,                // providers only, no NZB
+	}
+}
+
 func (p *PROCESSOR) newssid() uint64 {
 	p.mux.Lock()
 	p.sessIds++
@@ -434,7 +478,10 @@ func (p *PROCESSOR) newssid() uint64 {
 // If the session map exceeds the threshold, it removes the session from the processor map.
 // If the session is below the threshold, it closes the session partly.
 func (s *SESSION) clearSession() {
-	if len(s.proc.sessMap) > cfg.opt.SessThreshold {
+	s.proc.mux.RLock()
+	sessions := len(s.proc.sessMap) // the web job queue adds and removes sessions concurrently
+	s.proc.mux.RUnlock()
+	if sessions > cfg.opt.SessThreshold {
 		s.proc.removeSession(s.sessId, s) // remove session from processor map
 		return
 	}
@@ -449,28 +496,10 @@ func (s *SESSION) closeSession() {
 
 	dlog(cfg.opt.Debug, "closeSession: sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 
-	// close all channels in segmentChansCheck, segmentChansDowns, segmentChansReup
-	// app will panic if anybody still sends which should not be possible
-	for n, ch := range s.segmentChansCheck {
-		close(ch)
-		s.segmentChansCheck[n] = nil // remove from map
-	}
-	for n, ch := range s.segmentChansDowns {
-		close(ch)
-		s.segmentChansDowns[n] = nil // remove from map
-	}
-	for n, ch := range s.segmentChansReups {
-		close(ch)
-		s.segmentChansReups[n] = nil // remove from map
-	}
-
-	s.segmentChansCheck = nil
-	s.segmentChansDowns = nil
-	s.segmentChansReups = nil
-
-	s.segmentChansCheck = make(map[string]chan *segmentChanItem)
-	s.segmentChansDowns = make(map[string]chan *segmentChanItem)
-	s.segmentChansReups = make(map[string]chan *segmentChanItem)
+	// The segment channels are not closed here: each has a single close owner
+	// (the group's feeder, or closeWorkChans via StopRoutines), see the SESSION struct.
+	// Closing them again here panicked with "close of closed channel".
+	// The maps are dropped below under s.mux.
 
 	// todo cleanup memDL and memUP
 	/*
@@ -485,7 +514,7 @@ func (s *SESSION) closeSession() {
 		}
 	*/
 
-	dlog(cfg.opt.Debug, "cleanupSession: closed all segment channels for sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
+	dlog(cfg.opt.Debug, "closeSession: cleaning up sessId=%d nzbName='%s' nzbPath='%s'", s.sessId, s.nzbName, s.nzbPath)
 
 	s.mux.Lock()            // lock the session for cleanup
 	s.active = false        // set active to false, we are no longer processing
@@ -530,96 +559,3 @@ func (p *PROCESSOR) removeSession(sessId uint64, s *SESSION) {
 	s = nil             // set session to nil to free memory
 	dlog(cfg.opt.Debug, "PROCESSOR.removeSession: sessId=%d", sessId)
 } // end func p.removeSession
-
-func (p *PROCESSOR) processorThread() {
-	// watchDir is running concurrently
-	// TODO: load nzbs and distribute work here
-forever:
-	for {
-		select {
-		case stopSignal, ok := <-p.stopChan:
-			if !ok {
-				dlog(always, "ERROR PROCESSOR: stopChan closed, exiting processorThread")
-				return
-			}
-			p.stopChan <- stopSignal
-			break forever
-		case <-time.After(15 * time.Second):
-			// every 15 seconds check if we have new files in the nzbDir
-		}
-	}
-	dlog(always, "Quit PROCESSOR: dir='%s'", p.nzbDir)
-} // end func p.processorThread
-
-func (p *PROCESSOR) refreshDir() {
-	fs, err := os.ReadDir(p.nzbDir)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var newfiles []*string
-	for _, file := range fs {
-		filename := file.Name()
-		isNZB := (strings.HasSuffix(filename, ".nzb") || strings.HasSuffix(filename, "nzb.gz"))
-		if isNZB {
-			p.mux.RLock()
-			if p.seenFiles[filename] {
-				p.mux.RUnlock()
-				continue
-			}
-			p.mux.RUnlock()
-
-			p.mux.Lock()
-			// Add the file to the slice and mark it as seen
-			p.seenFiles[filename] = true
-			p.nzbFiles = append(p.nzbFiles, filename)
-			p.mux.Unlock()
-
-			newfiles = append(newfiles, &filename)
-
-			if sessId, _ := p.newSession(filename); err != nil || sessId <= 0 {
-				dlog(always, "ERROR refreshDir sessId=%d <= 0? err='%v'", sessId, err)
-			}
-
-		}
-	} // end for file fs
-
-	if len(newfiles) == 0 {
-		dlog(cfg.opt.Verbose, "refreshDir: no new files found...")
-		return
-	}
-
-	if cfg.opt.Verbose {
-		dlog(always, "refreshDir loaded new files: %d dir='%s'", len(newfiles), p.nzbDir)
-		for _, fn := range newfiles {
-			dlog(always, "refreshDir: '%s' New: '%s'", p.nzbDir, *fn)
-		}
-	}
-
-} // end func p.refreshDir
-
-func (p *PROCESSOR) watchDirThread() {
-	tAchan := time.After(5 * time.Second)
-	dlog(always, "Starting watchDir: '%s' first lookup in 5 sec", p.nzbDir)
-forever:
-	for {
-		select {
-		case nul := <-p.stopChan:
-			p.stopChan <- nul
-			break forever
-
-		case <-tAchan:
-			//dlog( "watchDir checking '%s'", p.nzbDir)
-			p.mux.RLock()
-			if p.refresh > 0 {
-				p.refreshDir()
-				tAchan = time.After(p.refresh)
-			} else {
-				// if p.refresh set to <= 0 don't run refreshDir
-				// but recheck every 15 seconds if value has been updated
-				tAchan = time.After(15 * time.Second)
-			}
-			p.mux.RUnlock()
-		}
-	} // end for
-	dlog(always, "Processor watchDir '%s' quit", p.nzbDir)
-} // end func watchDir

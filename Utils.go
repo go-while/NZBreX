@@ -3,6 +3,7 @@ package main
 import (
 	//"bufio"
 	//"bytes"
+	"archive/zip"
 	"bufio"
 	"compress/gzip"
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -21,9 +23,36 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tensai75/nzbparser"
 	"github.com/go-while/go-loggedrwmutex"
+	"github.com/javi11/nzbparser"
 )
+
+// validMessageID reports whether id is a message-id as RFC 3977 3.6 allows:
+// "<", 1 to 248 printable US-ASCII characters other than ">", then ">".
+// Spaces, control characters (CR, LF) and 8-bit bytes are not allowed.
+func validMessageID(id string) bool {
+	if len(id) < 3 || len(id) > 250 || id[0] != '<' || id[len(id)-1] != '>' {
+		return false
+	}
+	for i := 1; i < len(id)-1; i++ {
+		if c := id[i]; c < 0x21 || c > 0x7e || c == '>' {
+			return false
+		}
+	}
+	return true
+}
+
+// safeFileName returns the last element of a filename taken from an article
+// subject, for use in a path, and false if nothing usable is left. Both '/'
+// and '\\' count as separators, on every OS.
+func safeFileName(name string) (string, bool) {
+	base := path.Base(strings.ReplaceAll(name, `\`, "/"))
+	switch {
+	case base == "" || base == "." || base == ".." || base == "/", strings.ContainsRune(base, 0):
+		return "", false
+	}
+	return base, true
+}
 
 func getCoreLimiter() {
 	<-core_chan
@@ -47,10 +76,10 @@ nzbfile=&nzbparser.Nzb{Comment:"", Meta:map[string]string{},
 	nzbparser.NzbFile{
 		Groups:[]string{"alt.binaries.gougouland"},
 		Segments:nzbparser.NzbSegments{
-			nzbparser.NzbSegment{Bytes:729047, Number:1, Id:"b9c5260e93724cd7a76d1b951b2c8717@ngPost"},
-			nzbparser.NzbSegment{Bytes:729047, Number:1, Id:"a2f343f81b514fecbc7fbcb88b0e67bb@ngPost"},
-			nzbparser.NzbSegment{Bytes:729184, Number:2, Id:"9dbcd79527b449deb1f686b3ad795c49@ngPost"},
-			nzbparser.NzbSegment{Bytes:737522, Number:567, Id:"e27a7c05651e4880ab62328445bdc40a@ngPost"}
+			nzbparser.NzbSegment{Bytes:729047, Number:1, ID:"b9c5260e93724cd7a76d1b951b2c8717@ngPost"},
+			nzbparser.NzbSegment{Bytes:729047, Number:1, ID:"a2f343f81b514fecbc7fbcb88b0e67bb@ngPost"},
+			nzbparser.NzbSegment{Bytes:729184, Number:2, ID:"9dbcd79527b449deb1f686b3ad795c49@ngPost"},
+			nzbparser.NzbSegment{Bytes:737522, Number:567, ID:"e27a7c05651e4880ab62328445bdc40a@ngPost"}
 			},
 		Poster:"32V49ZAnrYOCS@ngPost.com",
 		Date:1681138800,
@@ -79,6 +108,38 @@ func loadNzbFile(path string) (*nzbparser.Nzb, error) {
 		}
 		defer gzReader.Close()
 		parsedReader = gzReader
+	} else if strings.HasSuffix(strings.ToLower(path), ".zip") {
+		// ZIP requires random access, can't stream directly
+		// Need to read file info first
+		fi, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		zipReader, err := zip.NewReader(f, fi.Size())
+		if err != nil {
+			return nil, err
+		}
+		// Find first .nzb file in ZIP
+		if len(zipReader.File) == 0 {
+			return nil, fmt.Errorf("zip file is empty")
+		}
+		var nzbFile *zip.File
+		for _, zf := range zipReader.File {
+			if strings.HasSuffix(strings.ToLower(zf.Name), ".nzb") {
+				nzbFile = zf
+				dlog(always, "loadNzbFile: found nzb file in zip: '%s'", zf.Name)
+				break
+			}
+		}
+		if nzbFile == nil {
+			return nil, fmt.Errorf("no .nzb file found in zip archive")
+		}
+		rc, err := nzbFile.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		parsedReader = rc
 	} else {
 		parsedReader = f
 	}
@@ -107,70 +168,96 @@ func loadConfigFile(path string) (*CFG, error) {
 */
 
 // loadProviderList loads the provider list from the configuration file.
-// It reads the JSON file specified in cfg.opt.ProvFile, unmarshals it into the cfg.providers slice,
-// and initializes each provider with a connection pool.
+// It reads the JSON file specified in cfg.opt.ProvFile into a local slice,
+// initializes each enabled provider with a connection pool, and then publishes
+// s.providerList and s.providerGroups under s.mux (the web stats reader locks it).
+// Nothing shared is written while parsing, so concurrent sessions don't race.
 func (cfg *Config) loadProviderList(s *SESSION, workerWGconnEstablish *sync.WaitGroup) error {
-	if file, err := os.ReadFile(cfg.opt.ProvFile); err != nil {
+	file, err := os.ReadFile(cfg.opt.ProvFile)
+	if err != nil {
 		return err
-	} else {
-		if err := json.Unmarshal(file, &cfg.providers); err != nil {
-			return err
-		}
-		id := 0
-		providernames := make(map[string]bool)          // tmp map to check unique/duped provider names
-		providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
-		for n := range cfg.providers {
-			if !cfg.providers[n].Enabled {
-				dlog(cfg.opt.Debug, "CFG Skipped Provider (n=%d) '%s' because not enabled", n, cfg.providers[n].Name)
-				continue
-			}
-			Name := cfg.providers[n].Name
-			if providernames[Name] {
-				// duplicate provider Name
-				return fmt.Errorf("error in loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
-			}
-			providernames[Name] = true
-			Group := cfg.providers[n].Group
-			if providerACL[Group] == nil {
-				providerACL[Group] = make(map[string]bool)
-			}
-
-			// check for inconsistent configuration
-			if !cfg.providers[n].NoDownload && providerACL[Group]["NoDownload"] {
-				dlog(always, "ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
-				os.Exit(1)
-			}
-			if !cfg.providers[n].NoUpload && providerACL[Group]["NoUpload"] {
-				dlog(always, "ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
-				os.Exit(1)
-			}
-
-			// read NoDownload / NoUpload values from provider and set once per group for all
-			if cfg.providers[n].NoDownload {
-				providerACL[Group]["NoDownload"] = true
-			}
-			if cfg.providers[n].NoUpload {
-				providerACL[Group]["NoUpload"] = true
-			}
-
-			if !slices.Contains(s.providerGroups, Group) {
-				// add group to providerGroups if not already present
-				s.providerGroups = append(s.providerGroups, Group)
-			}
-
-			// link to this provider
-			provider := cfg.providers[n]
-			p := &provider
-			// provider is ready to connect
-			p.id = id
-			p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: p.Name}
-			NewConnPool(s, p, workerWGconnEstablish)
-			s.providerList = append(s.providerList, p)
-			dlog(cfg.opt.Debug, "CFG Loaded Provider (id=%d) '%s'", id, p.Name)
-			id++
-		}
 	}
-	time.Sleep(time.Second * 3)
+	var providers []Provider
+	if err := json.Unmarshal(file, &providers); err != nil {
+		return err
+	}
+	var providerList []*Provider
+	var providerGroups []string
+	id := 0
+	providernames := make(map[string]bool)          // tmp map to check unique/duped provider names
+	providerACL := make(map[string]map[string]bool) // map to check for bad config combinations prevents bypass in pushDL/pushUP
+	for n := range providers {
+		if !providers[n].Enabled {
+			dlog(cfg.opt.Debug, "CFG Skipped Provider (n=%d) '%s' because not enabled", n, providers[n].Name)
+			continue
+		}
+		if providers[n].MaxConns <= 0 {
+			// GoBootWorkers would never boot workers for it
+			dlog(always, "CFG Skipped Provider (n=%d) '%s' because MaxConns=%d", n, providers[n].Name, providers[n].MaxConns)
+			continue
+		}
+		Name := providers[n].Name
+		if providernames[Name] {
+			// duplicate provider Name
+			// release the workerWGconnEstablish counts taken for the providers loaded so far
+			for range providerList {
+				workerWGconnEstablish.Done()
+			}
+			return fmt.Errorf("error in loadProviderList duplicate provider.Name='%s' (n=%d) in config", Name, n)
+		}
+		providernames[Name] = true
+		if providers[n].Group == "" {
+			// a provider without a group is its own group. Set here, before anything reads it:
+			// GoBootWorkers used to do this per provider while other goroutines read Group,
+			// and providerGroups/providerACL here held "" for all of them.
+			providers[n].Group = Name
+		}
+		Group := providers[n].Group
+		if providerACL[Group] == nil {
+			providerACL[Group] = make(map[string]bool)
+		}
+
+		// check for inconsistent configuration
+		if !providers[n].NoDownload && providerACL[Group]["NoDownload"] {
+			dlog(always, "ERROR loadProviderList provider '%s'. set 'NoDownload' to same value in group '%s'!", Name, Group)
+			os.Exit(1)
+		}
+		if !providers[n].NoUpload && providerACL[Group]["NoUpload"] {
+			dlog(always, "ERROR loadProviderList provider '%s'. set 'NoUpload' to same value in group '%s'!", Name, Group)
+			os.Exit(1)
+		}
+
+		// read NoDownload / NoUpload values from provider and set once per group for all
+		if providers[n].NoDownload {
+			providerACL[Group]["NoDownload"] = true
+		}
+		if providers[n].NoUpload {
+			providerACL[Group]["NoUpload"] = true
+		}
+
+		if !slices.Contains(providerGroups, Group) {
+			// add group to providerGroups if not already present
+			providerGroups = append(providerGroups, Group)
+		}
+
+		// every session gets its own copy of each provider
+		p := &providers[n]
+		// provider is ready to connect
+		p.id = id
+		p.mux = &loggedrwmutex.LoggedSyncRWMutex{Name: p.Name}
+		// Add before NewConnPool: its Speedmeter and WatchOpenConnsThread goroutines
+		// call workerWGconnEstablish.Wait() right away.
+		// Released once per provider by GoBootWorkers, or by LaunchSession for proxy sessions.
+		workerWGconnEstablish.Add(1)
+		NewConnPool(s, p, workerWGconnEstablish)
+		providerList = append(providerList, p)
+		dlog(cfg.opt.Debug, "CFG Loaded Provider (id=%d) '%s'", id, p.Name)
+		id++
+	}
+	s.mux.Lock()
+	s.providerList = providerList
+	s.providerGroups = providerGroups
+	s.mux.Unlock()
 	return nil
 } // end func loadProviderList
 
@@ -226,11 +313,10 @@ func LoadHeadersFromFile(path string) ([]string, error) {
 
 // AppendFileBytes appends null bytes to the end of a file.
 // It opens the file in append mode, creates it if it does not exist, and writes the specified number of null bytes.
-// If nullbytes is 0, it does nothing.
-// If nullbytes is negative, it returns an error.
+// If nullbytes is 0 or negative, it returns an error.
 // If the file does not exist, it creates a new file with the specified number of null bytes.
 // If the file exists, it appends the specified number of null bytes to the end of the file.
-func AppendFileBytes(nullbytes int, dstPath string) error {
+func AppendFileBytes(nullbytes int, dstPath string) (err error) {
 	if nullbytes <= 0 {
 		return fmt.Errorf("error AppendFileBytes nullbytes=%d must be greater than 0", nullbytes)
 	}
@@ -239,24 +325,38 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 	}
 
 	// Open destination file in append mode, create if not exists
-	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		return err
+	dstFile, openErr := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if openErr != nil {
+		return openErr // Return opening error directly
 	}
+	// Defer Close and handle its error.
+	// If err is already set (e.g., from Write or Flush), this deferred Close error will not overwrite it.
+	// If err is nil, and Close fails, err will be set to the Close error.
 	defer func() {
-		cerr := dstFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
+		if closeErr := dstFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error closing file '%s': %v", dstPath, closeErr)
+			}
+			// Optional: Log closeErr if err was already set, e.g.:
+			// else { log.Printf("AppendFileBytes: additionally failed to close '%s' during error handling: %v", dstPath, closeErr) }
 		}
 	}()
-	nul := make([]byte, nullbytes)
+
+	writer := bufio.NewWriter(dstFile)
 	for i := 0; i < nullbytes; i++ {
-		nul = append(nul, 0x00)
+		if err = writer.WriteByte(0x00); err != nil {
+			// err is assigned (it's the named return), will be returned. Defer will run.
+			return err
+		}
 	}
-	if _, writeErr := dstFile.Write(nul); writeErr != nil {
-		return writeErr
+
+	// Ensure all buffered data is written to the file
+	if err = writer.Flush(); err != nil {
+		// err is assigned, will be returned. Defer will run.
+		return err
 	}
-	return nil
+
+	return nil // If everything is successful, err remains nil (or gets set by defer if Close fails)
 } // end func AppendFileBytes
 
 // AppendFile appends (merges) the file contents of srcPath to dstPath.
@@ -268,54 +368,64 @@ func AppendFileBytes(nullbytes int, dstPath string) error {
 // If the destination file does not exist, it creates a new file.
 // If the source file is empty, it does nothing.
 func AppendFile(srcPath string, dstPath string, delsrc bool) (err error) {
-	if srcPath == "" || dstPath == "" {
-		return fmt.Errorf("error AppendFile srcPath='%s' or dstPath='%s' empty", srcPath, dstPath)
+	if srcPath == "" {
+		return fmt.Errorf("error AppendFile srcPath is empty")
+	}
+	if dstPath == "" {
+		return fmt.Errorf("error AppendFile dstPath is empty")
 	}
 
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		cerr := srcFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
-
-	dstFile, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		return err
+	// Open source file for reading
+	srcFile, openSrcErr := os.Open(srcPath)
+	if openSrcErr != nil {
+		return fmt.Errorf("error AppendFile opening source file '%s': %w", srcPath, openSrcErr)
 	}
 	defer func() {
-		cerr := dstFile.Close()
-		if err == nil && cerr != nil {
-			err = cerr
-		}
-	}()
-
-	buf := make([]byte, DefaultYencWriteBuffer)
-	for {
-		n, readErr := srcFile.Read(buf)
-		if n > 0 {
-			if _, writeErr := dstFile.Write(buf[:n]); writeErr != nil {
-				return writeErr
+		if closeErr := srcFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error AppendFile closing source file '%s': %w", srcPath, closeErr)
 			}
+			// Optional: Log closeErr if err was already set
+			// else { log.Printf("AppendFile: additionally failed to close source '%s' during error handling: %v", srcPath, closeErr) }
 		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return readErr
-		}
+	}()
+
+	// Open destination file in append mode, create if not exists
+	dstFile, openDstErr := os.OpenFile(dstPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if openDstErr != nil {
+		return fmt.Errorf("error AppendFile opening destination file '%s': %w", dstPath, openDstErr)
 	}
+	defer func() {
+		if closeErr := dstFile.Close(); closeErr != nil {
+			if err == nil { // Only assign closeErr if no other error has occurred
+				err = fmt.Errorf("error AppendFile closing destination file '%s': %w", dstPath, closeErr)
+			}
+			// Optional: Log closeErr if err was already set
+			// else { log.Printf("AppendFile: additionally failed to close destination '%s' during error handling: %v", dstPath, closeErr) }
+		}
+	}()
+
+	// Create a buffer and copy in chunks using io.CopyBuffer for efficiency
+	// DefaultYencWriteBuffer is assumed to be defined elsewhere, e.g., const DefaultYencWriteBuffer = 32 * 1024
+	buf := make([]byte, DefaultYencWriteBuffer) // Ensure DefaultYencWriteBuffer is a reasonable size
+	if _, copyErr := io.CopyBuffer(dstFile, srcFile, buf); copyErr != nil {
+		return fmt.Errorf("error AppendFile copying from '%s' to '%s': %w", srcPath, dstPath, copyErr)
+	}
+
+	// Ensure all buffered data for dstFile is written to disk before attempting to remove srcFile
+	if syncErr := dstFile.Sync(); syncErr != nil {
+		return fmt.Errorf("error AppendFile syncing destination file '%s': %w", dstPath, syncErr)
+	}
+
 	if delsrc {
-		if err := os.Remove(srcPath); err != nil {
-			return fmt.Errorf("error Yenc AppendFile Remove err='%v'", err)
+		if removeErr := os.Remove(srcPath); removeErr != nil {
+			// Assign to err, so it's returned by the named return, and defer for dstFile can still run.
+			err = fmt.Errorf("error AppendFile removing source file '%s': %w", srcPath, removeErr)
+			return err
 		}
 	}
-	return
-} // end func AppendFile (written by AI! GPT-4o, complaint and changed by GPT-4.1!)
+	return nil // If everything is successful, err remains nil (or gets set by defers if Close fails)
+} // end func AppendFile
 
 func SHA256SumFile(path string) (string, error) {
 	// Open the file for reading
@@ -341,79 +451,83 @@ func SHA256SumFile(path string) (string, error) {
 func (s *SESSION) writeCsvFile() (err error) {
 	// not tested since rewrite
 	if !cfg.opt.Csv {
-		return
+		return nil // Not an error, just not enabled
 	}
+	if s.nzbPath == "" {
+		return fmt.Errorf("writeCsvFile: nzbPath is empty, cannot determine CSV filename")
+	}
+
 	csvFileName := strings.TrimSuffix(filepath.Base(s.nzbPath), filepath.Ext(filepath.Base(s.nzbPath))) + ".csv"
-	f, err := os.Create(csvFileName)
-	if err != nil {
-		return fmt.Errorf("unable to open csv file: %v", err)
+	f, createErr := os.Create(csvFileName)
+	if createErr != nil {
+		return fmt.Errorf("writeCsvFile: unable to create csv file '%s': %w", csvFileName, createErr)
 	}
 	defer func() {
-		if cerr := f.Close(); cerr != nil {
-			log.Printf("ERROR closing file %s: %v", csvFileName, cerr)
+		if closeErr := f.Close(); closeErr != nil {
+			log.Printf("writeCsvFile: error closing csv file '%s': %v", csvFileName, closeErr) // Log the close error regardless
+			if err == nil {                                                                    // Only assign closeErr to the return if no other error has occurred
+				err = fmt.Errorf("writeCsvFile: error closing csv file '%s': %w", csvFileName, closeErr)
+			}
 		}
 	}()
-	log.Println("writing csv file...")
-	fmt.Print("Writing csv file... ")
+
+	log.Println("writing csv file...", csvFileName)      // Added filename to log
+	fmt.Printf("Writing csv file '%s'... ", csvFileName) // Added filename to print
+
 	csvWriter := csv.NewWriter(f)
-	firstLine := true
-	// make sorted provider name slice
+
+	// Prepare header
+	// Make sorted provider name slice
 	providers := make([]string, 0, len(s.providerList))
-	for n := range s.providerList {
-		providers = append(providers, s.providerList[n].Name)
+	for _, p := range s.providerList { // More idiomatic loop
+		providers = append(providers, p.Name)
 	}
-	sort.Strings(providers)
-	for fileName, file := range s.fileStat {
-		// write first line
-		if firstLine {
-			line := make([]string, len(providers)+2)
-			line[0] = "Filename"
-			line[1] = "Total segments"
-			for n, providerName := range providers {
-				line[n+2] = providerName
-			}
-			if err := csvWriter.Write(line); err != nil {
-				return fmt.Errorf("unable to write to the csv file: %v", err)
-			}
-			firstLine = false
-		}
-		// write line
+	sort.Strings(providers) // Ensure consistent column order
+
+	header := make([]string, len(providers)+2)
+	header[0] = "Filename"
+	header[1] = "TotalSegments"
+	copy(header[2:], providers)
+
+	if writeErr := csvWriter.Write(header); writeErr != nil {
+		return fmt.Errorf("writeCsvFile: unable to write header to csv file '%s': %w", csvFileName, writeErr)
+	}
+
+	// Write data rows
+	// To ensure consistent row order if fileStat is a map, consider sorting keys
+	fileNames := make([]string, 0, len(s.fileStat))
+	for fn := range s.fileStat {
+		fileNames = append(fileNames, fn)
+	}
+	sort.Strings(fileNames) // Sort filenames for consistent output order
+
+	for _, fileName := range fileNames {
+		file := s.fileStat[fileName]
 		line := make([]string, len(providers)+2)
 		line[0] = fileName
-		line[1] = fmt.Sprintf("%v", file.totalSegments)
-		for n, providerName := range providers {
+		line[1] = fmt.Sprintf("%d", file.totalSegments) // Use %d for integers
+		for i, providerName := range providers {
 			if value, ok := file.available[providerName]; ok {
-				line[n+2] = fmt.Sprintf("%v", value)
+				line[i+2] = fmt.Sprintf("%d", value) // Use %d for integers
 			} else {
-				line[n+2] = "0"
+				line[i+2] = "0"
 			}
 		}
-		if err := csvWriter.Write(line); err != nil {
-			return fmt.Errorf("unable to write to the csv file: %v", err)
+		if writeErr := csvWriter.Write(line); writeErr != nil {
+			return fmt.Errorf("writeCsvFile: unable to write line for '%s' to csv file '%s': %w", fileName, csvFileName, writeErr)
 		}
 	}
+
 	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		return fmt.Errorf("unable to write to the csv file: %v", err)
+	if flushErr := csvWriter.Error(); flushErr != nil {
+		return fmt.Errorf("writeCsvFile: error flushing csv writer for '%s': %w", csvFileName, flushErr)
 	}
-	dlog(cfg.opt.Csv, "writeCsv: done")
-	return
+
+	fmt.Println("Done.") // Indicate completion for the fmt.Print above
+	dlog(cfg.opt.Csv, "writeCsvFile: done for '%s'", csvFileName)
+	return nil // err is nil if execution reaches here successfully
 } // end func writeCsv
 
-/*
-	func setGlobalTimerNow(timer *time.Time) {
-		globalmux.Lock()
-		*timer = time.Now()
-		globalmux.Unlock()
-	}
-
-	func getGlobalTimerSince(timer time.Time) time.Duration {
-		globalmux.RLock()
-		duration := time.Since(timer)
-		globalmux.RUnlock()
-		return duration
-	}
-*/
 func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps float64) {
 	if durationSeconds <= 0 {
 		return 0, 0
@@ -430,7 +544,7 @@ func ConvertSpeed(bytes int64, durationSeconds int64) (kibPerSec int64, mbps flo
 
 func SHA256str(astr string) string {
 	// string hash func works only with cacheON!
-	// only used to create hashs of segment.Id
+	// only used to create hashs of segment.ID
 	// no cache no hash!
 	if !cacheON {
 		return ""
@@ -562,21 +676,34 @@ func RotateLogFiles(name string, maxVersions int) error {
 	return nil
 } // end func RotateFiles (written by AI: GPT-4.1)
 
+// logFile is the file LogToFile last opened, closed when the log is switched
+// again (each -log session leaked one file descriptor before).
+var (
+	logFileMu sync.Mutex
+	logFile   *os.File
+)
+
 func SetLogToTerminal() {
 	// Reset log output to the terminal
+	logFileMu.Lock()
 	log.SetOutput(os.Stdout)
+	if logFile != nil {
+		logFile.Close()
+		logFile = nil
+	}
+	logFileMu.Unlock()
 	dlog(cfg.opt.Debug, "output reset to os.Stdout")
 } // end func SetLogToTerminal (written by AI: GPT-4.1)
 
 func LogToFile(filename string, append bool) (err error) {
 	// Set log output to the specified file
-	var logFile *os.File
+	var f *os.File
 	if append {
 		// Open the file in append mode
-		logFile, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, err = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	} else {
 		// Open the file in overwrite mode
-		logFile, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		f, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	}
 	if err != nil {
 		dlog(always, "ERROR LogToFile: failed to open log file '%s': %v", filename, err)
@@ -586,7 +713,13 @@ func LogToFile(filename string, append bool) (err error) {
 		SetLogToTerminal()
 		dlog(always, "LogToFile: log output set to '%s'", filename)
 	}
-	log.SetOutput(logFile)
+	logFileMu.Lock()
+	log.SetOutput(f)
+	if logFile != nil {
+		logFile.Close()
+	}
+	logFile = f
+	logFileMu.Unlock()
 	return
 } // end func LogToFile (written by AI: GPT-4.1)
 
@@ -595,10 +728,12 @@ func DecreaseDLQueueCnt() {
 	GCounter.Decr("dlQueueCnt")
 }
 
+// The queue counts go up *before* the send (pushDL/pushUP) and back down if the
+// channel was full: counted after the send, a fast worker could Decrease first
+// (clamped at 0), and the late Increase left the count at 1 for good, so the
+// divider never saw an empty queue (plan 7). TOTAL_* count successful pushes.
 func IncreaseDLQueueCnt() {
-	// this is used to decrease the dlQueueCnt counter
 	GCounter.Incr("dlQueueCnt")
-	GCounter.Incr("TOTAL_dlQueueCnt")
 	//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
 	//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
 }
@@ -609,9 +744,7 @@ func DecreaseUPQueueCnt() {
 }
 
 func IncreaseUPQueueCnt() {
-	// this is used to decrease the upQueueCnt counter
 	GCounter.Incr("upQueueCnt")
-	GCounter.Incr("TOTAL_upQueueCnt")
 }
 
 func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Duration, min, max int64) int64 {

@@ -1,3 +1,4 @@
-[submodule "rapidyenc"]
-	path = rapidyenc
-	url = https://github.com/mnightingale/rapidyenc.git
+[submodule "rapidyenc-c"]
+	path = rapidyenc/rapidyenc
+	url = https://github.com/animetosho/rapidyenc.git
+	ignore = untracked

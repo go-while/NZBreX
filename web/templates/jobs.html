@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ NZBreX Job Queue</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bg-light">
+    <div class="container my-4">
+        <div class="mb-3">
+            <a href="/" class="btn btn-outline-secondary me-2">← Back to Upload</a>
+            <a href="/stats" class="btn btn-outline-primary">📊 Statistics</a>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h1 class="card-title mb-2">📋 Job Queue</h1>
+                <p class="text-muted mb-4">Manage jobs</p>
+
+                <div class="d-flex gap-2 mb-3 flex-wrap">
+                    <button class="btn btn-success" onclick="startAllJobs()">▶ Start All Queued Jobs</button>
+                    <button class="btn btn-info" onclick="openDefaultConfigModal()">⚙ Default Job Config</button>
+                </div>
+
+                <div id="jobsContainer">
+                    <!-- Jobs will be loaded here -->
+                </div>
+
+                <div class="text-center text-muted small mt-3">
+                    Auto-refreshing every 3 seconds
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container for Notifications -->
+    <div class="toast-container position-fixed top-0 end-0 p-3"></div>
+
+    <!-- Config Modal -->
+    <div class="modal fade" id="configModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Configure Job</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-secondary small">Per-job settings are not supported yet: jobs run with the settings NZBreX was started with.</div>
+                    <fieldset disabled>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="cfgCheckOnly">
+                            <label class="form-check-label" for="cfgCheckOnly">Check Only (no download/upload)</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="cfgCheckFirst">
+                            <label class="form-check-label" for="cfgCheckFirst">Check First (check all before download)</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="cfgYencCRC">
+                            <label class="form-check-label" for="cfgYencCRC">Enable CRC32 Verification</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="cfgYencTest" class="form-label">Yenc Test Mode (1-4):</label>
+                        <input type="number" class="form-control" id="cfgYencTest" min="1" max="4" value="4">
+                    </div>
+                    <div class="mb-3">
+                        <label for="cfgYencCpu" class="form-label">Yenc CPU Threads (0 = auto):</label>
+                        <input type="number" class="form-control" id="cfgYencCpu" min="0" value="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="cfgCachedir" class="form-label">Cache Directory:</label>
+                        <input type="text" class="form-control" id="cfgCachedir" placeholder="/path/to/cache">
+                    </div>
+                    </fieldset>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Default Config Modal -->
+    <div class="modal fade" id="defaultConfigModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Default Job Configuration</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-secondary small">Per-job settings are not supported yet: every job runs with these startup settings.</div>
+                    <fieldset disabled>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="defCheckOnly">
+                            <label class="form-check-label" for="defCheckOnly">Check Only (no download/upload)</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="defCheckFirst">
+                            <label class="form-check-label" for="defCheckFirst">Check First (check all before download)</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="defYencCRC">
+                            <label class="form-check-label" for="defYencCRC">Enable CRC32 Verification</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="defYencTest" class="form-label">Yenc Test Mode (1-4):</label>
+                        <input type="number" class="form-control" id="defYencTest" min="1" max="4" value="4">
+                    </div>
+                    <div class="mb-3">
+                        <label for="defYencCpu" class="form-label">Yenc CPU Threads (0 = auto):</label>
+                        <input type="number" class="form-control" id="defYencCpu" min="0" value="0">
+                    </div>
+                    <div class="mb-3">
+                        <label for="defCachedir" class="form-label">Cache Directory:</label>
+                        <input type="text" class="form-control" id="defCachedir" placeholder="/path/to/cache">
+                    </div>
+                    </fieldset>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" disabled>Save Defaults</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentJobId = null;
+
+        async function loadJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                renderJobs(data.jobs || []);
+            } catch (error) {
+                console.error('Failed to load jobs:', error);
+            }
+        }
+
+        function renderJobs(jobs) {
+            const container = document.getElementById('jobsContainer');
+
+            if (jobs.length === 0) {
+                container.innerHTML = '<div class="alert alert-info text-center">No jobs in queue. Upload an NZB file to get started.</div>';
+                return;
+            }
+
+            let html = '<div class="table-responsive"><table class="table table-hover"><thead class="table-light"><tr>';
+            html += '<th>Job ID</th>';
+            html += '<th>NZB File</th>';
+            html += '<th>Articles / Size</th>';
+            html += '<th>Status</th>';
+            html += '<th>Timeline</th>';
+            html += '<th>Config</th>';
+            html += '<th>Actions</th>';
+            html += '</tr></thead><tbody>';
+
+            jobs.forEach(job => {
+                const statusClass = 'status-' + job.Status;
+                const canStart = job.Status === 'queued';
+                const canDelete = job.Status === 'queued' || job.Status === 'completed' || job.Status === 'failed';
+                const canStop = job.Status === 'waiting' || job.Status === 'running';
+                const canConfig = job.Status === 'queued';
+
+                const config = job.Config || {};
+                const configSummary = [
+                    config.CheckOnly ? 'CheckOnly' : null,
+                    config.CheckFirst ? 'CheckFirst' : null,
+                    config.YencCRC ? 'CRC32' : null,
+                ].filter(Boolean).join(', ') || 'Default';
+
+                // Format articles and size info
+                const articlesInfo = job.total_articles > 0
+                    ? `${job.total_articles.toLocaleString()} articles`
+                    : '0 articles';
+                const sizeInfo = job.total_size > 0
+                    ? formatBytes(job.total_size)
+                    : '0 B';
+
+                // Build timeline info based on status
+                let timelineHtml = '';
+                if (job.Status === 'queued') {
+                    timelineHtml = `<small class="text-muted">Queued: ${formatTime(job.AddedAt)}</small>`;
+                } else if (job.Status === 'waiting') {
+                    timelineHtml = `<small class="text-muted">Waiting for the running job to finish</small>`;
+                } else if (job.Status === 'running') {
+                    const duration = formatDuration(job.StartedAt, new Date());
+                    const progressPct = (job.Progress * 100).toFixed(2);
+                    const articlesProcessed = job.articles_processed || 0;
+                    const articlesTotal = job.total_articles || 0;
+
+                    timelineHtml = `
+                        <small class="text-muted d-block">Started: ${formatTime(job.StartedAt)}</small>
+                        <small class="text-muted d-block">Duration: ${duration}</small>
+                    `;
+
+                    if (articlesTotal > 0) {
+                        timelineHtml += `<small class="text-muted d-block">Progress: ${progressPct}% (${articlesProcessed.toLocaleString()}/${articlesTotal.toLocaleString()})</small>`;
+                    } else if (job.Progress > 0) {
+                        timelineHtml += `<small class="text-muted d-block">Progress: ${progressPct}%</small>`;
+                    }
+                } else if (job.Status === 'completed' || job.Status === 'failed') {
+                    const duration = formatDuration(job.StartedAt, job.FinishedAt);
+                    timelineHtml = `
+                        <small class="text-muted d-block">Started: ${formatTime(job.StartedAt)}</small>
+                        <small class="text-muted d-block">Finished: ${formatTime(job.FinishedAt)}</small>
+                        <small class="text-muted d-block">Duration: ${duration}</small>
+                    `;
+                }
+
+                html += '<tr>';
+                html += `<td><code class="small">${escapeHtml(job.ID)}</code></td>`;
+                html += `<td>${escapeHtml(job.NZBName)}</td>`;
+                html += `<td><small class="text-muted d-block">${articlesInfo}</small><small class="text-muted d-block">${sizeInfo}</small></td>`;
+                html += `<td><span class="badge ${getBadgeClass(job.Status)}">${job.Status}</span></td>`;
+                html += `<td>${timelineHtml}</td>`;
+                html += `<td><small class="text-muted">${configSummary}</small></td>`;
+                html += '<td class="text-nowrap">';
+                if (canStart) {
+                    html += `<button class="btn btn-sm btn-success me-1" title="Start Job" onclick="startJob('${job.ID}')">▶</button>`;
+                }
+                if (canConfig) {
+                    // per-job settings are not supported yet: the button is shown, but disabled on purpose
+                    html += `<button class="btn btn-sm btn-info me-1" title="Per-job settings are not supported yet" disabled>⚙</button>`;
+                }
+                if (canStop) {
+                    html += `<button class="btn btn-sm btn-warning me-1" title="Stop Job" onclick="stopJob('${job.ID}')">■</button>`;
+                }
+                if (canDelete) {
+                    html += `<button class="btn btn-sm btn-danger" title="Delete Job" onclick="deleteJob('${job.ID}')">🗑</button>`;
+                }
+                if (job.Error) {
+                    html += `<br><small class="text-danger">${escapeHtml(job.Error)}</small>`;
+                }
+                html += '</td>';
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        function getBadgeClass(status) {
+            switch(status) {
+                case 'queued': return 'bg-warning text-dark';
+                case 'waiting': return 'bg-secondary';
+                case 'running': return 'bg-info text-dark';
+                case 'completed': return 'bg-success';
+                case 'failed': return 'bg-danger';
+                default: return 'bg-secondary';
+            }
+        }
+
+        async function startJob(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/start`, { method: 'POST', headers: { 'X-NZBreX-Request': '1' } });
+                const result = await response.json();
+                if (response.ok) {
+                    console.log('Job started:', result);
+                    loadJobs();
+                } else {
+                    alert('Failed to start job: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to start job: ' + error.message);
+            }
+        }
+
+        async function stopJob(jobId) {
+            if (!confirm('Stop this job? Work that is left is dropped.')) return;
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/stop`, { method: 'POST', headers: { 'X-NZBreX-Request': '1' } });
+                const result = await response.json();
+                if (response.ok) {
+                    loadJobs();
+                } else {
+                    alert('Failed to stop job: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to stop job: ' + error.message);
+            }
+        }
+
+        async function deleteJob(jobId) {
+            if (!confirm('Delete this job?')) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE', headers: { 'X-NZBreX-Request': '1' } });
+                const result = await response.json();
+                if (response.ok) {
+                    console.log('Job deleted:', result);
+                    loadJobs();
+                } else {
+                    alert('Failed to delete job: ' + result.error);
+                }
+            } catch (error) {
+                alert('Failed to delete job: ' + error.message);
+            }
+        }
+
+        function openConfigModal(jobId) {
+            currentJobId = jobId;
+            const modal = new bootstrap.Modal(document.getElementById('configModal'));
+            modal.show();
+        }
+
+        function closeConfigModal() {
+            const modalEl = document.getElementById('configModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+            currentJobId = null;
+        }
+
+        // Start all queued jobs
+        async function startAllJobs() {
+            try {
+                const response = await fetch('/api/jobs/start-all', {
+                    method: 'POST',
+                    headers: { 'X-NZBreX-Request': '1' } // required on every change: blocks cross-site requests
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    showNotification(data.message || `Started ${data.count} job(s)`, 'success');
+                    loadJobs(); // Reload the job list
+                } else {
+                    showNotification('Failed to start jobs: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showNotification('Error starting jobs: ' + error.message, 'error');
+            }
+        }
+
+        // Open default config modal
+        async function openDefaultConfigModal() {
+            try {
+                const response = await fetch('/api/jobs/default-config');
+                const data = await response.json();
+
+                // 501: per-job settings are not supported yet; the reply carries the startup settings
+                if (data.config) {
+                    const config = data.config;
+                    document.getElementById('defCheckOnly').checked = config.CheckOnly || false;
+                    document.getElementById('defCheckFirst').checked = config.CheckFirst || false;
+                    document.getElementById('defYencCRC').checked = config.YencCRC || false;
+                    document.getElementById('defYencTest').value = config.YencTest || 4;
+                    document.getElementById('defYencCpu').value = config.YencCpu || 0;
+                    document.getElementById('defCachedir').value = config.Cachedir || '';
+
+                    const modal = new bootstrap.Modal(document.getElementById('defaultConfigModal'));
+                    modal.show();
+                } else {
+                    showNotification('Failed to load default config', 'error');
+                }
+            } catch (error) {
+                showNotification('Error loading default config: ' + error.message, 'error');
+            }
+        }
+
+        // Close default config modal
+        function closeDefaultConfigModal() {
+            const modalEl = document.getElementById('defaultConfigModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+        }
+
+        function formatDuration(start, end) {
+            if (!start || !end) return 'N/A';
+
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+            const diffMs = endDate - startDate;
+
+            if (diffMs < 0) return 'N/A';
+
+            const seconds = Math.floor(diffMs / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            const days = Math.floor(hours / 24);
+
+            if (days > 0) {
+                return `${days}d ${hours % 24}h ${minutes % 60}m`;
+            } else if (hours > 0) {
+                return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+            } else if (minutes > 0) {
+                return `${minutes}m ${seconds % 60}s`;
+            } else {
+                return `${seconds}s`;
+            }
+        }
+
+        function formatTime(timestamp) {
+            if (!timestamp) return 'N/A';
+            const date = new Date(timestamp);
+
+            // Format: Oct 16, 15:30:45
+            const options = {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            };
+            return date.toLocaleString(undefined, options);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showNotification(message, type) {
+            const container = document.querySelector('.toast-container');
+
+            // Map type to Bootstrap toast classes
+            const typeMap = {
+                'success': 'text-bg-success',
+                'error': 'text-bg-danger',
+                'warning': 'text-bg-warning',
+                'info': 'text-bg-info'
+            };
+            const toastClass = typeMap[type] || 'text-bg-secondary';
+
+            // Create toast element
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast align-items-center ${toastClass} border-0`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.setAttribute('aria-live', 'assertive');
+            toastEl.setAttribute('aria-atomic', 'true');
+
+            toastEl.innerHTML = `
+                <div class="d-flex">
+                    <div class="toast-body">${escapeHtml(message)}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            `;
+
+            container.appendChild(toastEl);
+
+            // Show toast
+            const toast = new bootstrap.Toast(toastEl, {
+                autohide: true,
+                delay: 5000
+            });
+            toast.show();
+
+            // Remove from DOM after hidden
+            toastEl.addEventListener('hidden.bs.toast', () => {
+                toastEl.remove();
+            });
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Initial load
+        loadJobs();
+
+        // Auto-refresh every 3 seconds
+        setInterval(loadJobs, 3000);
+    </script>
+</body>
+</html>
