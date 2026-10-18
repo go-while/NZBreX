@@ -30,10 +30,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Test
@@ -43,7 +43,7 @@ jobs:
           for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64; do
             DEB=1 ./scripts/build-release.sh purego "${t%/*}" "${t#*/}" "$TAG" dist
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: purego
           path: dist/*
@@ -87,11 +87,11 @@ jobs:
             lib: ./build_rapidyenc_linux-amd64.sh darwin
             native: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
           submodules: true
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Install build tools
@@ -108,7 +108,7 @@ jobs:
           CXX: ${{ matrix.cxx }}
           DEB: ${{ matrix.goos == 'linux' && '1' || '0' }}
         run: ./scripts/build-release.sh rapidyenc "${{ matrix.goos }}" "${{ matrix.goarch }}" "$TAG" dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rapidyenc-${{ matrix.name }}
           path: dist/*
@@ -122,7 +122,7 @@ jobs:
     permissions:
       contents: write # the only job that may write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
