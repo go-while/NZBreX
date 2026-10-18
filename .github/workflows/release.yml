@@ -1,0 +1,142 @@
+name: Release
+
+# Push a tag like v0.0.7 (or v0.0.7-test-p1 for a pre-release), or run this
+# by hand for an existing tag. Builds two variants per platform:
+#   purego     no cgo, decoder go-yenc-simd; every target, from one runner
+#   rapidyenc  rapidyenc's C decoder; the platforms with a C toolchain here
+# and publishes them in one release with SHA256SUMS.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release, e.g. v0.0.7"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  purego:
+    name: purego (all targets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: GOEXPERIMENT=simd go test ./...
+      - name: Build and pack
+        run: |
+          for t in linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 freebsd/amd64; do
+            DEB=1 ./scripts/build-release.sh purego "${t%/*}" "${t#*/}" "$TAG" dist
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: purego
+          path: dist/*
+          if-no-files-found: error
+
+  rapidyenc:
+    name: rapidyenc ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-amd64
+            runner: ubuntu-22.04 # older glibc: runs on more distributions
+            goos: linux
+            goarch: amd64
+            lib: ./build_rapidyenc_linux-amd64.sh
+            apt: cmake
+            native: true
+          - name: linux-arm64
+            runner: ubuntu-22.04
+            goos: linux
+            goarch: arm64
+            lib: ./build_rapidyenc_linux-arm64.sh
+            apt: cmake gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
+          - name: windows-amd64
+            runner: ubuntu-24.04
+            goos: windows
+            goarch: amd64
+            lib: ./crossbuild_rapidyenc_windows-amd64.sh
+            apt: cmake gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
+          - name: darwin-arm64
+            runner: macos-15
+            goos: darwin
+            goarch: arm64
+            lib: ./build_rapidyenc_linux-amd64.sh darwin
+            native: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install build tools
+        if: matrix.apt
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ matrix.apt }}
+      - name: Build the rapidyenc library
+        run: cd rapidyenc && ${{ matrix.lib }}
+      - name: Test (native)
+        if: matrix.native
+        run: go test -tags rapidyenc ./rapidyenc/
+      - name: Build and pack
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          DEB: ${{ matrix.goos == 'linux' && '1' || '0' }}
+        run: ./scripts/build-release.sh rapidyenc "${{ matrix.goos }}" "${{ matrix.goarch }}" "$TAG" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rapidyenc-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: publish
+    needs: [purego, rapidyenc]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # the only job that may write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prerelease=
+          case "$TAG" in *-test*|*-alpha*|*-beta*|*-rc*) prerelease=--prerelease ;; esac
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --title "NZBreX $TAG" --generate-notes $prerelease
+          fi
