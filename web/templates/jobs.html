@@ -47,6 +47,8 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="alert alert-secondary small">Per-job settings are not supported yet: jobs run with the settings NZBreX was started with.</div>
+                    <fieldset disabled>
                     <div class="mb-3">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="cfgCheckOnly">
@@ -77,10 +79,11 @@
                         <label for="cfgCachedir" class="form-label">Cache Directory:</label>
                         <input type="text" class="form-control" id="cfgCachedir" placeholder="/path/to/cache">
                     </div>
+                    </fieldset>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="saveConfig()">Save</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" disabled>Save</button>
                 </div>
             </div>
         </div>
@@ -95,7 +98,8 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="text-muted small">These settings will be applied to all newly uploaded NZB files.</p>
+                    <div class="alert alert-secondary small">Per-job settings are not supported yet: every job runs with these startup settings.</div>
+                    <fieldset disabled>
                     <div class="mb-3">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="defCheckOnly">
@@ -126,10 +130,11 @@
                         <label for="defCachedir" class="form-label">Cache Directory:</label>
                         <input type="text" class="form-control" id="defCachedir" placeholder="/path/to/cache">
                     </div>
+                    </fieldset>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="saveDefaultConfig()">Save Defaults</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" disabled>Save Defaults</button>
                 </div>
             </div>
         </div>
@@ -192,6 +197,8 @@
                 let timelineHtml = '';
                 if (job.Status === 'queued') {
                     timelineHtml = `<small class="text-muted">Queued: ${formatTime(job.AddedAt)}</small>`;
+                } else if (job.Status === 'waiting') {
+                    timelineHtml = `<small class="text-muted">Waiting for the running job to finish</small>`;
                 } else if (job.Status === 'running') {
                     const duration = formatDuration(job.StartedAt, new Date());
                     const progressPct = (job.Progress * 100).toFixed(2);
@@ -228,11 +235,10 @@
                 if (canStart) {
                     html += `<button class="btn btn-sm btn-success me-1" title="Start Job" onclick="startJob('${job.ID}')">▶</button>`;
                 }
-                <!--
                 if (canConfig) {
-                    html += `<button class="btn btn-sm btn-info me-1" title="Configure Job" onclick="openConfigModal('${job.ID}')">⚙</button>`;
+                    // per-job settings are not supported yet: the button is shown, but disabled on purpose
+                    html += `<button class="btn btn-sm btn-info me-1" title="Per-job settings are not supported yet" disabled>⚙</button>`;
                 }
-                -->
                 if (canDelete) {
                     html += `<button class="btn btn-sm btn-danger" title="Delete Job" onclick="deleteJob('${job.ID}')">🗑</button>`;
                 }
@@ -250,6 +256,7 @@
         function getBadgeClass(status) {
             switch(status) {
                 case 'queued': return 'bg-warning text-dark';
+                case 'waiting': return 'bg-secondary';
                 case 'running': return 'bg-info text-dark';
                 case 'completed': return 'bg-success';
                 case 'failed': return 'bg-danger';
@@ -327,7 +334,8 @@
                 const response = await fetch('/api/jobs/default-config');
                 const data = await response.json();
 
-                if (response.ok && data.config) {
+                // 501: per-job settings are not supported yet; the reply carries the startup settings
+                if (data.config) {
                     const config = data.config;
                     document.getElementById('defCheckOnly').checked = config.CheckOnly || false;
                     document.getElementById('defCheckFirst').checked = config.CheckFirst || false;
@@ -351,69 +359,6 @@
             const modalEl = document.getElementById('defaultConfigModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
-        }
-
-        // Save default config
-        async function saveDefaultConfig() {
-            const config = {
-                CheckOnly: document.getElementById('defCheckOnly').checked,
-                CheckFirst: document.getElementById('defCheckFirst').checked,
-                YencCRC: document.getElementById('defYencCRC').checked,
-                YencTest: parseInt(document.getElementById('defYencTest').value),
-                YencCpu: parseInt(document.getElementById('defYencCpu').value),
-                Cachedir: document.getElementById('defCachedir').value
-            };
-
-            try {
-                const response = await fetch('/api/jobs/default-config', {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(config)
-                });
-
-                if (response.ok) {
-                    showNotification('Default configuration saved successfully', 'success');
-                    closeDefaultConfigModal();
-                } else {
-                    const data = await response.json();
-                    showNotification('Failed to save: ' + (data.error || 'Unknown error'), 'error');
-                }
-            } catch (error) {
-                showNotification('Error saving default config: ' + error.message, 'error');
-            }
-        }
-
-        async function saveConfig() {
-            if (!currentJobId) return;
-
-            const config = {
-                CheckOnly: document.getElementById('cfgCheckOnly').checked,
-                CheckFirst: document.getElementById('cfgCheckFirst').checked,
-                YencCRC: document.getElementById('cfgYencCRC').checked,
-                YencTest: parseInt(document.getElementById('cfgYencTest').value),
-                YencCpu: parseInt(document.getElementById('cfgYencCpu').value),
-                Cachedir: document.getElementById('cfgCachedir').value,
-            };
-
-            try {
-                const response = await fetch(`/api/jobs/${currentJobId}/config`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(config)
-                });
-                const result = await response.json();
-                if (response.ok) {
-                    console.log('Config updated:', result);
-                    closeConfigModal();
-                    loadJobs();
-                } else {
-                    alert('Failed to update config: ' + result.error);
-                }
-            } catch (error) {
-                alert('Failed to update config: ' + error.message);
-            }
         }
 
         function formatDuration(start, end) {

@@ -371,6 +371,8 @@ Still races:
 
 **Fix:** `net.Listen` synchronously and return its error; `tls.LoadX509KeyPair` up front when `-webssl`; then `go srv.Serve(ln)`.
 
+**Result (2026-10-18):** fixed. `StartWebServer` loads the certificate, binds, and only then serves in the background (`srv.Serve`/`ServeTLS` on its own `http.Server`, kept in `webSrv` for a later `Shutdown`). `main` calls it synchronously, before the web base session starts. Busy port: the old build kept running without a web server (killed at 20 s); the new one exits 1 at once with the error. Missing certificate: exits 1 with the file error. `TestStartWebServerReportsBindError`.
+
 ### 4.2 Shared job state written under a read lock
 
 `ListJobs` (`webserver.go:178-218`, writes at `:194-200`) and `collectStats` (writes at `:926-933` under `jobQueue.mu.RLock` from `:897`) both modify `*QueuedJob` under `RLock`. `ListJobs` returns live pointers that are marshalled after the lock is dropped (`:652-655`), while the completion goroutine writes `Status`/`Error`/`FinishedAt` (`:293-302`).
@@ -379,6 +381,15 @@ Still races:
 
 **Fix:** readers must not modify jobs. The job updates its own progress (it currently advances only when someone polls, so it stays 0 with no browser open, even after completion). Return copies (`[]QueuedJob`) under the lock.
 
+**Result (2026-10-18):** fixed; the job queue moved to `webjobs.go`.
+- One `jobs` slice in insertion order (no `running`/`completed` lists), every field under `jq.mu`. `ListJobs`/`GetJob`/`runningJobs` return copies; nothing that reads writes.
+- Each job holds its own session (`runJob` creates it with `newSession` and passes it to `LaunchSession`), and `SessionID` is set. No matching by path any more. `LaunchSession` now loads a supplied session's NZB from `s.nzbPath`.
+- Progress: `GoWorkDivider` publishes its per-pass counts in `s.progress` (atomics). A running job's copy reads them; `finishLocked` stores the final counts, so a finished job shows its result even if nobody polled.
+- `extractSessionStats` (and its unlocked `segmentList` check) is gone.
+- Web race run (2 jobs, `/api/jobs` + `/api/stats` every 50 ms): **0 races** (was 13–26, all here). Both jobs completed, progress 1.0, session IDs 1 and 2.
+- Tests: `TestListJobsReturnsCopies`, `TestJobProgressFromItsSession`, `TestJobStateErrors`.
+- **New engine finding (not fixed):** a successful upload sets `uploadedTo` and deletes `missingOn`, but never sets `availableOn` (commented out in `Routines.go`). The divider's "done" test needs `availableOn` on every provider, so uploaded items are never "done". Each pass then counts them as "no upload target" (`notarget`), and every successful refresh ends through close case #8 instead of #0/#4. The run still ends correctly. `len(item.availableOn)` also counts `false` entries (`pushDL` ranges over it checking the value). The web counts uploaded items as done.
+
 ### 4.3 Locks held across long work
 
 - `AddJob` (`:117-147`) holds `jq.mu` while it opens, gunzips and parses the whole NZB (`Utils.go:67-124`). It swallows the parse error (`err == nil &&`), so a corrupt file is accepted with HTTP 200. The parse is then redone by `LaunchSession` (`Session.go:211`).
@@ -386,6 +397,8 @@ Still races:
 - `collectStats` holds `globalmux.RLock()` for its whole body (`:847-848`). `globalmux` writers (`Workers.go:13`, `Session.go:301/354`, the `ConnPool.go:830` Speedmeter tick) block behind it, and once a writer is waiting, new readers block too.
 
 **Fix:** parse outside the lock and reject parse errors with 400. Keep running counters on the session (atomics updated by the workers) and have the web layer read those instead of scanning.
+
+**Result (2026-10-18):** fixed. `AddJob` parses before taking `jq.mu` and returns the parse error (400; the upload is deleted). `collectStats` no longer holds `globalmux` (it reads the `memlim` pointer under a brief `RLock`), copies the active sessions' provider lists under `p.mux`, then reads providers without it. Job progress comes from the session atomics; no segment list is walked.
 
 ### 4.4 Login, CSRF, timeouts, uploads (corrected; needs D1)
 
@@ -414,6 +427,8 @@ Still races:
 - `webserver.go:349-360`: `wg.Add(1)`/`wg.Wait()` around a synchronous `LaunchSession` that already defers `Done()`. A no-op; remove.
 - Status codes: not-found returns 400 at `:663`/`:678`, conflict returns 400 at `:678`/`:699`. Use 404/409.
 - No graceful shutdown: add `srv.Shutdown(ctx)` on signal.
+
+**Partial result (2026-10-18), with 4.2:** `waiting` state (`StartJob` sets it; `runJob` sets `running`/`StartedAt` once it holds `processingMu`); `SessionID` assigned and used; panic recovery on the job goroutine (`launch`); a failed `LaunchSession` removes its session from `sessMap`; pending jobs capped at 1000 (503), finished jobs at 50; second `webProcessor`/`webWg` assignment and the no-op WaitGroup removed; 404/409 instead of 400. **Still open:** stop/cancel endpoint, D3 mode checks, graceful shutdown.
 
 ### 4.6 Templates (corrected)
 
@@ -538,6 +553,8 @@ All three answered by the user on 2026-10-17.
 - Delete the commented-out block in `processJob` (`webserver.go:332-348`); it couldn't have worked (6.1).
 - Fix `WEB_JOB_QUEUE.md:105`/`:179` to say per-job settings are planned, not active.
 - Fix `jobs.html:231-235` so the button state is deliberate (disabled), not an accident of the `<!-- -->` comment (4.6).
+
+**Partial result (2026-10-18), with 4.2:** the three endpoints return 501 with the startup settings in the body; `/upload` ignores the config fields and says so (`note`); the default-config dialog shows the startup settings read-only with a note; both dialogs have disabled fields and Save buttons; the ⚙ button is rendered disabled on purpose; the dead `processJob` block and the queue's `defaultConfig` are gone. Each job's `Config` shows the startup settings it runs with. **Still open:** `WEB_JOB_QUEUE.md` (with 6.3).
 - The real implementation (6.1 refactor) stays a separate later change, after Phases 2–3.
 
 **D3: Startup mode combinations. DECIDED: reject with a clear error.**

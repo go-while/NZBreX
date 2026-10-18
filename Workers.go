@@ -1220,6 +1220,14 @@ forever:
 			dlog(always, " | Segment Check Done: took='%.1f sec'", took.Seconds())
 		}
 
+		s.progress.checked.Store(checked)
+		s.progress.done.Store(done)
+		s.progress.dead.Store(dead)
+		s.progress.cached.Store(cached)
+		s.progress.downloaded.Store(isdl)
+		s.progress.uploaded.Store(isup)
+		s.progress.notarget.Store(notarget)
+
 		// workDone also moves on failed attempts: slow failing work (a dead provider) is not stuck
 		if progress := checked + isdl + isup + isyenc + cached + done + dead + fails + notarget + s.workDone.Load(); progress != lastProgress {
 			lastProgress, lastProgressAt = progress, time.Now()

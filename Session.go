@@ -73,6 +73,7 @@ type SESSION struct {
 	segmentChansReups map[string]chan *segmentChanItem // map[provider.Group]chan
 	checkers          map[string]*checkerGroup         // live check routines per provider.Group, built with the channels
 	workDone          atomic.Uint64                    // items finished by any check/downs/reups routine, ok or not (divider watchdog)
+	progress          sessionProgress                  // counts published by GoWorkDivider for the web UI
 	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
 	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
 	preBoot               bool              // true from LaunchSession until GoBootWorkers starts the workers; guarded by mux
@@ -219,7 +220,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 		if s.nzbFile != nil {
 			// nzbfile is still open and loaded, pass
 
-		} else if s.nzbFile == nil && nzbfilepath != "" {
+		} else if s.nzbFile == nil && s.nzbPath != "" {
 			// we have a nzbfilepath and no nzbFile loaded yet
 			// nzbfile has not been opened and parsed before (or has been closed)
 			nzbfile, err := loadNzbFile(s.nzbPath)
@@ -290,6 +291,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 			s.mux.Lock()
 			s.segmentList = segmentList
 			s.mux.Unlock()
+			s.progress.total.Store(uint64(len(segmentList)))
 
 			mibsize := float64(nzbfile.Bytes) / 1024 / 1024
 			artsize := mibsize / float64(len(segmentList)) * 1024
@@ -437,6 +439,12 @@ func (p *PROCESSOR) SetDirRefresh(seconds int64) {
 } // end func SetWatchDirRefresh
 
 // private PROCESSOR/SESSION functions
+
+// sessionProgress holds the counts of GoWorkDivider's last pass over the segment
+// list. The web UI reads them instead of walking segmentList under locks (plan 4.3).
+type sessionProgress struct {
+	total, checked, done, dead, cached, downloaded, uploaded, notarget atomic.Uint64
+}
 
 func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	// create session, every nzbfile will have its own session
