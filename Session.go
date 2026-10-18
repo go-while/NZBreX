@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tensai75/nzbparser"
@@ -70,7 +71,9 @@ type SESSION struct {
 	segmentChansCheck map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansDowns map[string]chan *segmentChanItem // map[provider.Group]chan
 	segmentChansReups map[string]chan *segmentChanItem // map[provider.Group]chan
-	//memDL                 map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
+	checkers          map[string]*checkerGroup         // live check routines per provider.Group, built with the channels
+	workDone          atomic.Uint64                    // items finished by any check/downs/reups routine, ok or not (divider watchdog)
+	//memDL                map[string]map[*string]*segmentChanItem // (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -checkfirst queues items here. map will be create in GoWorkDivider()
 	//memUP                 map[string]map[*string]*segmentChanItem // TODO: (map[provider.group]map[ptr to segment.Id]ptr to Item) --- with -uploadlater process uploads after downloads (possible only with cacheON) map will be create in GoWorkDivider()
 	preBoot               bool              // will be set to false before workers start
 	active                bool              // will be set to true when processing starts // REVIEW!TODO!FIXME: set to false is missing!!

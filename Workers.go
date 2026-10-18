@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -72,6 +73,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 				if err != nil {
 					dlog(always, "ERROR Boot Provider '%s' err='%v'", provider.Name, err)
 					// Release waitWorker and waitPool counters for all workers that won't be started
+					s.checkersExit(provider, provider.MaxConns) // their check routines never start
 					for i := 0; i < provider.MaxConns; i++ {
 						waitWorker.Done() // 3 times per worker
 						waitWorker.Done()
@@ -129,10 +131,15 @@ func (s *SESSION) makeSegmentChans() {
 	check := make(map[string]chan *segmentChanItem)
 	downs := make(map[string]chan *segmentChanItem)
 	reups := make(map[string]chan *segmentChanItem)
+	checkers := make(map[string]*checkerGroup)
 	for _, provider := range s.providerList {
 		if !provider.Enabled || provider.MaxConns <= 0 {
 			continue
 		}
+		if checkers[provider.Group] == nil {
+			checkers[provider.Group] = &checkerGroup{gone: make(chan struct{})}
+		}
+		checkers[provider.Group].left.Add(int64(provider.MaxConns)) // one check routine per conn
 		if check[provider.Group] != nil {
 			continue
 		}
@@ -145,26 +152,87 @@ func (s *SESSION) makeSegmentChans() {
 	s.segmentChansCheck = check
 	s.segmentChansDowns = downs
 	s.segmentChansReups = reups
+	s.checkers = checkers
 	s.mux.Unlock()
 	for group, ch := range check {
-		go s.feedCheckChan(group, ch) // the feeder owns ch and is the only one closing it
+		go s.feedCheckChan(group, ch, checkers[group].gone) // the feeder owns ch and is the only one closing it
 	}
 } // end func makeSegmentChans
 
-// feedCheckChan pushes every segment of the session into the check channel of one group,
-// waits for the check routines to empty it, then closes it.
-func (s *SESSION) feedCheckChan(group string, segmentChanCheck chan *segmentChanItem) {
-	start := time.Now()
-	for _, item := range s.segmentList {
-		segmentChanCheck <- item // is allowed to block inside feeder routine
+// checkerGroup counts the check routines of one provider group that have not exited yet,
+// including the ones that will never start because their worker failed to connect.
+// gone is closed when the count reaches 0: nothing will read the group's check channel again.
+type checkerGroup struct {
+	left     atomic.Int64
+	gone     chan struct{}
+	goneOnce sync.Once
+}
+
+// exit marks n check routines of the group as finished (or never started).
+func (g *checkerGroup) exit(n int) {
+	if g == nil || n <= 0 {
+		return
 	}
-	for {
-		time.Sleep(time.Second) // wait for check routine to empty out the chan
-		if len(segmentChanCheck) == 0 {
-			break
+	if g.left.Add(-int64(n)) <= 0 {
+		g.goneOnce.Do(func() { close(g.gone) })
+	}
+}
+
+// checkersExit is checkerGroup.exit for a provider's group. The map is read-only once published.
+func (s *SESSION) checkersExit(provider *Provider, n int) {
+	s.checkers[provider.Group].exit(n)
+}
+
+// allCheckersGone reports whether every check routine of every group has exited:
+// from then on no item's checkedOn changes anymore.
+func (s *SESSION) allCheckersGone() bool {
+	for _, g := range s.checkers {
+		select {
+		case <-g.gone:
+		default:
+			return false
 		}
 	}
-	dlog(cfg.opt.Verbose, " | Done feeding items=%d -> segmentChanCheck Group '%s' took='%.0f sec'", len(s.segmentList), group, time.Since(start).Seconds())
+	return len(s.checkers) > 0
+}
+
+// feedCheckChan pushes every segment of the session into the check channel of one group,
+// waits for the check routines to empty it, then closes it.
+// If all check routines of the group are gone (none could connect, or all died) it stops
+// feeding and closes the channel right away: nobody will read it anymore.
+func (s *SESSION) feedCheckChan(group string, segmentChanCheck chan *segmentChanItem, checkersGone <-chan struct{}) {
+	start := time.Now()
+	fed := 0
+	abandoned := func() {
+		dlog(always, "WARN feeder group '%s': all check routines are gone, %d/%d items fed, %d left in chan never checked here",
+			group, fed, len(s.segmentList), len(segmentChanCheck))
+	}
+feed:
+	for _, item := range s.segmentList {
+		select {
+		case segmentChanCheck <- item: // is allowed to block inside feeder routine
+			fed++
+		case <-checkersGone:
+			abandoned()
+			break feed
+		}
+	}
+	if fed == len(s.segmentList) {
+		tick := time.NewTicker(time.Second)
+	waitEmpty:
+		for len(segmentChanCheck) > 0 { // wait for the check routines to empty out the chan
+			select {
+			case <-tick.C:
+			case <-checkersGone:
+				if len(segmentChanCheck) > 0 {
+					abandoned()
+				}
+				break waitEmpty
+			}
+		}
+		tick.Stop()
+	}
+	dlog(cfg.opt.Verbose, " | Done feeding items=%d/%d -> segmentChanCheck Group '%s' took='%.0f sec'", fed, len(s.segmentList), group, time.Since(start).Seconds())
 	s.mux.Lock()
 	// set checkFeedDone only signals that feeding to the channel is done
 	// the check routine may still be activly checking!
@@ -192,6 +260,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 			waitWorker.Done()
 			// release this GoWorker from the pool
 			waitPool.Done()
+			s.checkersExit(provider, 1) // its check routine never starts
 			dlog(always, "ERROR GoWorker (%d) failed to get shared conn for '%s' err='%v' close worker", wid, provider.Name, err)
 			return
 		}
@@ -203,8 +272,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 	segCC := s.segmentChansCheck[provider.Group]
 	go func(wid int, provider *Provider, waitWorker *sync.WaitGroup, thisWorkerWG *sync.WaitGroup, sharedCC chan *ConnItem, segCC chan *segmentChanItem) {
 		var processed uint64
+		noConn := 0 // items in a row that got no connection
 		defer waitWorker.Done()
 		defer thisWorkerWG.Done()
+		defer s.checkersExit(provider, 1)
 		timeOut := time.Now().Add(15 * time.Second)
 		lastGood := time.Now()
 		toChan := make(chan struct{}, 1)
@@ -240,15 +311,27 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				lastGood = time.Now()
 				switch cfg.opt.ByPassSTAT {
 				case false:
-					code, err := s.GoCheckRoutine(wid, provider, item, sharedCC)
+					code, err := s.checkItem(wid, provider, item, sharedCC)
 					item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoCheckRoutine: code=%d", code))
-					if err != nil { // re-queue?
+					if err != nil && !provider.isDown() { // recorded as error on this group by checkItem
 						dlog(always, "ERROR in GoCheckRoutine err='%v'", err)
+					}
+					if errors.Is(err, errNoConn) && !provider.isDown() { // down: checkItem fails items at once, keep draining
+						if noConn++; noConn >= maxCheckNoConn {
+							dlog(always, "WARN CheckRoutine (%d@'%s'): no connection for %d items in a row, quitting", wid, provider.Name, noConn)
+							break forGoCheckRoutine
+						}
+					} else {
+						noConn = 0
 					}
 				case true:
 					log.Fatal("you should not be here! Quitting...") // FIXME TODO: remove this fatal error
 				}
 				processed++
+				s.workDone.Add(1)
+				// the idle timeout counts from now: one slow item (connect retries) must
+				// not make the routine quit while items are waiting in the channel
+				timeOut = time.Now().Add(15 * time.Second)
 				continue forGoCheckRoutine
 			}
 		} // end forGoCheckRoutine
@@ -301,6 +384,14 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					segCD <- nil // refill the nil so others will die too
 					break forGoDownsRoutine
 				}
+				if s.stopped() {
+					// the divider quit: drop what is still queued instead of working it
+					item.mux.Lock()
+					item.flaginDL = false
+					item.mux.Unlock()
+					DecreaseDLQueueCnt()
+					continue forGoDownsRoutine
+				}
 				timeOut = time.Now().Add(15 * time.Second)
 				lastGood = time.Now()
 				dlog(cfg.opt.DebugWorker, "GoDownsRoutine: (%d@'%s') start seg.Id='%s'", wid, provider.Name, item.segment.Id)
@@ -322,6 +413,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				code, err := s.GoDownsRoutine(wid, provider, item, sharedCC)
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
 				processed++
+				s.workDone.Add(1)
 				DecreaseDLQueueCnt()
 				if err != nil || (code != 220 && code != 920) {
 					if code != 430 {
@@ -401,19 +493,30 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					segCR <- nil // refill the nil so others will die too
 					break forGoReupsRoutine
 				}
+				if s.stopped() {
+					// the divider quit: drop what is still queued (its mem slot goes back in releaseMemSlots)
+					item.mux.Lock()
+					item.flaginUP = false
+					item.mux.Unlock()
+					DecreaseUPQueueCnt()
+					continue forGoReupsRoutine
+				}
 				timeOut = time.Now().Add(15 * time.Second)
 				lastGood = time.Now()
 				StartReUps := lastGood
 				code, err := s.GoReupsRoutine(wid, provider, item, sharedCC)
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
 				processed++
+				s.workDone.Add(1)
 				DecreaseUPQueueCnt()
 				if err != nil || code == 0 {
 					errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' no retry", code, err)
-					dlog(always, "%s", errStr)
-					if !errors.Is(err, errSessionStopped) { // a stopped wait took no slot
-						memlim.MemReturn("MemRetOnERR: "+errStr, item) // memfree GoReupsRoutine on error
-					}
+					dlog(!provider.isDown() || cfg.opt.DebugUR, "%s", errStr)
+					// Keep the mem slot: the item was flagged and is either re-pushed (retry, another
+					// group) or retired by the divider (retireNoUploadTarget returns the slot).
+					// Returning it here let downloads take every slot while the item, queued again
+					// without one, waited in MemLockWait behind items that held them: deadlock.
+					// Whatever is still held at session end goes back in releaseMemSlots.
 					continue forGoReupsRoutine
 				}
 				speedInKBytes := (float64(item.size) / 1024) / float64(time.Since(StartReUps).Seconds())
@@ -454,6 +557,51 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 
 // matchThisDL checks if the item is a candidate for download
 // it returns true if the item is a candidate for download
+const (
+	// checkAttempts: a STAT whose connection broke is tried this often (each on a fresh conn).
+	// No retry if no connection could be had at all: GetConn already retried connecting.
+	checkAttempts = 2
+	// maxCheckNoConn: a check routine quits after this many items in a row got no connection.
+	// When all of a group's check routines are gone, the feeder and the divider give up on it.
+	maxCheckNoConn = 3
+)
+
+// checkItem runs GoCheckRoutine and retries a check whose connection broke. A check that
+// still fails is recorded as an error on the provider's group, so the item still
+// counts as checked there; otherwise the divider waits forever for checked == todo.
+func (s *SESSION) checkItem(wid int, provider *Provider, item *segmentChanItem, sharedCC chan *ConnItem) (code int, err error) {
+	for attempt := 1; ; attempt++ {
+		code, err = s.GoCheckRoutine(wid, provider, item, sharedCC)
+		if code != 0 || err == nil {
+			return code, err
+		}
+		if errors.Is(err, errNoConn) || attempt >= checkAttempts || s.stopped() {
+			break
+		}
+		dlog(always, "WARN check seg.Id='%s' @ '%s' attempt %d/%d failed, retry: %v", item.segment.Id, provider.Name, attempt, checkAttempts, err)
+	}
+	s.markCheckFailed(item, provider)
+	return code, err
+} // end func checkItem
+
+// markCheckFailed records a check that could not be done on the provider's group:
+// the item counts as checked there, but its state there is unknown, so it is neither
+// downloaded from nor uploaded to that group (errorOn, ignoreDlOn; not missingOn).
+func (s *SESSION) markCheckFailed(item *segmentChanItem, provider *Provider) {
+	item.mux.Lock()
+	for id, prov := range s.providerList {
+		if prov.Group != provider.Group {
+			continue
+		}
+		item.checkedOn++
+		item.errorOn[id] = true
+		item.ignoreDlOn[id] = true
+	}
+	item.mux.Unlock()
+	// a down provider was logged once by markDown
+	dlog(!provider.isDown() || cfg.opt.DebugCR, "WARN check seg.Id='%s' failed on group '%s', marked as error there", item.segment.Id, provider.Group)
+} // end func markCheckFailed
+
 func matchThisDL(item *segmentChanItem) bool {
 	// item is a candidate for download if it has no size, is not in DL, not in UP, and not in DLMEM
 	switch cacheON {
@@ -471,6 +619,9 @@ func matchThisDL(item *segmentChanItem) bool {
 	return (!item.flaginDL && !item.flagisDL && !item.flaginUP && !item.flagisUP && !item.flaginDLMEM)
 } // end func matchThisDL
 
+// maxItemFails: after this many errors an upload target is given up for the item.
+const maxItemFails = 3
+
 func (item *segmentChanItem) FlagError(providerId int) {
 	log.Printf("FlagError called for providerId=%d on segment.Id='%s' waiting to lock item mutex", providerId, item.segment.Id)
 	item.mux.Lock()
@@ -478,15 +629,24 @@ func (item *segmentChanItem) FlagError(providerId int) {
 	//item.ignoreDlOn[providerId] = true
 	//item.ignoreUlOn[providerId] = true
 	//item.errorOn[providerId] = true
+	wasUP := item.flaginUP
 	if item.flaginUP {
-		if item.fails < 3 {
-			item.retryIn = int64(time.Now().Add(5 * time.Second).Second())
+		if item.fails < maxItemFails-1 {
+			// retry this provider in 5s (was .Second(), the 0-59 seconds field, and retryOn was never set: no delay)
+			item.retryIn = time.Now().Add(5 * time.Second).Unix()
+			item.retryOn[providerId] = true
 		}
 		item.flaginUP = false
 	}
 
 	item.flaginDL = false
 	item.fails++
+	if wasUP && item.fails >= maxItemFails {
+		// stop re-pushing it there: matchThisUP/pushUP don't look at fails.
+		// With no other target the divider retires it (notarget).
+		item.errorOn[providerId] = true
+		dlog(always, "WARN upload of '%s' failed %d times, giving up on providerId=%d", item.segment.Id, item.fails, providerId)
+	}
 	delete(item.availableOn, providerId)
 	dlog(always, "Flagged item error, will not retry '%s' on providerId=%d", item.segment.Id, providerId)
 }
@@ -514,7 +674,7 @@ func (s *SESSION) hasUploadTarget(item *segmentChanItem) bool {
 			continue
 		}
 		p := s.providerList[pid]
-		if p.NoUpload || (!p.capabilities.ihave && !p.capabilities.post) {
+		if p.NoUpload || (!p.capabilities.ihave && !p.capabilities.post) || p.isDown() {
 			continue
 		}
 		if item.ignoreUlOn[pid] || item.uploadedTo[pid] || item.availableOn[pid] ||
@@ -617,7 +777,7 @@ providerDl:
 			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] (nodl) item errorOn seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			continue providerDl
 		}
-		if s.providerList[pid].NoDownload {
+		if s.providerList[pid].NoDownload || s.providerList[pid].isDown() {
 			nodl++
 			item.ignoreDlOn[pid] = true
 			continue providerDl
@@ -688,7 +848,7 @@ providerUp:
 			continue providerUp
 		}
 		//s.providerList[pid].mux.RLock() // FIXME TODO #b8bd287b: dynamic capas
-		flagNoUp := (s.providerList[pid].NoUpload || (!s.providerList[pid].capabilities.ihave && !s.providerList[pid].capabilities.post))
+		flagNoUp := (s.providerList[pid].NoUpload || (!s.providerList[pid].capabilities.ihave && !s.providerList[pid].capabilities.post) || s.providerList[pid].isDown())
 		//s.providerList[pid].mux.RUnlock()
 		if flagNoUp {
 			noup++
@@ -768,6 +928,11 @@ type WrappedItem struct {
 
 const testing = false // set to true to test the worker loop
 // GoWorkDivider is the main worker loop that processes segments
+// noProgressTimeout ends a session whose counters (and finished attempts, workDone)
+// did not move for this long. Note: with UseNoDeadline conns have no read deadline,
+// so a routine blocked on a silent server still holds up waitWorker after this fires.
+const noProgressTimeout = 3 * time.Minute
+
 func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sync.WaitGroup) {
 	dlog(cfg.opt.DebugWorker, "go GoWorkDivider() waiting on waitDivider.Wait()")
 	waitDivider.Wait() // waits for all conns to establish
@@ -796,8 +961,9 @@ func (s *SESSION) GoWorkDivider(waitDivider *sync.WaitGroup, waitDividerDone *sy
 	fetchedtoDL, fetchedtoUP, backlogDL, refillUP, pushedDL, pushedUP := uint64(0), uint64(0), uint64(0), uint64(0), uint64(0), uint64(0)
 	startLoop := time.Now()
 	deadWorkersDeadline := 9
-	deadcounter := 10
-	var capture_done, capture_segm, capture_isdl, capture_isup float64
+	// watchdog: quit if no counter moved for noProgressTimeout (any -verbose setting)
+	var lastProgress uint64
+	lastProgressAt := time.Now()
 
 forever:
 	for {
@@ -836,16 +1002,11 @@ forever:
 		var Tnodl, Tnoup uint64
 
 		startLoop = time.Now()
+		checkersGone := s.allCheckersGone() // before counting: then the counts below are final for checks
 
 	forsegmentList:
 		for _, item := range s.segmentList {
 			item.mux.PrintStatus(false)
-
-			if deadcounter <= 0 {
-				dlog(always, "GoWorkDivider: counters not increasing for too long, exiting")
-				closeCase = "noProgress"
-				break forever
-			}
 
 			item.mux.RLock() // RLOCKS HERE #824d
 			if item.flagCache {
@@ -979,35 +1140,6 @@ forever:
 			yenc_perc := float64(isyenc) / float64(todo) * 100
 			used_slots, max_slots := memlim.Usage()
 
-			if segm_perc > capture_segm {
-				capture_segm = segm_perc
-				deadcounter = 10 // reset deadcounter
-			} else if segm_perc < 100 && segm_perc == capture_segm {
-				deadcounter--
-				dlog(always, "GoWorkDivider: segm_perc not increasing, deadcounter=%d", deadcounter)
-
-			} else if segcheckdone && done_perc > capture_done {
-				capture_done = done_perc
-				deadcounter = 10 // reset deadcounter
-			} else if segcheckdone && done_perc < 100 && done_perc == capture_done {
-				deadcounter--
-				dlog(always, "GoWorkDivider: done_perc not increasing, deadcounter=%d", deadcounter)
-
-			} else if segcheckdone && isdl_perc > capture_isdl {
-				capture_isdl = isdl_perc
-				deadcounter = 10 // reset deadcounter
-			} else if segcheckdone && isdl_perc < 100 && isdl_perc == capture_isdl {
-				deadcounter--
-				dlog(always, "GoWorkDivider: isdl_perc not increasing, deadcounter=%d", deadcounter)
-
-			} else if segcheckdone && isup_perc > capture_isup {
-				capture_isup = isup_perc
-				deadcounter = 10 // reset deadcounter
-			} else if segcheckdone && isup_perc < 100 && isup_perc == capture_isup {
-				deadcounter--
-				dlog(always, "GoWorkDivider: isup_perc not increasing, deadcounter=%d", deadcounter)
-			}
-
 			//log00 = fmt.Sprintf(" TODO: %d ", todo)
 
 			if (cfg.opt.CheckFirst || cfg.opt.CheckOnly) || (checked > 0 && checked != segm && checked != done) {
@@ -1107,6 +1239,24 @@ forever:
 			s.segcheckdone = true
 			s.mux.Unlock()
 			dlog(always, " | Segment Check Done: took='%.1f sec'", took.Seconds())
+		}
+
+		// workDone also moves on failed attempts: slow failing work (a dead provider) is not stuck
+		if progress := checked + isdl + isup + isyenc + cached + done + dead + fails + notarget + s.workDone.Load(); progress != lastProgress {
+			lastProgress, lastProgressAt = progress, time.Now()
+		} else if time.Since(lastProgressAt) > noProgressTimeout {
+			dlog(always, "WARN [DV] no progress for %v, giving up: checked=%d/%d done=%d isdl=%d isup=%d indl=%d inup=%d dlQ=%d upQ=%d",
+				noProgressTimeout, checked, todo, done, isdl, isup, indl, inup, dlQ, upQ)
+			closeCase = "noProgress"
+			break forever
+		}
+
+		// checkedOn only changes in check routines: once all are gone, unchecked items stay unchecked.
+		// Finish what is in flight, then quit instead of waiting for checked == todo forever.
+		if checked != todo && checkersGone && inup == 0 && indl == 0 && inretry == 0 && inyenc == 0 && dlQ == 0 && upQ == 0 && yeQ == 0 {
+			dlog(always, "WARN [DV] all check routines are gone, %d/%d items were not checked on every provider: giving up on them", todo-checked, todo)
+			closeCase = "checkersGone"
+			break forever
 		}
 
 		// continue as long as any of this triggers because stuff is still in queues and processing

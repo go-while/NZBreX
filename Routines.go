@@ -26,6 +26,9 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 	GCounter.Incr("GoCheckRoutines")
 	defer GCounter.Decr("GoCheckRoutines")
+	if provider.isDown() {
+		return 0, fmt.Errorf("GoCheckRoutine '%s' is down: %w", provider.Name, errNoConn) // checkItem marks it failed here
+	}
 
 	dlog(cfg.opt.DebugCR, "GoWorker (%d) checking seg.Id='%s' @ '%s' remainingInChan=%d/%d", wid, item.segment.Id, provider.Name, len(s.segmentChansCheck[provider.Group]), cap(s.segmentChansCheck[provider.Group]))
 
@@ -39,7 +42,7 @@ func (s *SESSION) GoCheckRoutine(wid int, provider *Provider, item *segmentChanI
 		connitem, err = provider.ConnPool.GetConn()
 	}
 	if err != nil {
-		return 0, fmt.Errorf("error in GoCheckRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		return 0, fmt.Errorf("error in GoCheckRoutine: ConnGet '%s' connitem='%v' sharedCC='%v': %w: %v", provider.Name, connitem, sharedCC, errNoConn, err)
 	}
 	if connitem == nil || connitem.conn == nil {
 		return 0, fmt.Errorf("error in GoCheckRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
@@ -148,6 +151,13 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 	GCounter.Incr("GoDownsRoutines")
 	defer GCounter.Decr("GoDownsRoutines")
+	if provider.isDown() {
+		item.FlagError(provider.id) // clears flaginDL, drops availableOn there
+		item.mux.Lock()
+		item.ignoreDlOn[provider.id] = true
+		item.mux.Unlock()
+		return 0, fmt.Errorf("GoDownsRoutine '%s' is down: %w", provider.Name, errNoConn)
+	}
 
 	// check cache before download
 	if cacheON && cache.ReadCache(item) > 0 {
@@ -164,10 +174,12 @@ func (s *SESSION) GoDownsRoutine(wid int, provider *Provider, item *segmentChanI
 		connitem, err = provider.ConnPool.GetConn()
 	}
 	if err != nil {
-		return 0, fmt.Errorf("error in GoDownsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		item.FlagError(provider.id) // clears flaginDL: the divider would count it as in download forever
+		return 0, fmt.Errorf("error in GoDownsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v': %w: %v", provider.Name, connitem, sharedCC, errNoConn, err)
 	}
 	if connitem == nil || connitem.conn == nil {
-		return 0, fmt.Errorf("error in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		item.FlagError(provider.id)
+		return 0, fmt.Errorf("error in GoDownsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v': %w", provider.Name, connitem, sharedCC, errNoConn)
 	}
 	dlog(cfg.opt.DebugWorker, "GoDownsRoutine got connitem='%v' sharedCC='%v' --> CMD_ARTICLE seg.Id='%s'", connitem, sharedCC, item.segment.Id)
 
@@ -323,6 +335,14 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 	}
 	GCounter.Incr("GoReupsRoutines")
 	defer GCounter.Decr("GoReupsRoutines")
+	if provider.isDown() {
+		// no upload there this session; the divider retires the item if it has no other target
+		item.mux.Lock()
+		item.errorOn[provider.id] = true
+		item.flaginUP = false
+		item.mux.Unlock()
+		return 0, fmt.Errorf("GoReupsRoutine '%s' is down: %w", provider.Name, errNoConn)
+	}
 	//who := fmt.Sprintf("UR=%d@'%s' seg.Id='%s'", wid, provider.Name, item.segment.Id)  // DISABLED MEMRETURN
 
 	item.mux.Lock()
@@ -344,10 +364,12 @@ func (s *SESSION) GoReupsRoutine(wid int, provider *Provider, item *segmentChanI
 		connitem, err = provider.ConnPool.GetConn()
 	}
 	if err != nil {
-		return 0, fmt.Errorf("error in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		item.FlagError(provider.id) // clears flaginUP: the divider would count it as in upload forever
+		return 0, fmt.Errorf("error in GoReupsRoutine: ConnGet '%s' connitem='%v' sharedCC='%v': %w: %v", provider.Name, connitem, sharedCC, errNoConn, err)
 	}
 	if connitem == nil || connitem.conn == nil || connitem.srvtp == nil {
-		return 0, fmt.Errorf("error in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v' err='%v'", provider.Name, connitem, sharedCC, err)
+		item.FlagError(provider.id)
+		return 0, fmt.Errorf("error in GoReupsRoutine: ConnGet got nil item or conn '%s' connitem='%v'  sharedCC='%v': %w", provider.Name, connitem, sharedCC, errNoConn)
 	}
 
 	var uploaded, unwanted, retry bool

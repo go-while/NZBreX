@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/Tensai75/nzbparser"
@@ -138,7 +139,10 @@ type Provider struct {
 	ConnPool      *ConnPool // the pool of connections for this provider
 	//mux           sync.RWMutex    // mutex to protect the provider struct
 	mux *loggedrwmutex.LoggedSyncRWMutex // debug mutex
-	id  int                              // will be set in loadProviderList
+	// down is set when the conn pool gave up dialing (see markDown). Each session has
+	// its own provider copies, so it only lasts for the session. Never set in proxy mode.
+	down atomic.Bool
+	id   int // will be set in loadProviderList
 	// flags
 	capabilities struct {
 		check  bool // if true, provider supports checking articles

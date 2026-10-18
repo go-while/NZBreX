@@ -161,6 +161,42 @@ Written under `globalmux` in each provider's boot goroutine (`Workers.go:65-81`)
 
 **Fix:** give the feeder and the divider a shared "give up" signal, for example closed when every check routine of a group has exited, plus a deadline. The feeder's close must follow the 2.6 single-owner rule.
 
+**Result (2026-10-18):** fixed. Testing found four more hangs on the same path; all are fixed here.
+- **Give-up signal.**
+  - `checkerGroup` counts each group's check routines, built with the channels in `makeSegmentChans`.
+  - The count drops when a check routine exits and for every routine that never starts (boot `GetConn` failure, shared-conn failure). At 0 it closes `gone`.
+  - The feeder selects on `gone` and closes its channel (still the only owner).
+  - When every group is gone, `checked != todo` and nothing is in flight, the divider quits with `checkersGone`.
+- **(new) A failed check was dropped.** A `STAT` with no reply, or no connection, never reached `checkedOn`, so `checked == todo` never held.
+  - `checkItem` retries once on a broken connection.
+  - Otherwise `markCheckFailed` sets `errorOn`/`ignoreDlOn` for the group (not `missingOn`), and the divider retires the item ("no upload target").
+  - A check routine quits after 3 items in a row with no connection.
+- **(new) The watchdog only ran with `-verbose`** (it lived in the stats block; `-verbose` is on by default) and was wrong.
+  - It counted down whenever `segm_perc` stayed below 100, so any NZB with segments missing everywhere was killed about 20 s into the transfer: 32 of 40 uploads in the test. Without `-verbose` there was no watchdog, so a dead group hung forever.
+  - Replaced by an always-on 3-minute no-progress check over the counters plus `s.workDone` (every finished attempt, so slow failing work doesn't count as stuck).
+- **(new) Conn failures left items "in flight" forever.** `GoReupsRoutine`/`GoDownsRoutine` returned on a `GetConn` failure without `FlagError`, so `flaginUP`/`flaginDL` stayed set and the divider waited forever.
+- **(new) Failed uploads were retried forever.** `matchThisUP`/`pushUP` ignore `fails`. After `maxItemFails` (3), `FlagError` now sets `errorOn` for that provider. The retry delay works now: `.Unix()` instead of `.Second()`, and `retryOn` is set.
+- **(new) Mem-slot deadlock on upload errors.** The re-upload loop returned the slot on error. Downloads took every slot, and the re-queued item waited in `MemLockWait` behind items that held them; goroutine dump: all 8 routines in `MemLimit.go:106`. A failed upload now keeps its slot until it succeeds or is retired; `releaseMemSlots` returns the rest at session end.
+- **(new) Work after the stop.** The downs/reups routines drop items still queued once the session has stopped, and `GetConn` no longer dials after the stop.
+- **(new) Provider down for the session.** When `GetConn` gives up on a dial error (`errDial`, now wrapped through `connect`/`NewConn`), `Provider.markDown` takes the provider out for the rest of the session.
+  - The routines and `pushUP`/`pushDL`/`hasUploadTarget` then skip it without touching the network.
+  - Never in proxy sessions, whose pools live as long as the process. Checked: B dialled again on every request, never marked down.
+  - Without this, each item cost 3 × ~9 s of dial retries: 90 uploads ran past 400 s.
+- Tests: `TestFeederClosesWhenCheckersGone`.
+- **Verified under `-race` against the local servers, no races in any run:**
+
+| Scenario | Before | After |
+|---|---|---|
+| B down at boot, no `-verbose` | hangs (killed at 120 s) | 13 s |
+| Segments missing everywhere, slow uploads, `-verbose` | killed at ~20 s, 32/40 uploads | 50 s, 40/40 |
+| B killed during checks | — | 31 s (first fix round: 385 s via watchdog, then 188 s) |
+| B killed during uploads | — | 32 s, close case #8, no slots leaked |
+
+  - A→B, same-group and the 2.4 leak setup: unchanged results.
+  - Web mode: both jobs complete; the 25 races are all in `webserver.go` (4.2).
+- **Note:** `UseNoDeadline = true` (`Config.go`): conns have no read deadline, so a server that accepts and then goes silent can still block a routine, and with it `waitWorker`, after the watchdog has fired. That belongs with 3.14 (`checkCapabilities`).
+- **Limitation:** items not checked on a dead group are given up for the whole session, even when other groups could still serve them.
+
 ### 3.3 Shared-connection early returns (dropped as a bug)
 
 `SharedConnGet` only returns an item with `conn != nil`. On the error path it has already put `nil` back into `sharedCC` (`ConnPool.go:749`). The `conn != nil && srvtp == nil` window doesn't occur: `CloseConn` runs in the holder's own goroutine. The guards at `Routines.go:45-47`, `:170-172`, `:348-350` are defensive dead code. If they are touched, never push a token back on the error path; the cap-1 channel is already refilled.
@@ -268,7 +304,7 @@ Keyed by a per-session index (`Utils.go:200`, `ConnPool.go:134/181`), so session
 
 **Result (2026-10-17):** fixed. `TestIHAVEReplyNot335KeepsConnUsable` (fake server answers 436, then 435) blocks on the old code and passes now.
 
-**Also noted (not fixed):** `FlagError` (`Workers.go`) sets `retryIn = int64(time.Now().Add(5 * time.Second).Second())`. That is the seconds field of the current minute (0–59), not a Unix time, so `retryIn > now` is never true and the 5 s retry delay never applies. It should be `.Unix()`.
+**Also noted (fixed with 3.2):** `FlagError` (`Workers.go`) set `retryIn = int64(time.Now().Add(5 * time.Second).Second())`. That is the seconds field of the current minute (0–59), not a Unix time, so `retryIn > now` was never true and the 5 s retry delay never applied (it also never set `retryOn`).
 
 ### 3.14 Remaining unsynchronised accesses (corrected)
 

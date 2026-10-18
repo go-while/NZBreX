@@ -104,3 +104,54 @@ func TestStopRoutinesWithoutChannels(t *gotesting.T) {
 		t.Fatal("nil stopChan reported as stopped")
 	}
 }
+
+// Plan 3.2: when every check routine of a group is gone (here: none ever
+// started, like a provider that can't connect at boot) the feeder used to block
+// on a full channel, or spin on len(ch) > 0, forever. It now closes the channel.
+func TestFeederClosesWhenCheckersGone(t *gotesting.T) {
+	testCfg()
+	cfg.opt.ChanSize = 2
+	s := &SESSION{
+		mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "TEST-SESSION"},
+		stopChan: make(chan struct{}),
+		providerList: []*Provider{
+			{Name: "a", Group: "a", Enabled: true, MaxConns: 2, mux: &loggedrwmutex.LoggedSyncRWMutex{Name: "a"}},
+			{Name: "b", Group: "b", Enabled: true, MaxConns: 3, mux: &loggedrwmutex.LoggedSyncRWMutex{Name: "b"}},
+		},
+	}
+	for i := 0; i < 10; i++ { // more items than the channel holds: the feeder blocks on send
+		s.segmentList = append(s.segmentList, testItem(string(rune('a'+i))))
+	}
+	s.makeSegmentChans()
+	if got := s.checkers["b"].left.Load(); got != 3 {
+		t.Fatalf("group b: want 3 check routines, got %d", got)
+	}
+	chB := s.segmentChansCheck["b"]
+	time.Sleep(100 * time.Millisecond)
+	if s.allCheckersGone() {
+		t.Fatal("allCheckersGone before any routine exited")
+	}
+
+	s.checkersExit(s.providerList[1], 3) // b: boot failed, none of its 3 check routines start
+	deadline := time.After(3 * time.Second)
+	for closed := false; !closed; {
+		select {
+		case _, ok := <-chB:
+			closed = !ok
+		case <-deadline:
+			t.Fatal("feeder of group b did not close its channel after its checkers were gone")
+		}
+	}
+	if s.allCheckersGone() {
+		t.Fatal("group a still has check routines")
+	}
+	s.checkersExit(s.providerList[0], 1)
+	s.checkersExit(s.providerList[0], 1)
+	s.checkersExit(s.providerList[0], 1) // over-counting must not panic (close once)
+	if !s.allCheckersGone() {
+		t.Fatal("allCheckersGone false after every group exited")
+	}
+	if !closedWithin(s.segmentChansCheck["a"], 3*time.Second) {
+		t.Fatal("feeder of group a did not close its channel")
+	}
+}

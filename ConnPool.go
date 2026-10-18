@@ -90,6 +90,22 @@ type ConnPool struct {
 // errSessionStopped is returned by waits that gave up because the session stopped.
 var errSessionStopped = errors.New("session stopped")
 
+// errNoConn: a routine could not get a connection at all (GetConn already retried).
+var errNoConn = errors.New("no connection")
+
+// errDial: the TCP/TLS dial itself failed (refused, timeout, unreachable), not the banner or auth.
+var errDial = errors.New("dial failed")
+
+// markDown takes the provider out of this session: every routine and the divider skip it
+// from now on, instead of paying GetConn's dial retries again for every item.
+func (p *Provider) markDown(err error) {
+	if p.down.CompareAndSwap(false, true) {
+		dlog(always, "WARN provider '%s' is down for this session, skipping it from now on: %v", p.Name, err)
+	}
+}
+
+func (p *Provider) isDown() bool { return p.down.Load() }
+
 func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGroup) {
 	provider.mux.Lock()         // NewConnPool mutex #d028
 	defer provider.mux.Unlock() // NewConnPool mutex #d028
@@ -213,10 +229,10 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 		dlog(cfg.opt.DebugConnPool, "ConnPool raw tcp.Dial took='%v' '%s'", time.Since(start), c.provider.Name)
 		if err != nil {
 			if isNetworkUnreachable(err) {
-				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
+				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s': %w: %v", c.provider.Host, c.provider.Name, errDial, err)
 			}
 			dlog(cfg.opt.DebugConnPool, "ERROR connect Dial '%s' no retry err='%v'", c.provider.Name, err)
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errDial, err)
 		}
 	case true:
 		conf := &tls.Config{
@@ -229,10 +245,10 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 		dlog(cfg.opt.DebugConnPool, "ConnPool raw tls.Dial took='%v' '%s'", time.Since(start), c.provider.Name)
 		if err != nil {
 			if isNetworkUnreachable(err) {
-				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s' err='%v'", c.provider.Host, c.provider.Name, err)
+				return nil, fmt.Errorf("error connect Unreachable network! '%s' @ '%s': %w: %v", c.provider.Host, c.provider.Name, errDial, err)
 			}
 			dlog(cfg.opt.DebugConnPool, "ERROR connect Dial '%s' no-retry err='%v'", c.provider.Name, err)
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errDial, err)
 		}
 	} // end switch
 	dlog(cfg.opt.DebugConnPool, "ConPool connect raw conn established '%s' took=(%d ms)", c.provider.Name, time.Since(start).Milliseconds())
@@ -335,7 +351,7 @@ func (c *ConnPool) NewConn() (connitem *ConnItem, err error) {
 			c.openConns--
 			dlog(cfg.opt.DebugConnPool, "ERROR in ConnPool NewConn: connect failed '%s' openConns=%d connitem='%v' err='%v'", c.provider.Name, c.openConns, connitem, err)
 			c.mux.Unlock() // mutex c460
-			return nil, fmt.Errorf("error in ConnPool NewConn: connect failed '%s' err='%v'", c.provider.Name, err)
+			return nil, fmt.Errorf("error in ConnPool NewConn: connect failed '%s' err='%w'", c.provider.Name, err)
 		}
 		c.mux.RLock() // mutex c461
 		dlog(cfg.opt.DebugConnPool, "ConnPool NewConn: got new connid=%d '%s' openConns after=%d/%d before=%d connectTook=(%d ms) err='%v", connitem.connid, c.provider.Name, c.openConns, c.provider.MaxConns, openConnsBefore, time.Since(start).Milliseconds(), err)
@@ -455,6 +471,12 @@ getConnFromPool:
 			dlog(cfg.opt.DebugConnPool, "ConnPool GetConn: try to open a new connection '%s' openConns=%d provider.MaxConns=%d", c.provider.Name, c.openConns, c.provider.MaxConns)
 			c.mux.RUnlock() // mutex c458
 
+			select {
+			case <-c.sessStop:
+				// don't dial (and retry for seconds) for a session that is over
+				return nil, fmt.Errorf("error in ConnPool GetConn '%s': %w", c.provider.Name, errSessionStopped)
+			default:
+			}
 			// try to open a new connection
 			newconnitem, aerr := c.NewConn()
 			if aerr != nil || newconnitem == nil || newconnitem.conn == nil {
@@ -465,6 +487,10 @@ getConnFromPool:
 					// we have retried too often
 					dlog(cfg.opt.DebugConnPool, "ERROR in ConnPool GetConn: retried %d times to get a new conn '%s' giving up! aerr='%v'", retried, c.provider.Name, aerr)
 					err = aerr
+					if errors.Is(aerr, errDial) && c.s != nil && !c.s.proxy {
+						// the proxy's pools live as long as the process: never mark them down
+						c.provider.markDown(aerr)
+					}
 					break getConnFromPool // break out of the for loop
 				}
 				continue getConnFromPool // until chan rans empty
