@@ -72,7 +72,7 @@ type CFG struct {
 	YencMerge               bool   `json:"YencMerge"`               // if true, yenc parts will be merged into target files
 	YencDelParts            bool   `json:"YencDelParts"`            // if true, yenc parts will be deleted after merge
 	RapidYencBufSize        int    `json:"RapidYencBufSize"`        // buffer size for rapidyenc, default 4k in rapidyenc.DefaultBufSize
-	YencGo                  bool   `json:"YencGo"`                  // -yenctest=4 decodes with the pure-Go decoder (ydec) instead of rapidyenc's C code
+	YencGo                  bool   `json:"YencGo"`                  // -yenctest=4 decodes with the pure-Go decoder (go-yenc-simd) instead of rapidyenc's C code
 	DoubleCheckRapidYencCRC bool   `json:"DoubleCheckRapidYencCRC"` // if true, double check crc32 with rapidyenc
 	Csv                     bool   `json:"Csv"`                     // if true, write a csv file for every nzb file
 	Log                     bool   `json:"Log"`                     // if true, log to file

@@ -8,15 +8,15 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/go-while/NZBreX/ydec"
+	yencsimd "github.com/go-while/go-yenc-simd"
 )
 
-func TestStateValuesMatchYdec(t *testing.T) {
+func TestStateValuesMatchYencsimd(t *testing.T) {
 	pairs := []struct{ c, g int }{
-		{int(StateCRLF), int(ydec.StateCRLF)}, {int(StateEQ), int(ydec.StateEQ)}, {int(StateCR), int(ydec.StateCR)},
-		{int(StateNone), int(ydec.StateNone)}, {int(StateCRLFDT), int(ydec.StateCRLFDT)},
-		{int(StateCRLFDTCR), int(ydec.StateCRLFDTCR)}, {int(StateCRLFEQ), int(ydec.StateCRLFEQ)},
-		{int(EndNone), int(ydec.EndNone)}, {int(EndControl), int(ydec.EndControl)}, {int(EndArticle), int(ydec.EndArticle)},
+		{int(StateCRLF), int(yencsimd.StateCRLF)}, {int(StateEQ), int(yencsimd.StateEQ)}, {int(StateCR), int(yencsimd.StateCR)},
+		{int(StateNone), int(yencsimd.StateNone)}, {int(StateCRLFDT), int(yencsimd.StateCRLFDT)},
+		{int(StateCRLFDTCR), int(yencsimd.StateCRLFDTCR)}, {int(StateCRLFEQ), int(yencsimd.StateCRLFEQ)},
+		{int(EndNone), int(yencsimd.EndNone)}, {int(EndControl), int(yencsimd.EndControl)}, {int(EndArticle), int(yencsimd.EndArticle)},
 	}
 	for i, p := range pairs {
 		if p.c != p.g {

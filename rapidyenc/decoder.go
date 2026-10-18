@@ -23,7 +23,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/go-while/NZBreX/ydec"
+	yencsimd "github.com/go-while/go-yenc-simd"
 	"golang.org/x/text/transform"
 )
 
@@ -537,17 +537,17 @@ const (
 
 var decodeInitOnce sync.Once
 
-// UseGoDecoder makes every Decoder use the pure-Go decoder (package ydec)
+// UseGoDecoder makes every Decoder use the pure-Go decoder (github.com/go-while/go-yenc-simd)
 // instead of the C library for the yEnc data (plan Phase 8). Headers, CRC and
 // size checks are the same Go code either way. Set it before decoding starts.
 var UseGoDecoder bool
 
 // decodeIncremental runs the yEnc data through the C or the Go decoder.
-// Both use the same State and End values (checked in decoder_test.go).
+// Both use the same State and End values (checked in godecoder_test.go).
 func (d *Decoder) decodeIncremental(dst, src []byte) (int, int, End, error) {
 	if UseGoDecoder {
-		st := ydec.State(d.State)
-		nd, ns, end, err := ydec.DecodeIncremental(dst, src, &st)
+		st := yencsimd.State(d.State)
+		nd, ns, end, err := yencsimd.DecodeIncremental(dst, src, &st)
 		d.State = State(st)
 		return nd, ns, End(end), err
 	}

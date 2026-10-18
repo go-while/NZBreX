@@ -616,6 +616,7 @@ Independent of Phases 1–7; can run in parallel.
   | whole Decoder, 64 KiB reads, C / Go | 1990 / 1220 (61%) | 8500 / 6600 (78%) |
 
   The C path also makes 390 allocations per article (cgo pointer escapes), Go 12.
+- **Own repo (2026-10-18):** moved out of `ydec/` into `github.com/go-while/go-yenc-simd` (package `yencsimd`, MIT), a local sibling checkout with its own git history, not published yet. NZBreX imports it with `replace github.com/go-while/go-yenc-simd => ../go-yenc-simd` (as nntp-server does with its siblings); drop the replace and require a tag once it is on GitHub. The repo's tests need no cgo: 504 golden calls generated once from the C decoder (on every vector path), each vector path against the state machine (random + fuzz), encode/decode round trips; mutation checks pass. The C cross-check tests (random, chunked, articles, sample files, fuzz, decode-loop benchmarks) now live in `rapidyenc/yencsimd_diff_test.go`.
 - **Step 4, decision open (user):** Go is not "close" in the raw loop (49–63%), but 61–81% through the whole decoder, and far above download speeds on either machine. Making it the default would drop cgo for the decoder (the encoder is only used by tests), the `.a`/`.dll` builds and the cross toolchains; it would also tie the fast path to `GOEXPERIMENT=simd` (without it: 460–1150 MB/s, still above a 1 Gbit/s link). Until decided, C stays the default and `-yencgo` is opt-in.
 
 ---
