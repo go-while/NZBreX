@@ -149,6 +149,8 @@ Run with the following arguments:
 - `-crc32` [true|false] check CRC32 of articles while downloading (default: false)
 - `-checkfirst` [true|false] if false: start downs/reups as soon as segments are checked (default: false)
 - `-uploadlater` (TODO) [true|false] needs cache! start uploads when everything is cached (default: false)
+- `-nzbdir` /path watch this directory: process its `.nzb`/`.nzb.gz` files one at a time, oldest first. A file is taken once it is unchanged between two scans; afterwards it moves to `done/` (or `failed/` if the run couldn't start) in that directory. SIGINT/SIGTERM stops the running NZB, which stays in place for the next start. Not with `-nzb`, `-web` or the proxy.
+- `-dirrefresh` seconds with `-nzbdir`: scan interval (default: 60, minimum 15)
 - `-checkonly` [true|false] check online status only: no downs/reups (default: false)
 - `-verify` [true|false] waits and tries to verify/recheck all reups (default: false)
 - `-verbose` [true|false] more output (default: true)
@@ -255,7 +257,7 @@ Example output:
 ---
 
 ## Ideas and more TODOs
-- #0001: watchDir (processor/sessions) almost done!
+- ~~#0001: watchDir (processor/sessions)~~ done: `-nzbdir`
 - #0010: fix all todos in code!
 - #0020: better console output
 - #0030: verify uploaded articles

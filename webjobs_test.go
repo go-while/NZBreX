@@ -137,7 +137,7 @@ func TestStartupModeError(t *gotesting.T) {
 		{true, "", false, false, true},
 		{false, "", true, false, true},
 		{false, "", false, true, true},
-		{false, "/d", false, false, false}, // -nzbdir unfinished
+		{false, "/d", false, false, true}, // -nzbdir alone (directory mode)
 		{false, "/d", true, false, false},
 		{false, "/d", false, true, false},
 		{true, "/d", false, false, false},

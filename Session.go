@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,15 +25,11 @@ type PROCESSOR struct {
 	IsRunning bool
 	//cfg       *Config // TODO: remove from global scope?
 	//mux       sync.RWMutex
-	mux       *loggedrwmutex.LoggedSyncRWMutex
-	sessIds   uint64              // counts up
-	sessMap   map[uint64]*SESSION // map with sessions
-	nzbDir    string              // watch this dir for nzb files
-	seenFiles map[string]bool     // map to keep track of already seen/added files
-	nzbFiles  []string            // watched and added from nzbDir
-	refresh   time.Duration       // update list of nzb dir files every N seconds
+	mux     *loggedrwmutex.LoggedSyncRWMutex
+	sessIds uint64              // counts up
+	sessMap map[uint64]*SESSION // map with sessions
+	nzbDir  string              // -nzbdir: the watched directory (dirWatcher)
 	//limitA    int                 // limits amount of open sessions
-	stopChan chan struct{}
 	//waitSessionMap     map[uint64]*sync.WaitGroup
 } // end type PROCESSOR struct
 
@@ -118,16 +113,11 @@ func (p *PROCESSOR) NewProcessor() error {
 			time.Sleep(9 * time.Second) // watchdir not found, retry in
 			retries--
 		}
-		//p.refresh = time.Duration(0 * time.Second) // default. call processor.SetDirRefresh after NewProcessor
-		p.nzbDir = cfg.opt.NzbDir
-		p.seenFiles = make(map[string]bool)
-		go p.watchDirThread()
+		p.nzbDir = cfg.opt.NzbDir // main runs the watcher (nzbdir.go)
 	}
 	p.sessMap = make(map[uint64]*SESSION)
-	p.stopChan = make(chan struct{}, 1)
-	go p.processorThread()
 	p.IsRunning = true
-	dlog(always, "NewProcessor: nzbDir='%s' refresh=%d proxy=%t", p.nzbDir, p.refresh, proxy)
+	dlog(cfg.opt.Verbose, "NewProcessor: nzbDir='%s' proxy=%t", p.nzbDir, proxy)
 	return nil
 } // end func NewProcessor
 
@@ -414,18 +404,6 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 	return
 } // end func LaunchSession
 
-func (p *PROCESSOR) SetDirRefresh(seconds int64) {
-	if seconds < 0 {
-		seconds = 0
-	} else if seconds > 0 && seconds < 15 {
-		seconds = 15 // hardcoded minimum scan interval is 15 seconds!
-	}
-	p.mux.Lock()
-	p.refresh = time.Duration(seconds) * time.Second
-	p.mux.Unlock()
-	dlog(always, "SetWatchDirRefresh: seconds=%d nzbDir='%s' ", seconds, p.nzbDir)
-} // end func SetWatchDirRefresh
-
 // private PROCESSOR/SESSION functions
 
 // sessionProgress holds the counts of GoWorkDivider's last pass over the segment
@@ -436,7 +414,7 @@ type sessionProgress struct {
 
 func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	// create session, every nzbfile will have its own session
-	// this is called from LaunchSession and watchDirThread
+	// called from LaunchSession, the web job runner and the -nzbdir watcher
 	// nzbName is the name of the nzb file, e.g. "test.nzb" or "test.nzb.gz"
 	//
 	s := &SESSION{
@@ -581,99 +559,3 @@ func (p *PROCESSOR) removeSession(sessId uint64, s *SESSION) {
 	s = nil             // set session to nil to free memory
 	dlog(cfg.opt.Debug, "PROCESSOR.removeSession: sessId=%d", sessId)
 } // end func p.removeSession
-
-func (p *PROCESSOR) processorThread() {
-	// watchDir is running concurrently
-	// TODO: load nzbs and distribute work here
-forever:
-	for {
-		select {
-		case stopSignal, ok := <-p.stopChan:
-			if !ok {
-				dlog(always, "ERROR PROCESSOR: stopChan closed, exiting processorThread")
-				return
-			}
-			p.stopChan <- stopSignal
-			break forever
-		case <-time.After(15 * time.Second):
-			// every 15 seconds check if we have new files in the nzbDir
-		}
-	}
-	dlog(always, "Quit PROCESSOR: dir='%s'", p.nzbDir)
-} // end func p.processorThread
-
-func (p *PROCESSOR) refreshDir() {
-	fs, err := os.ReadDir(p.nzbDir)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var newfiles []*string
-	for _, file := range fs {
-		filename := file.Name()
-		isNZB := (strings.HasSuffix(filename, ".nzb") || strings.HasSuffix(filename, "nzb.gz"))
-		if isNZB {
-			p.mux.RLock()
-			if p.seenFiles[filename] {
-				p.mux.RUnlock()
-				continue
-			}
-			p.mux.RUnlock()
-
-			p.mux.Lock()
-			// Add the file to the slice and mark it as seen
-			p.seenFiles[filename] = true
-			p.nzbFiles = append(p.nzbFiles, filename)
-			p.mux.Unlock()
-
-			newfiles = append(newfiles, &filename)
-
-			if sessId, _ := p.newSession(filename); err != nil || sessId <= 0 {
-				dlog(always, "ERROR refreshDir sessId=%d <= 0? err='%v'", sessId, err)
-			}
-
-		}
-	} // end for file fs
-
-	if len(newfiles) == 0 {
-		dlog(cfg.opt.Verbose, "refreshDir: no new files found...")
-		return
-	}
-
-	if cfg.opt.Verbose {
-		dlog(always, "refreshDir loaded new files: %d dir='%s'", len(newfiles), p.nzbDir)
-		for _, fn := range newfiles {
-			dlog(always, "refreshDir: '%s' New: '%s'", p.nzbDir, *fn)
-		}
-	}
-
-} // end func p.refreshDir
-
-func (p *PROCESSOR) watchDirThread() {
-	tAchan := time.After(5 * time.Second)
-	dlog(always, "Starting watchDir: '%s' first lookup in 5 sec", p.nzbDir)
-forever:
-	for {
-		select {
-		case nul := <-p.stopChan:
-			p.stopChan <- nul
-			break forever
-
-		case <-tAchan:
-			//dlog( "watchDir checking '%s'", p.nzbDir)
-			// read p.refresh under a short lock only:
-			// refreshDir() and newSession() take p.mux themselves (not reentrant).
-			p.mux.RLock()
-			refresh := p.refresh
-			p.mux.RUnlock()
-			if refresh > 0 {
-				p.refreshDir()
-				tAchan = time.After(refresh)
-			} else {
-				// if p.refresh set to <= 0 don't run refreshDir
-				// but recheck every 15 seconds if value has been updated
-				tAchan = time.After(15 * time.Second)
-			}
-		}
-	} // end for
-	dlog(always, "Processor watchDir '%s' quit", p.nzbDir)
-} // end func watchDir

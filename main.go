@@ -80,8 +80,13 @@ func main() {
 		dlog(always, "ERROR NewProcessor: proxy err='%v'", err)
 		os.Exit(1)
 	}
-	// -nzbdir is refused in ParseFlags until directory processing works (D3)
-	if proxy {
+	if cfg.opt.NzbDir != "" {
+		// directory mode: process the NZBs that appear in -nzbdir until a signal
+		w := thisProcessor.newDirWatcher(time.Duration(cfg.opt.DirRefresh) * time.Second)
+		dirShutdownOnSignal(w)
+		w.loop()
+		dlog(always, "-nzbdir: stopped")
+	} else if proxy {
 		// boot proxy server: a session that only loads the providers and runs their pools
 		s := thisProcessor.newBaseSession("PROXYSESSION")
 		s.ready = make(chan struct{})

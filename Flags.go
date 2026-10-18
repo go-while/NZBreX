@@ -25,7 +25,8 @@ func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
 	// essentials
 	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
-	flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "/path/to/watch/dir/for/nzbfiles")
+	flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "watch this directory: process its .nzb/.nzb.gz files one at a time, oldest first; processed files move to done/ or failed/ in it")
+	flag.Int64Var(&cfg.opt.DirRefresh, "dirrefresh", 60, "with -nzbdir: scan the directory every N seconds (minimum 15)")
 	flag.StringVar(&cfg.opt.ProvFile, "provider", "provider.json", "/path/provider.json")
 	flag.BoolVar(&cfg.opt.CheckOnly, "checkonly", false, "[true|false] check online status only: no downs/reups (default: false)")
 	flag.BoolVar(&cfg.opt.DlMissing, "dlmissing", false, "[true|false] download the articles missing on any provider into the cache (-cd), also when no provider takes uploads, e.g. to re-upload them later (default: false)")
@@ -499,9 +500,6 @@ func addWebUser(spec string) {
 	}
 }
 
-// startupModeError rejects mode combinations that don't work (D3). Exactly one
-// of -nzb, -web or -proxytcp/-proxytls runs; with none, the default -nzb runs.
-// -nzbdir is unfinished (processorThread is a stub) and is refused for now.
 // setupCoreLimiters fills core_chan and async_core_chan once at startup.
 // LaunchSession used to do this and resize them when the size differed,
 // dropping the tokens other sessions still held (plan 6.2).
@@ -523,6 +521,8 @@ func setupCoreLimiters() {
 	dlog(cfg.opt.Verbose, "core_chan=%d async_core_chan=%d", cfg.opt.YencCpu, cfg.opt.YencAsyncCpu)
 }
 
+// startupModeError rejects mode combinations that don't work (D3). Exactly one
+// of -nzb, -nzbdir, -web or -proxytcp/-proxytls runs; with none, the default -nzb runs.
 func startupModeError(nzbSet bool, nzbDir string, web, proxy bool) error {
 	if nzbDir != "" {
 		switch {
@@ -533,7 +533,7 @@ func startupModeError(nzbSet bool, nzbDir string, web, proxy bool) error {
 		case nzbSet:
 			return fmt.Errorf("-nzbdir can't be combined with -nzb")
 		}
-		return fmt.Errorf("-nzbdir is not supported yet (directory processing is unfinished): use -nzb or -web")
+		return nil
 	}
 	if web && proxy {
 		// both would open their own pools: together they could exceed a provider account's connection limit
