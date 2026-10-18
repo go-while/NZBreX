@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -16,12 +18,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 //go:embed web/templates/*
@@ -151,51 +152,10 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 	webProcessor = processor
 	jobQueue = NewJobQueue()
 
-	// Set Gin to release mode for production
-	if !cfg.opt.Debug {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
-	router := gin.Default()
-	if err := router.SetTrustedProxies(nil); err != nil { // c.ClientIP() is the peer, never X-Forwarded-For
-		return err
-	}
-	router.MaxMultipartMemory = 8 << 20 // bigger uploads spool to a temp file
-	router.Use(webGuard(webAllowedHosts(addr, auth != nil)))
-	if auth != nil {
-		router.Use(auth.middleware())
-	}
-
-	// Parse embedded templates
-	tmpl, err := template.ParseFS(templatesFS, "web/templates/*.html")
-	if err != nil {
-		return fmt.Errorf("failed to parse templates: %w", err)
-	}
-	router.SetHTMLTemplate(tmpl)
-
-	static, err := fs.Sub(staticFS, "web/static")
+	handler, err := webHandler(addr, auth)
 	if err != nil {
 		return err
 	}
-	router.StaticFS("/static", http.FS(static))
-
-	// Routes
-	router.GET("/", handleIndex)
-	router.GET("/stats", handleStats)
-	router.POST("/upload", handleUpload)
-	router.GET("/api/stats", handleAPIStats)
-
-	// Job queue routes
-	router.GET("/jobs", handleJobsList)
-	router.GET("/api/jobs", handleAPIJobsList)
-	router.POST("/api/jobs/:id/start", handleJobStart)
-	router.POST("/api/jobs/start-all", handleJobStartAll)
-	router.POST("/api/jobs/:id/stop", handleJobStop)
-	router.DELETE("/api/jobs/:id", handleJobDelete)
-	// per-job settings are not implemented yet (D2)
-	router.PATCH("/api/jobs/:id/config", handleJobConfigNotImplemented)
-	router.GET("/api/jobs/default-config", handleJobConfigNotImplemented)
-	router.PUT("/api/jobs/default-config", handleJobConfigNotImplemented)
 
 	var tlsConf *tls.Config
 	if webServerSSL {
@@ -206,7 +166,7 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 		tlsConf = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
 	}
 	// a fresh private dir: the old fixed /tmp/nzbrex-uploads (0755) let another
-	// local user plant symlinks that gin's SaveUploadedFile would follow
+	// local user plant symlinks that the old save (gin's SaveUploadedFile) followed
 	if webUploadDir, err = os.MkdirTemp("", "nzbrex-uploads-"); err != nil {
 		return fmt.Errorf("web server upload dir: %w", err)
 	}
@@ -216,7 +176,7 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 		return fmt.Errorf("web server listen on '%s': %w", addr, err)
 	}
 	srv := &http.Server{
-		Handler:           router,
+		Handler:           handler,
 		TLSConfig:         tlsConf,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
@@ -244,6 +204,129 @@ func StartWebServer(addr string, processor *PROCESSOR) error {
 	return nil
 }
 
+// H is a JSON object for responses.
+type H = map[string]any
+
+// webHandler returns the web server's routes behind the Host/CSRF guard and,
+// with auth, the login. Standard library only (net/http routing, Go 1.22+).
+func webHandler(addr string, auth *webAuth) (http.Handler, error) {
+	tmpl, err := template.ParseFS(templatesFS, "web/templates/*.html")
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse templates: %w", err)
+	}
+	static, err := fs.Sub(staticFS, "web/static")
+	if err != nil {
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+	// pages: they load their data from the API
+	mux.HandleFunc("GET /{$}", page(tmpl, "index.html"))
+	mux.HandleFunc("GET /stats", page(tmpl, "stats.html"))
+	mux.HandleFunc("GET /jobs", page(tmpl, "jobs.html"))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", filesOnly(http.FileServerFS(static))))
+
+	mux.HandleFunc("POST /upload", handleUpload)
+	mux.HandleFunc("GET /api/stats", handleAPIStats)
+
+	// job queue
+	mux.HandleFunc("GET /api/jobs", handleAPIJobsList)
+	mux.HandleFunc("POST /api/jobs/{id}/start", handleJobStart)
+	mux.HandleFunc("POST /api/jobs/start-all", handleJobStartAll)
+	mux.HandleFunc("POST /api/jobs/{id}/stop", handleJobStop)
+	mux.HandleFunc("DELETE /api/jobs/{id}", handleJobDelete)
+	// per-job settings are not implemented yet (D2)
+	mux.HandleFunc("PATCH /api/jobs/{id}/config", handleJobConfigNotImplemented)
+	mux.HandleFunc("GET /api/jobs/default-config", handleJobConfigNotImplemented)
+	mux.HandleFunc("PUT /api/jobs/default-config", handleJobConfigNotImplemented)
+
+	var h http.Handler = mux
+	if auth != nil {
+		h = auth.middleware(h)
+	}
+	h = webGuard(webAllowedHosts(addr, auth != nil), h)
+	return recoverPanics(accessLog(h)), nil
+}
+
+// writeJSON answers with v as JSON (no trailing newline, like before).
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		dlog(always, "ERROR Web: encoding a response: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	w.Write(b)
+}
+
+// page serves one template. It renders into a buffer first, so a template
+// error gives a 500 instead of half a page.
+func page(tmpl *template.Template, name string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, name, nil); err != nil {
+			dlog(always, "ERROR Web: template %s: %v", name, err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(buf.Bytes())
+	}
+}
+
+// filesOnly answers 404 for directories: no listings of the static files.
+func filesOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// recoverPanics turns a panic in a handler into a 500 and a log line with the
+// stack (gin's Recovery did this before).
+func recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if p := recover(); p != nil {
+				if p == http.ErrAbortHandler {
+					panic(p)
+				}
+				dlog(always, "ERROR Web: panic in %s %s: %v\n%s", r.Method, r.URL.Path, p, debug.Stack())
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// statusWriter records the status code for the access log.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (s *statusWriter) WriteHeader(code int) { s.code = code; s.ResponseWriter.WriteHeader(code) }
+
+// accessLog logs every request with -debug. (gin logged them always; the pages
+// poll every few seconds, so that was a line every few seconds per open page.)
+func accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !cfg.opt.Debug {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		dlog(always, "Web: %s %s %s -> %d (%v)", peerIP(r), r.Method, r.URL.Path, sw.code, time.Since(start).Round(time.Microsecond))
+	})
+}
+
 // webShutdownOnSignal stops the web server cleanly on SIGINT/SIGTERM: no new
 // requests, waiting jobs canceled, the running job stopped (its session tears
 // down as usual), the upload dir removed. Then the process exits.
@@ -269,16 +352,6 @@ func webShutdownOnSignal() {
 		dlog(always, "Web: shut down")
 		os.Exit(0)
 	}()
-}
-
-// handleIndex serves the main page
-func handleIndex(c *gin.Context) {
-	c.HTML(http.StatusOK, "index.html", nil)
-}
-
-// handleStats serves the statistics page. The page loads its data from /api/stats.
-func handleStats(c *gin.Context) {
-	c.HTML(http.StatusOK, "stats.html", nil)
 }
 
 // jobErrStatus maps a job queue error to an HTTP status.
@@ -338,23 +411,34 @@ func saveUpload(file *multipart.FileHeader) (string, error) {
 }
 
 // handleUpload processes NZB file uploads and adds them to the job queue
-func handleUpload(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, webMaxUploadBytes)
-	file, err := c.FormFile("file")
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, webMaxUploadBytes)
+	var file *multipart.FileHeader
+	err := r.ParseMultipartForm(8 << 20) // bigger uploads spool to a temp file
+	if err == nil {
+		if r.MultipartForm.File["file"] == nil {
+			err = http.ErrMissingFile
+		} else {
+			file = r.MultipartForm.File["file"][0]
+		}
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": fmt.Sprintf("upload larger than %d MiB", webMaxUploadBytes>>20)})
+			writeJSON(w, http.StatusRequestEntityTooLarge, H{"error": fmt.Sprintf("upload larger than %d MiB", webMaxUploadBytes>>20)})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
+		writeJSON(w, http.StatusBadRequest, H{"error": "No file uploaded"})
 		return
 	}
 
 	// Validate file extension
 	ext := filepath.Ext(file.Filename)
 	if ext != ".nzb" && ext != ".gz" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type. Only .nzb and .nzb.gz files are allowed"})
+		writeJSON(w, http.StatusBadRequest, H{"error": "Invalid file type. Only .nzb and .nzb.gz files are allowed"})
 		return
 	}
 
@@ -362,7 +446,7 @@ func handleUpload(c *gin.Context) {
 	dst, err := saveUpload(file)
 	if err != nil {
 		dlog(always, "ERROR Web: saving upload '%s': %v", file.Filename, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		writeJSON(w, http.StatusInternalServerError, H{"error": "Failed to save file"})
 		return
 	}
 
@@ -371,11 +455,11 @@ func handleUpload(c *gin.Context) {
 	jobID, err := jobQueue.AddJob(dst, file.Filename)
 	if err != nil {
 		os.Remove(dst)
-		c.JSON(jobErrStatus(err), gin.H{"error": err.Error()})
+		writeJSON(w, jobErrStatus(err), H{"error": err.Error()})
 		return
 	}
 
-	resp := gin.H{
+	resp := H{
 		"message":  "File uploaded and added to queue",
 		"filename": file.Filename,
 		"size":     file.Size,
@@ -383,60 +467,55 @@ func handleUpload(c *gin.Context) {
 		"status":   jobQueued,
 	}
 	for _, field := range []string{"checkonly", "checkfirst", "crc32", "cachedir", "yenctest", "yenccpu"} {
-		if c.PostForm(field) != "" {
+		if r.PostFormValue(field) != "" {
 			resp["note"] = "per-job settings are not supported yet and were ignored: the job runs with the startup settings"
 			break
 		}
 	}
-	c.JSON(http.StatusOK, resp)
-}
-
-// handleJobsList displays the jobs queue page. The page loads its data from /api/jobs.
-func handleJobsList(c *gin.Context) {
-	c.HTML(http.StatusOK, "jobs.html", nil)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleAPIJobsList returns all jobs as JSON
-func handleAPIJobsList(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+func handleAPIJobsList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, H{
 		"jobs": jobQueue.ListJobs(),
 	})
 }
 
 // handleJobStart starts a queued job
-func handleJobStart(c *gin.Context) {
-	jobID := c.Param("id")
+func handleJobStart(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
 	if err := jobQueue.StartJob(jobID); err != nil {
-		c.JSON(jobErrStatus(err), gin.H{"error": err.Error()})
+		writeJSON(w, jobErrStatus(err), H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(w, http.StatusOK, H{
 		"message": "Job started successfully",
 		"job_id":  jobID,
 	})
 }
 
 // handleJobStop cancels a waiting job or stops a running one
-func handleJobStop(c *gin.Context) {
-	jobID := c.Param("id")
+func handleJobStop(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
 	if err := jobQueue.StopJob(jobID); err != nil {
-		c.JSON(jobErrStatus(err), gin.H{"error": err.Error()})
+		writeJSON(w, jobErrStatus(err), H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(w, http.StatusOK, H{
 		"message": "Job stopping",
 		"job_id":  jobID,
 	})
 }
 
 // handleJobDelete deletes a queued or finished job
-func handleJobDelete(c *gin.Context) {
-	jobID := c.Param("id")
+func handleJobDelete(w http.ResponseWriter, r *http.Request) {
+	jobID := r.PathValue("id")
 	if err := jobQueue.DeleteJob(jobID); err != nil {
-		c.JSON(jobErrStatus(err), gin.H{"error": err.Error()})
+		writeJSON(w, jobErrStatus(err), H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(w, http.StatusOK, H{
 		"message": "Job deleted successfully",
 		"job_id":  jobID,
 	})
@@ -444,26 +523,26 @@ func handleJobDelete(c *gin.Context) {
 
 // handleJobConfigNotImplemented answers the per-job and default settings
 // endpoints. Jobs run with the startup settings until per-job settings exist (D2).
-func handleJobConfigNotImplemented(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{
+func handleJobConfigNotImplemented(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusNotImplemented, H{
 		"error":  "per-job settings are not supported yet: jobs run with the startup settings",
 		"config": startupJobConfig(),
 	})
 }
 
 // handleJobStartAll starts all queued jobs
-func handleJobStartAll(c *gin.Context) {
+func handleJobStartAll(w http.ResponseWriter, r *http.Request) {
 	started := jobQueue.StartAllQueued()
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(w, http.StatusOK, H{
 		"message": fmt.Sprintf("Started %d job(s)", started),
 		"count":   started,
 	})
 }
 
 // handleAPIStats returns statistics as JSON for AJAX requests
-func handleAPIStats(c *gin.Context) {
+func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	stats := collectStats()
-	c.JSON(http.StatusOK, stats)
+	writeJSON(w, http.StatusOK, stats)
 }
 
 // collectStats gathers current statistics for display. It only copies

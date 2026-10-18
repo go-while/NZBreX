@@ -10,18 +10,12 @@ import (
 	gotesting "testing" // Workers.go declares a const named testing
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func guardRouter(allowed map[string]bool) *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-	r.Use(webGuard(allowed))
-	ok := func(c *gin.Context) { c.String(http.StatusOK, "ok") }
-	r.GET("/x", ok)
-	r.POST("/x", ok)
-	return r
+func guardRouter(allowed map[string]bool) http.Handler {
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	return webGuard(allowed, ok)
 }
 
 func doReq(r http.Handler, method, host string, hdr map[string]string) int {

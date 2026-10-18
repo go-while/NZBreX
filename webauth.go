@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
 // Web login (D1): HTTP basic auth against its own passwd file (-webpasswd),
@@ -137,19 +135,27 @@ func (a *webAuth) check(user, pass string) bool {
 }
 
 // middleware asks for basic auth on every request.
-func (a *webAuth) middleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		user, pass, ok := c.Request.BasicAuth()
+func (a *webAuth) middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
 		if !ok || !a.check(user, pass) {
 			if ok {
-				log.Printf("Web: failed login for user '%s' from %s", user, c.ClientIP())
+				log.Printf("Web: failed login for user '%s' from %s", user, peerIP(r))
 			}
-			c.Header("WWW-Authenticate", `Basic realm="NZBreX", charset="UTF-8"`)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "login required"})
+			w.Header().Set("WWW-Authenticate", `Basic realm="NZBreX", charset="UTF-8"`)
+			writeJSON(w, http.StatusUnauthorized, H{"error": "login required"})
 			return
 		}
-		c.Next()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// peerIP is the client's address: the TCP peer, never X-Forwarded-For.
+func peerIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
+	return r.RemoteAddr
 }
 
 // isLoopbackAddr reports whether a listen address only accepts local clients.
@@ -198,31 +204,31 @@ func hostOnly(hostport string) string {
 // cross-site requests (CSRF). Basic auth alone doesn't: browsers send cached
 // credentials cross-site. The custom header forces a CORS preflight, which
 // this server never answers, and Origin / Sec-Fetch-Site must be this site.
-func webGuard(allowedHosts map[string]bool) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if allowedHosts != nil && !allowedHosts[hostOnly(c.Request.Host)] {
-			c.AbortWithStatusJSON(http.StatusMisdirectedRequest, gin.H{"error": "unknown host"})
+func webGuard(allowedHosts map[string]bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if allowedHosts != nil && !allowedHosts[hostOnly(r.Host)] {
+			writeJSON(w, http.StatusMisdirectedRequest, H{"error": "unknown host"})
 			return
 		}
-		switch c.Request.Method {
+		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			c.Next()
+			next.ServeHTTP(w, r)
 			return
 		}
-		if c.GetHeader(webRequestHeader) != "1" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing " + webRequestHeader + " header"})
+		if r.Header.Get(webRequestHeader) != "1" {
+			writeJSON(w, http.StatusForbidden, H{"error": "missing " + webRequestHeader + " header"})
 			return
 		}
-		if site := c.GetHeader("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "cross-site request refused"})
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			writeJSON(w, http.StatusForbidden, H{"error": "cross-site request refused"})
 			return
 		}
-		if origin := c.GetHeader("Origin"); origin != "" {
-			if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, c.Request.Host) {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "cross-origin request refused"})
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) {
+				writeJSON(w, http.StatusForbidden, H{"error": "cross-origin request refused"})
 				return
 			}
 		}
-		c.Next()
-	}
+		next.ServeHTTP(w, r)
+	})
 }

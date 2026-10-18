@@ -638,6 +638,10 @@ Independent of Phases 1–7; can run in parallel.
 - **Not changed:** duplicate meta types still collapse into the `Meta` map (an API change for the maintainer).
 - **NZBreX:** segment ids are normalised to `<…>` and checked against RFC 3977 3.6 (printable ASCII, no spaces, ≤ 250 bytes) before they go into command lines; invalid ones are skipped with an error. The old check wrapped only ids with neither bracket.
 
+## Web server on the standard library (2026-10-18)
+
+gin replaced by `net/http` (Go 1.22+ method/wildcard patterns): `webHandler` builds the routes behind `webGuard` and the login (`auth.middleware`), with `writeJSON`, template pages rendered into a buffer, `filesOnly` (no directory listings), panic recovery (500 + stack, as gin's Recovery) and an access log with `-debug` only (gin logged every poll). Same routes, JSON bodies, status codes and content types; a wrong method now gets 405 instead of 404. Before switching, `webserver_test.go` was written against the gin router (every route, uploads incl. 413, login, CSRF, Host) and passes unchanged on `net/http`. Binary 33.5 → 17.1 MB, third-party packages 114 → 27 (gin pulled bytedance/sonic, go-playground/validator, quic-go, ...). Real binary: both web race scripts (two jobs, pollers, `-log`), the Phase 4 login/CSRF/size probes and SIGTERM give the same results as before.
+
 ## Decisions
 
 All three answered by the user on 2026-10-17.
