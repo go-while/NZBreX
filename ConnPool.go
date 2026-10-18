@@ -561,7 +561,7 @@ func (c *ConnPool) ParkConn(wid int, connitem *ConnItem, src string) {
 		// parked in pool
 		//if cfg.opt.DebugConnPool && !silent {
 		GCounter.Incr("TOTAL_ParkedConns")
-		if always || cfg.opt.BUG && cfg.opt.DebugConnPool {
+		if cfg.opt.DebugConnPool && cfg.opt.DebugWorker { // only lock for the debug line (was `always ||`: a lock on every park)
 			c.mux.RLock()
 			dlog(cfg.opt.DebugConnPool && cfg.opt.DebugWorker, "ParkedConn connid=%d (wid=%d) '%s' inPool=%d cap=%d openConns=%d src='%s'", connitem.connid, wid, c.provider.Name, len(c.pool), cap(c.pool), c.openConns, src)
 			c.mux.RUnlock()

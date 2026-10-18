@@ -467,6 +467,24 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 	return sessId, s
 } // end func newSession
 
+// newBaseSession makes the providers-only session behind -proxytcp/-proxytls
+// and -web: it loads the providers and runs their pools, never an NZB. It is not
+// in sessMap (it isn't a job). main used to build these by hand, leaving
+// counter, fileStat and WorkDividerChan nil (plan 7).
+func (p *PROCESSOR) newBaseSession(name string) *SESSION {
+	return &SESSION{
+		proc:                 p,
+		mux:                  &loggedrwmutex.LoggedSyncRWMutex{Name: name},
+		preparationStartTime: time.Now(),
+		providerList:         make([]*Provider, 0, 8),
+		counter:              NewCounter(10), // no sessId: not a job, job sessions keep counting from 1
+		fileStat:             make(filesStatistic),
+		WorkDividerChan:      make(chan *WrappedItem, max(cfg.opt.ChanSize, 0)),
+		stopChan:             make(chan struct{}), // closed only by s.stop()
+		proxy:                true,                // providers only, no NZB
+	}
+}
+
 func (p *PROCESSOR) newssid() uint64 {
 	p.mux.Lock()
 	p.sessIds++

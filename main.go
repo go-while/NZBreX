@@ -83,13 +83,8 @@ func main() {
 	// -nzbdir is refused in ParseFlags until directory processing works (D3)
 	if proxy {
 		// boot proxy server: a session that only loads the providers and runs their pools
-		s := &SESSION{
-			proc:     thisProcessor,
-			mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "PROXYSESSION"},
-			stopChan: make(chan struct{}), // closed only by s.stop()
-			proxy:    true,
-			ready:    make(chan struct{}),
-		}
+		s := thisProcessor.newBaseSession("PROXYSESSION")
+		s.ready = make(chan struct{})
 		ProxyParent = s // written before any listener goroutine starts
 		go GoCliRxTxCounter()
 		launchErr := make(chan error, 1)
@@ -120,12 +115,7 @@ func main() {
 		}
 		webShutdownOnSignal()
 		// a base session loads the providers for the web server, like the proxy's
-		s := &SESSION{
-			proc:     thisProcessor,
-			mux:      &loggedrwmutex.LoggedSyncRWMutex{Name: "WEBSESSION"},
-			stopChan: make(chan struct{}), // closed only by s.stop()
-			proxy:    true,                // Set proxy flag to initialize providers without processing NZB
-		}
+		s := thisProcessor.newBaseSession("WEBSESSION")
 		// /api/stats lists its providers while no job runs
 		webBaseSession.Store(s)
 		wg.Add(1) // waitSession

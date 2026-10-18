@@ -700,10 +700,12 @@ func DecreaseDLQueueCnt() {
 	GCounter.Decr("dlQueueCnt")
 }
 
+// The queue counts go up *before* the send (pushDL/pushUP) and back down if the
+// channel was full: counted after the send, a fast worker could Decrease first
+// (clamped at 0), and the late Increase left the count at 1 for good, so the
+// divider never saw an empty queue (plan 7). TOTAL_* count successful pushes.
 func IncreaseDLQueueCnt() {
-	// this is used to decrease the dlQueueCnt counter
 	GCounter.Incr("dlQueueCnt")
-	GCounter.Incr("TOTAL_dlQueueCnt")
 	//GCounter.IncrMax("dlQueueCnt", uint64(len(s.segmentList)), "pushDL")       // increment temporary dlQueueCnt counter
 	//GCounter.IncrMax("TOTAL_dlQueueCnt", uint64(len(s.segmentList)), "pushDL") // increment TOTAL_dlQueueCnt counter
 }
@@ -714,9 +716,7 @@ func DecreaseUPQueueCnt() {
 }
 
 func IncreaseUPQueueCnt() {
-	// this is used to decrease the upQueueCnt counter
 	GCounter.Incr("upQueueCnt")
-	GCounter.Incr("TOTAL_upQueueCnt")
 }
 
 func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Duration, min, max int64) int64 {

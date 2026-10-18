@@ -787,15 +787,17 @@ providerDl:
 			} else if !cfg.opt.ByPassSTAT {
 		*/
 		// if we don't check first and did not bypass STAT, we can push items to download queue for provider-group
+		IncreaseDLQueueCnt() // before the send: the worker may Decrease as soon as it has the item
 		select {
 		case s.segmentChansDowns[s.providerList[pid].Group] <- item: // non-blocking
 			pushed = true
 			item.flaginDL = true
 			item.pushedDL++ // mark as pushed to download queue (in pushDL)
-			IncreaseDLQueueCnt()
+			GCounter.Incr("TOTAL_dlQueueCnt")
 			dlog(cfg.opt.DebugWorker, " | [DV-pushDL] pushed to dlchan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			return pushed, 0, nil // return after 1st push!
 		default:
+			DecreaseDLQueueCnt() // not queued
 			dlog(cfg.opt.BUG, "DEBUG SPAM pushDL: chan is full @ #'%s', retry next", s.providerList[pid].Group)
 			// chan is full means we cannot push the item to the download queue to this provider group
 			// either app is blocked or we're just checking faster than we can download at all...
@@ -889,17 +891,19 @@ providerUp:
 		/* push upload request only to 1.
 		this one should up it and usenet should distribute it within minutes
 		*/
-		select { // non-blocking
+		IncreaseUPQueueCnt() // before the send: the worker may Decrease as soon as it has the item
+		select {
 		case s.segmentChansReups[s.providerList[pid].Group] <- item: // non-blocking
 			// pass
 			item.flaginUP = true
-			item.pushedUP++      // mark as pushed to upload queue (in pushUP)
-			IncreaseUPQueueCnt() // increment upQueueCnt counter
+			item.pushedUP++ // mark as pushed to upload queue (in pushUP)
+			GCounter.Incr("TOTAL_upQueueCnt")
 			//GCounter.IncrMax("upQueueCnt", uint64(len(s.segmentList)), "pushUP")
 			//GCounter.IncrMax("TOTAL_upQueueCnt", uint64(len(s.segmentList)), "pushUP")
 			dlog(cfg.opt.DebugWorker, " | pushUP: in chan seg.Id='%s' @ #'%s'", item.segment.Id, s.providerList[pid].Group)
 			return true, 0, 0, nil // return after 1st push to a group!
 		default:
+			DecreaseUPQueueCnt() // not queued
 			//dlog(cfg.opt.BUG "DEBUG SPAM pushUP: chan is full @ '%s'", s.providerList[pid].Name)
 			// chan is full for this group, try next provider-group or not? FIXME TODO REVIEW
 			noup++

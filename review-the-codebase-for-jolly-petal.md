@@ -575,6 +575,12 @@ The jobs page has a per-job settings dialog and a "default settings" dialog, wit
 - **Queue counter ordering (corrected).** The draft's "Increase/Decrease mismatch → underflow" is wrong: every `Increase` (`Workers.go:572/674`) pairs with a successful push and each receive does one `Decrease` (`:305/:390`). The real bug: `Increase` runs *after* the non-blocking send. A fast worker (e.g. a cache hit) can `Decrease` first, which is clamped at 0 and logs an error. The late `Increase` then leaves `dlQueueCnt = 1` forever, so `GoWorkDivider` (`Workers.go:1029`) never ends. **Fix:** `Increase` before the send; undo it if the send fails.
 - **(dropped)** `Cache.go:86-101` request/response correlation: concurrent requests are for the same item and get the same answer, and `pushDL` sends each item to only one group.
 
+**Result (2026-10-18):**
+- `newBaseSession(name)` builds the proxy and web sessions (counter, fileStat, WorkDividerChan, unbuffered stopChan, `proxy`); main no longer builds `&SESSION{}` by hand. It gets no `sessId` and isn't in `sessMap`, so job session IDs still start at 1.
+- `ParkConn` takes `c.mux.RLock` only when `-debugconnpool -debugworker` would print the line.
+- `pushDL`/`pushUP` raise `dlQueueCnt`/`upQueueCnt` before the send and lower them again if the channel was full; `TOTAL_*` count successful pushes only. The race never showed in the test logs (no "is already 0" in any run), so this is a fix by reading, not a reproduced bug.
+- Checked under `-race`: CLI download/upload in mode 4 (240 segments, 60 re-uploaded to B, 17 s, no counter errors), web script with two jobs (session IDs 1 and 2, 0 races), proxy start + CAPABILITIES + SIGTERM (0 races).
+
 ---
 
 ## Phase 8 (new): Pure-Go yEnc decoder using Go SIMD (prototype)
