@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -56,7 +57,44 @@ var (
 	// UseNoDeadline turns ExtendConn into a no-op, so without this a server that accepts the
 	// TCP connection and then sends nothing blocks the caller forever. A var so tests can shorten it.
 	connHandshakeTimeout = 30 * time.Second
+
+	// connIdleTimeout ends a read or write on a conn that moved no data for this
+	// long (idleConn): a provider that stops answering mid-command no longer blocks
+	// a worker forever. A var so tests can shorten it.
+	connIdleTimeout = DefaultConnReadDeadline
 )
+
+// idleConn gives every Read and Write a fresh deadline of its idle timeout, so a
+// command fails only when nothing arrives (or leaves) for that long, however
+// long a big article takes as a whole. A fixed deadline per command (ExtendConn,
+// switched off by UseNoDeadline) would cut off slow but steady transfers.
+// The timeout is 0 (off) during the handshake, which has its own absolute deadline.
+type idleConn struct {
+	net.Conn
+	idle atomic.Int64 // time.Duration; 0 = off
+}
+
+func (c *idleConn) Read(p []byte) (int, error) {
+	if d := time.Duration(c.idle.Load()); d > 0 {
+		c.Conn.SetReadDeadline(time.Now().Add(d))
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *idleConn) Write(p []byte) (int, error) {
+	if d := time.Duration(c.idle.Load()); d > 0 {
+		c.Conn.SetWriteDeadline(time.Now().Add(d))
+	}
+	return c.Conn.Write(p)
+}
+
+// setIdleTimeout sets conn's idle timeout (0: off, for exchanges with their own
+// deadline). Conns that aren't idleConns are left alone.
+func setIdleTimeout(conn net.Conn, d time.Duration) {
+	if ic, ok := conn.(*idleConn); ok {
+		ic.idle.Store(int64(d))
+	}
+}
 
 // holds an active connection to share around
 type ConnItem struct {
@@ -261,6 +299,9 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 	} // end switch
 	dlog(cfg.opt.DebugConnPool, "ConPool connect raw conn established '%s' took=(%d ms)", c.provider.Name, time.Since(start).Milliseconds())
 
+	// every read and write gets an idle timeout once the handshake is done
+	conn = &idleConn{Conn: conn}
+
 	// bound the greeting and login; cleared again once the conn is handed out
 	conn.SetDeadline(time.Now().Add(connHandshakeTimeout))
 	defer func() {
@@ -295,7 +336,8 @@ func (c *ConnPool) connect() (connitem *ConnItem, err error) {
 		connitem, err = c.auth(srvtp, conn, start)
 	}
 	if connitem != nil && connitem.conn != nil {
-		connitem.conn.SetDeadline(time.Time{}) // no deadline from here on, see ExtendConn / UseNoDeadline
+		connitem.conn.SetDeadline(time.Time{}) // the handshake's absolute deadline is over
+		setIdleTimeout(connitem.conn, connIdleTimeout)
 	}
 	return connitem, err
 } // end func connect

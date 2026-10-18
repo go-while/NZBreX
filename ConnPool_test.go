@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/textproto"
+	"os"
+	"strings"
 	gotesting "testing" // Workers.go declares a const named testing
 	"time"
 
@@ -160,5 +164,95 @@ func TestCheckCapabilitiesTimesOutWithoutHoldingLock(t *gotesting.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("checkCapabilities blocked on a silent server")
+	}
+}
+
+// serveScript accepts one conn, greets, then answers each command line with reply(line, conn).
+func serveScript(t *gotesting.T, reply func(line string, w net.Conn)) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		t.Cleanup(func() { conn.Close() })
+		io.WriteString(conn, "200 ready\r\n")
+		br := bufio.NewReader(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			reply(strings.TrimRight(line, "\r\n"), conn)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+func shortIdle(t *gotesting.T) {
+	old := connIdleTimeout
+	connIdleTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { connIdleTimeout = old })
+}
+
+// A server that stops answering mid-session no longer blocks the caller forever.
+func TestIdleTimeoutEndsSilentCommand(t *gotesting.T) {
+	shortIdle(t)
+	addr := serveScript(t, func(string, net.Conn) {}) // never answers
+	c := testPool(t, addr)
+	ci, err := c.connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ci.conn.Close()
+	start := time.Now()
+	id, err := ci.srvtp.Cmd("STAT <a@b>")
+	if err == nil {
+		ci.srvtp.StartResponse(id)
+		_, _, err = ci.srvtp.ReadCodeLine(223)
+		ci.srvtp.EndResponse(id)
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("STAT to a silent server: err=%v, want a deadline error", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %v, want about the idle timeout", d)
+	}
+}
+
+// The timeout is per read: a slow but steady article is not cut off.
+func TestIdleTimeoutKeepsSlowTransfer(t *gotesting.T) {
+	shortIdle(t)
+	addr := serveScript(t, func(_ string, w net.Conn) {
+		io.WriteString(w, "222 0 <a@b> body\r\n")
+		for i := 0; i < 30; i++ { // 3 s in total, 10x the idle timeout
+			time.Sleep(100 * time.Millisecond)
+			fmt.Fprintf(w, "line %d\r\n", i)
+		}
+		io.WriteString(w, ".\r\n")
+	})
+	c := testPool(t, addr)
+	ci, err := c.connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ci.conn.Close()
+	id, err := ci.srvtp.Cmd("BODY <a@b>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci.srvtp.StartResponse(id)
+	defer ci.srvtp.EndResponse(id)
+	if _, _, err := ci.srvtp.ReadCodeLine(222); err != nil {
+		t.Fatal(err)
+	}
+	lines, err := ci.srvtp.ReadDotLines()
+	if err != nil || len(lines) != 30 {
+		t.Fatalf("slow body: %d lines, err=%v; want 30 lines", len(lines), err)
 	}
 }

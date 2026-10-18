@@ -1037,9 +1037,10 @@ func checkCapabilities(provider *Provider, connitem *ConnItem) error {
 	rcode := 101 // expected
 
 	defer provider.ConnPool.CloseConn(connitem, nil)
-	// The conn has no read deadline (UseNoDeadline): give this exchange its own, so a
+	// Swap the idle timeout for one deadline over the whole exchange, so a
 	// server that stops answering can't block the boot. The conn is closed afterwards,
 	// so the deadline never reaches a reused conn.
+	setIdleTimeout(connitem.conn, 0) // this exchange has its own deadline
 	connitem.conn.SetDeadline(time.Now().Add(connHandshakeTimeout))
 
 	// No lock is held during the network I/O (it used to hold provider.mux across both reads).

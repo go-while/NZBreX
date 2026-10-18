@@ -365,11 +365,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					lastGood = time.Now() // reset lastGood if segcheck is not done
 					continue forGoDownsRoutine
 				}
-				if segcheckdone && time.Now().After(timeOut) {
-					dlog(always, "GoDownsRoutine: (%d@'%s') timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
-					break forGoDownsRoutine
-				}
-				dlog(time.Since(lastGood) > 9*time.Second && always && segcheckdone, "GoDownsRoutine: (%d@'%s') waiting on segCD len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCD), time.Until(timeOut), time.Since(lastGood))
+				// No exit on idle any more: work can come back late (a retry after another
+				// provider timed out). The routine ends when LaunchSession closes the
+				// channel (StopRoutines) or the session stops.
+				dlog(time.Since(lastGood) > 9*time.Second && cfg.opt.DebugWorker && segcheckdone, "GoDownsRoutine: (%d@'%s') waiting on segCD len=%d timeout in: %v (lastGood: %v)", wid, provider.Name, len(segCD), time.Until(timeOut), time.Since(lastGood))
 			case item, ok := <-segCD:
 				if !ok {
 					dlog(cfg.opt.DebugWorker, "GoDownsRoutine: channel closed (%d@'%s')", wid, provider.Name)
@@ -466,11 +465,10 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 					lastGood = time.Now() // reset lastGood if segcheck is not done
 					continue forGoReupsRoutine
 				}
-				if segcheckdone && time.Now().After(timeOut) {
-					dlog(always, "ReupsRoutine: (%d@'%s') timeout reached, exiting. lastGood: %v", wid, provider.Name, time.Since(lastGood))
-					break forGoReupsRoutine
-				}
-				dlog(time.Since(lastGood) > 9*time.Second, "ReupsRoutine: (%d@'%s') waiting on segCR len=%d timeout in: %v (lastgood: %v)", wid, provider.Name, len(segCR), time.Until(timeOut), time.Since(lastGood))
+				// No exit on idle any more: work can come back late (a retry after another
+				// provider timed out). The routine ends when LaunchSession closes the
+				// channel (StopRoutines) or the session stops.
+				dlog(time.Since(lastGood) > 9*time.Second && cfg.opt.DebugWorker, "ReupsRoutine: (%d@'%s') waiting on segCR len=%d timeout in: %v (lastgood: %v)", wid, provider.Name, len(segCR), time.Until(timeOut), time.Since(lastGood))
 
 			case item, ok := <-segCR:
 				if !ok {
