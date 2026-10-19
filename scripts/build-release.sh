@@ -6,10 +6,12 @@
 #   <outdir>/nzbrex_<version>_<arch>_<variant>.deb               (linux, with DEB=1)
 #
 # purego:    CGO_ENABLED=0, decoder go-yenc-simd. Cross-compiles from anywhere;
-#            static on linux. GOEXPERIMENT=simd unless SIMD=0.
+#            static on linux.
 # rapidyenc: cgo + -tags rapidyenc. The rapidyenc library for the target must be
 #            built first (rapidyenc/build_rapidyenc_*.sh) and CC/CXX set for
 #            cross builds.
+# Both build with GOEXPERIMENT=simd unless SIMD=0: go-yenc-simd's AVX2/AVX-512
+# kernels, also for -yencgo and -benchmark in the rapidyenc variant.
 #
 # Used by .github/workflows/release.yml; runs the same locally.
 set -euo pipefail
@@ -37,10 +39,9 @@ tags=""
 case "$variant" in
 purego)
 	export CGO_ENABLED=0
-	if [ "${SIMD:-1}" = 1 ]; then export GOEXPERIMENT=simd; else export GOEXPERIMENT=; fi
 	;;
 rapidyenc)
-	export CGO_ENABLED=1 GOEXPERIMENT=
+	export CGO_ENABLED=1
 	tags="-tags=rapidyenc"
 	if [ "$goos" = windows ]; then
 		# no MinGW runtime DLLs: only KERNEL32 and msvcrt remain
@@ -52,6 +53,8 @@ rapidyenc)
 	exit 2
 	;;
 esac
+
+if [ "${SIMD:-1}" = 1 ]; then export GOEXPERIMENT=simd; else export GOEXPERIMENT=; fi
 
 echo "building $name (CGO_ENABLED=$CGO_ENABLED GOEXPERIMENT=${GOEXPERIMENT:-} $tags)"
 GOOS=$goos GOARCH=$goarch go build -trimpath $tags -ldflags="$ldflags" -o "$stage/$name/$bin" .

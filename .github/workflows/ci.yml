@@ -72,5 +72,5 @@ jobs:
         run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh darwin
       - name: Test and build
         run: |
-          go test -tags rapidyenc ./rapidyenc/
-          go build -tags rapidyenc -o /dev/null .
+          GOEXPERIMENT=simd go test -tags rapidyenc ./rapidyenc/
+          GOEXPERIMENT=simd go build -tags rapidyenc -o /dev/null .
