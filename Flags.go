@@ -23,6 +23,8 @@ var AddUserDataToProxy string // AddUserToProxy is a flag to add user to proxy
 
 func ParseFlags() {
 	flag.BoolVar(&version, "version", false, "prints app version")
+	flag.BoolVar(&benchmark, "benchmark", false, "measures how fast this machine decodes yEnc (every decoder and CPU kernel this build has) and exits; takes 4 x -benchtime per kernel")
+	flag.DurationVar(&benchTime, "benchtime", time.Second, "time per value of -benchmark")
 	// essentials
 	flag.StringVar(&nzbfile, "nzb", "nzbs/ubuntu-24.04-live-server-amd64.iso.nzb.gz", "/path/file.nzb(.gz)")
 	flag.StringVar(&cfg.opt.NzbDir, "nzbdir", "", "watch this directory: process its .nzb/.nzb.gz files one at a time, oldest first; processed files move to done/ or failed/ in it")
@@ -111,6 +113,13 @@ func ParseFlags() {
 
 	if version {
 		fmt.Printf("%s version: [%s]\n", appName, appVersion)
+		os.Exit(0)
+	}
+	if benchmark {
+		if err := runBenchmark(os.Stdout, max(benchTime, 10*time.Millisecond)); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR -benchmark: %v\n", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 	if runProf {

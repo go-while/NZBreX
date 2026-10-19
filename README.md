@@ -173,6 +173,7 @@ Run with the following arguments:
 - `-prof` start cpu+mem profiler
 - `-profweb` start profiling webserver at address
 - `-version` print app version
+- `-benchmark` measure how fast this machine decodes yEnc and exit: go-yenc-simd with every CPU kernel it can use, and in the rapidyenc build also the C decoder (`-benchtime` sets the time per value, default 1s)
 - `-yenccpu` limit parallel decoding with -crc32=true (default: 8)
 - `-yencout` [true|false] write yenc parts to cache (needs -cd)
 - `-yencmerge` [true|false] merge yenc parts into target files
