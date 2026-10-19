@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"net/textproto"
 	"os"
@@ -262,7 +261,6 @@ func KillConnPool(provider *Provider) {
 //   - directly after connecting if no auth is needed
 //   - after successful auth
 func (c *ConnPool) connect() (connitem *ConnItem, err error) {
-	time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond) // random sleep to avoid all threads connecting at the same time
 	var conn net.Conn
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultConnectTimeout)
