@@ -44,8 +44,9 @@ type SESSION struct {
 	// stopChan is closed exactly once, by stop(), when the session's work is over.
 	// It is created with the session and never replaced: readers may copy it into a local.
 	stopChan       chan struct{}
-	stopOnce       sync.Once // guards close(stopChan)
-	closeChansOnce sync.Once // guards closing segmentChansDowns/Reups (see closeWorkChans)
+	stopOnce       sync.Once     // guards close(stopChan)
+	divWake        chan struct{} // workers signal finished work: the divider runs its next round early
+	closeChansOnce sync.Once     // guards closing segmentChansDowns/Reups (see closeWorkChans)
 	mux            *loggedrwmutex.LoggedSyncRWMutex
 	counter        *Counter_uint64 // private counter for every session // TODO check all GCounter if they should be private
 	proc           *PROCESSOR      // the parent where we belong to
@@ -430,6 +431,7 @@ func (p *PROCESSOR) newSession(nzbName string) (uint64, *SESSION) {
 		fileStat:             make(filesStatistic),
 		WorkDividerChan:      make(chan *WrappedItem, max(cfg.opt.ChanSize, 0)), // -chansize may be <= 0
 		stopChan:             make(chan struct{}, 1),                            // stopChan is used to stop the session/routines
+		divWake:              make(chan struct{}, 1),
 	}
 
 	// add session to processor map
@@ -462,7 +464,8 @@ func (p *PROCESSOR) newBaseSession(name string) *SESSION {
 		fileStat:             make(filesStatistic),
 		WorkDividerChan:      make(chan *WrappedItem, max(cfg.opt.ChanSize, 0)),
 		stopChan:             make(chan struct{}), // closed only by s.stop()
-		proxy:                true,                // providers only, no NZB
+		divWake:              make(chan struct{}, 1),
+		proxy:                true, // providers only, no NZB
 	}
 }
 

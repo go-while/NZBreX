@@ -223,7 +223,7 @@ feed:
 		}
 	}
 	if fed == len(s.segmentList) {
-		tick := time.NewTicker(time.Second)
+		tick := time.NewTicker(50 * time.Millisecond) // was 1 s: the check phase ended up to 1 s late
 	waitEmpty:
 		for len(segmentChanCheck) > 0 { // wait for the check routines to empty out the chan
 			select {
@@ -246,7 +246,42 @@ feed:
 	s.checkFeedDone = true
 	s.mux.Unlock()
 	close(segmentChanCheck) // close the chan to signal no more items will come
+	s.wakeDivider()
 } // end func feedCheckChan
+
+// divMinRound is the shortest gap between two divider rounds when workers wake it.
+const divMinRound = 50 * time.Millisecond
+
+// wakeDivider tells the divider that work finished (never blocks).
+func (s *SESSION) wakeDivider() {
+	select {
+	case s.divWake <- struct{}{}:
+	default:
+	}
+}
+
+// divSleep waits up to d before the divider's next round, or less when a worker
+// signals finished work: then at least minRound after the last round started
+// (prevStart), so a busy session doesn't rescan the segment list for every item.
+// The divider only slept: a finished check, download or upload waited up to 2 s
+// for the next round, and so did the end of the session.
+func (s *SESSION) divSleep(d, minRound time.Duration, prevStart time.Time) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return
+	case <-s.stopChan:
+		return
+	case <-s.divWake:
+	}
+	if rest := minRound - time.Since(prevStart); rest > 0 {
+		select {
+		case <-time.After(rest):
+		case <-s.stopChan:
+		}
+	}
+}
 
 func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGroup, waitPool *sync.WaitGroup) {
 	dlog(cfg.opt.DebugWorker, "GoWorker (%d) launching routines '%s'", wid, provider.Name)
@@ -332,6 +367,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				}
 				processed++
 				s.workDone.Add(1)
+				s.wakeDivider()
 				// the idle timeout counts from now: one slow item (connect retries) must
 				// not make the routine quit while items are waiting in the channel
 				timeOut = time.Now().Add(15 * time.Second)
@@ -409,6 +445,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoDownsRoutine: code=%d", code))
 				processed++
 				s.workDone.Add(1)
+				s.wakeDivider()
 				DecreaseDLQueueCnt()
 				if err != nil || (code != 220 && code != 920) {
 					if code != 430 {
@@ -495,6 +532,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				item.PrintItemFlags(cfg.opt.DebugFlags, true, fmt.Sprintf("post-GoReupsRoutine: code=%d", code))
 				processed++
 				s.workDone.Add(1)
+				s.wakeDivider()
 				DecreaseUPQueueCnt()
 				if err != nil || code == 0 {
 					errStr := fmt.Sprintf("ERROR in GoReupsRoutine code='%d' err='%v' no retry", code, err)
@@ -1038,7 +1076,12 @@ forever:
 		if cfg.opt.DebugWorker {
 			dlog(cfg.opt.DebugWorker, " | [DV] lastRunTook='%d ms' '%v microsleep=%v fetchedtoUP=%d fetchedtoDL=%d backlogDL=%d refillUP=%d", dvlastRunTook.Milliseconds(), dvlastRunTook, microsleep, fetchedtoUP, fetchedtoDL, backlogDL, refillUP)
 		}
-		time.Sleep(time.Duration((dvlastRunTook.Milliseconds() * 2)) + (time.Duration(microsleep) * time.Millisecond))
+		minRound := max(divMinRound, 2*dvlastRunTook) // big NZBs: a round costs a scan of the whole list
+		sleep := 2*dvlastRunTook + time.Duration(microsleep)*time.Millisecond
+		if closeWait <= 0 {
+			sleep = minRound // a close case matched: confirm it in the next round right away
+		}
+		s.divSleep(sleep, minRound, startLoop)
 
 		if s.stopped() {
 			// stop() before the work is done: a web job was stopped. The routines drop

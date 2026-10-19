@@ -786,7 +786,7 @@ func AdjustMicroSleep(microsleep int64, pushed, todo uint64, lastRunTook time.Du
 	if newSleep > max {
 		newSleep = max
 	}
-	dlog(always, "AdjustMicroSleep: pushed=%d todo=%d lastRunTook=%s microsleep=%d -> newSleep=%d (min=%d max=%d)", pushed, todo, lastRunTook, microsleep, newSleep, min, max)
+	dlog(cfg.opt.DebugWorker, "AdjustMicroSleep: pushed=%d todo=%d lastRunTook=%s microsleep=%d -> newSleep=%d (min=%d max=%d)", pushed, todo, lastRunTook, microsleep, newSleep, min, max)
 	return newSleep
 }
 
