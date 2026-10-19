@@ -9,6 +9,7 @@ import (
 	"net/textproto"
 	"os"
 	"strings"
+	"sync/atomic"
 	gotesting "testing" // Workers.go declares a const named testing
 	"time"
 
@@ -254,5 +255,60 @@ func TestIdleTimeoutKeepsSlowTransfer(t *gotesting.T) {
 	lines, err := ci.srvtp.ReadDotLines()
 	if err != nil || len(lines) != 30 {
 		t.Fatalf("slow body: %d lines, err=%v; want 30 lines", len(lines), err)
+	}
+}
+
+// connect sets up at most cap(dialSem) connections to a provider at once: the
+// others wait for a handshake to finish (they used to start one by one, after a
+// random pause of up to 50 ms x MaxConns each).
+func TestConnectLimitsParallelDials(t *gotesting.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	var cur, peak atomic.Int32
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { conn.Close() })
+			go func() {
+				n := cur.Add(1)
+				for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+				}
+				time.Sleep(100 * time.Millisecond) // a slow handshake
+				cur.Add(-1)                        // before the greeting: the client frees its slot only after reading it
+				io.WriteString(conn, "200 test\r\n")
+				io.Copy(io.Discard, conn)
+			}()
+		}
+	}()
+	c := testPool(t, ln.Addr().String())
+	c.dialSem = make(chan struct{}, 2)
+
+	start := time.Now()
+	errs := make(chan error, 6)
+	for range 6 {
+		go func() {
+			ci, err := c.connect()
+			if err == nil {
+				ci.conn.Close()
+			}
+			errs <- err
+		}()
+	}
+	for range 6 {
+		if err := <-errs; err != nil {
+			t.Fatalf("connect: %v", err)
+		}
+	}
+	if p := peak.Load(); p > 2 {
+		t.Errorf("%d connections in setup at once, limit 2", p)
+	}
+	if took := time.Since(start); took < 250*time.Millisecond {
+		t.Errorf("6 connects with 2 at a time took %v, want 3 rounds of ~100 ms", took)
 	}
 }

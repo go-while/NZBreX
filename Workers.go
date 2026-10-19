@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -112,8 +111,7 @@ func (s *SESSION) GoBootWorkers(waitDivider *sync.WaitGroup, workerWGconnReady *
 					dlog(cfg.opt.Debug, "GoBootWorkers PreBoot Provider '%s' launch wid=%d/%d", provider.Name, wid, provider.MaxConns)
 				}
 				// GoWorker connecting....
-				go s.GoWorker(wid, provider, waitWorker, waitPool)
-				time.Sleep(time.Duration(rand.Intn(50*provider.MaxConns)) * time.Millisecond) // random sleep to avoid all workers connecting at the same time
+				go s.GoWorker(wid, provider, waitWorker, waitPool) // ConnPool.dialSem spreads the connects
 			}
 
 		}(provider, workerWGconnReady, waitWorker, waitPool) // end go func
