@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -68,7 +69,7 @@ func parsePasswdFile(filename string, opts passwdOpts) (map[string]*UserData, er
 		}
 		username := strings.TrimSpace(parts[0])
 		hash := parts[1]
-		maxconns, err := strconv.ParseInt(parts[2], 10, 64)
+		maxconns, err := strconv.Atoi(parts[2])
 		if err != nil {
 			log.Printf("Skipping line %d in passwd file '%s' for user '%s': invalid maxconns '%s'", lineNumber, filename, username, parts[2])
 			continue
@@ -104,7 +105,7 @@ func parsePasswdFile(filename string, opts passwdOpts) (map[string]*UserData, er
 		users[username] = &UserData{
 			Username: username,
 			Password: hash,
-			MaxConns: int(maxconns),
+			MaxConns: maxconns,
 			ExpireAt: expireAt,
 			Posting:  strings.HasPrefix(strings.ToLower(parts[4]), "post"),
 		}
@@ -148,19 +149,20 @@ func mergeNewPasswdFiles(filename string) {
 		}
 		newfile := filepath.Join(dir, entry.Name())
 		func() {
-			mainf, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
-			if err != nil {
-				log.Printf("Could not open %s for appending: %v", filename, err)
-				return
-			}
-			defer mainf.Close()
 			f, err := os.Open(newfile)
 			if err != nil {
 				log.Printf("Could not open %s: %v", newfile, err)
 				return
 			}
 			defer f.Close()
-			if _, err := io.Copy(mainf, f); err != nil {
+			mainf, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
+			if err != nil {
+				log.Printf("Could not open %s for appending: %v", filename, err)
+				return
+			}
+			_, err = io.Copy(mainf, f)
+			// a failed close can lose the appended users: keep the .new file then
+			if err = errors.Join(err, mainf.Close()); err != nil {
 				log.Printf("Failed to import %s into %s: %v", newfile, filename, err)
 				return
 			}
@@ -188,8 +190,8 @@ func appendPasswdUser(userData *UserData, filename string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open passwd file '%s' for appending: %w", filename, err)
 	}
-	defer file.Close()
-	if _, err := file.WriteString(line); err != nil {
+	_, err = file.WriteString(line)
+	if err = errors.Join(err, file.Close()); err != nil {
 		return fmt.Errorf("failed to write new user '%s' to passwd file '%s': %w", userData.Username, filename, err)
 	}
 	log.Printf("Successfully added user '%s' to '%s' with a bcrypt hashed password.", userData.Username, filename)

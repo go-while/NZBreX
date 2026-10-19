@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -683,14 +684,33 @@ var (
 	logFile   *os.File
 )
 
+// logQuote quotes text a client sent (URL path, file name) for the log, like
+// %q: strconv.Quote escapes line breaks and other control characters, so the
+// text can't start fake log lines or send terminal escapes. The ReplaceAll
+// calls change nothing after Quote; they are the form CodeQL's log-injection
+// check recognizes (it can't see %q through dlog).
+func logQuote(s string) string {
+	q := strconv.Quote(s)
+	return strings.ReplaceAll(strings.ReplaceAll(q, "\n", ""), "\r", "")
+}
+
+// closeLogFile closes a log file NZBreX no longer writes to. A failed close can
+// mean its last lines were lost; that goes to stderr, the log is gone already.
+func closeLogFile(f *os.File) {
+	if f == nil {
+		return
+	}
+	if err := f.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR closing log file '%s': %v\n", f.Name(), err)
+	}
+}
+
 func SetLogToTerminal() {
 	// Reset log output to the terminal
 	logFileMu.Lock()
 	log.SetOutput(os.Stdout)
-	if logFile != nil {
-		logFile.Close()
-		logFile = nil
-	}
+	closeLogFile(logFile)
+	logFile = nil
 	logFileMu.Unlock()
 	dlog(cfg.opt.Debug, "output reset to os.Stdout")
 } // end func SetLogToTerminal (written by AI: GPT-4.1)
@@ -715,9 +735,7 @@ func LogToFile(filename string, append bool) (err error) {
 	}
 	logFileMu.Lock()
 	log.SetOutput(f)
-	if logFile != nil {
-		logFile.Close()
-	}
+	closeLogFile(logFile)
 	logFile = f
 	logFileMu.Unlock()
 	return

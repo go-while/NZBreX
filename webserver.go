@@ -296,7 +296,7 @@ func recoverPanics(next http.Handler) http.Handler {
 				if p == http.ErrAbortHandler {
 					panic(p)
 				}
-				dlog(always, "ERROR Web: panic in %s %s: %v\n%s", r.Method, r.URL.Path, p, debug.Stack())
+				dlog(always, "ERROR Web: panic in %s %s: %v\n%s", r.Method, logQuote(r.URL.Path), p, debug.Stack())
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}
 		}()
@@ -323,7 +323,7 @@ func accessLog(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
 		next.ServeHTTP(sw, r)
-		dlog(always, "Web: %s %s %s -> %d (%v)", peerIP(r), r.Method, r.URL.Path, sw.code, time.Since(start).Round(time.Microsecond))
+		dlog(always, "Web: %s %s %s -> %d (%v)", peerIP(r), r.Method, logQuote(r.URL.Path), sw.code, time.Since(start).Round(time.Microsecond))
 	})
 }
 
@@ -385,29 +385,26 @@ func uploadName(clientName string) string {
 	return fmt.Sprintf("%d-%s", webUploadSeq.Add(1), string(clean))
 }
 
-// saveUpload writes the upload to a new file in webUploadDir. O_EXCL: an
-// existing file or symlink at that name makes it fail instead of being followed.
-func saveUpload(file *multipart.FileHeader) (string, error) {
+// saveUpload writes the upload to a new file in webUploadDir and returns its
+// path and the bytes written. O_EXCL: an existing file or symlink at that name
+// makes it fail instead of being followed.
+func saveUpload(file *multipart.FileHeader) (string, int64, error) {
 	src, err := file.Open()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer src.Close()
 	dst := filepath.Join(webUploadDir, uploadName(file.Filename))
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	if _, err := io.Copy(out, src); err != nil {
-		out.Close()
+	n, err := io.Copy(out, src)
+	if err = errors.Join(err, out.Close()); err != nil {
 		os.Remove(dst)
-		return "", err
+		return "", 0, err
 	}
-	if err := out.Close(); err != nil {
-		os.Remove(dst)
-		return "", err
-	}
-	return dst, nil
+	return dst, n, nil
 }
 
 // handleUpload processes NZB file uploads and adds them to the job queue
@@ -443,14 +440,14 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// saved under a unique name: two uploads of foo.nzb used to overwrite each other
-	dst, err := saveUpload(file)
+	dst, size, err := saveUpload(file)
 	if err != nil {
-		dlog(always, "ERROR Web: saving upload '%s': %v", file.Filename, err)
+		dlog(always, "ERROR Web: saving upload %s: %v", logQuote(file.Filename), err)
 		writeJSON(w, http.StatusInternalServerError, H{"error": "Failed to save file"})
 		return
 	}
 
-	dlog(always, "Web: Uploaded NZB file: %s (size: %d bytes)", file.Filename, file.Size)
+	dlog(always, "Web: Uploaded NZB file: %s (size: %d bytes)", logQuote(file.Filename), size)
 
 	jobID, err := jobQueue.AddJob(dst, file.Filename)
 	if err != nil {
