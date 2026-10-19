@@ -149,18 +149,17 @@ func mergeNewPasswdFiles(filename string) {
 		}
 		newfile := filepath.Join(dir, entry.Name())
 		func() {
+			f, err := os.Open(newfile)
+			if err != nil {
+				log.Printf("Could not open %s: %v", newfile, err)
+				return
+			}
+			defer f.Close()
 			mainf, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
 			if err != nil {
 				log.Printf("Could not open %s for appending: %v", filename, err)
 				return
 			}
-			f, err := os.Open(newfile)
-			if err != nil {
-				log.Printf("Could not open %s: %v", newfile, err)
-				mainf.Close() // nothing was written
-				return
-			}
-			defer f.Close()
 			_, err = io.Copy(mainf, f)
 			// a failed close can lose the appended users: keep the .new file then
 			if err = errors.Join(err, mainf.Close()); err != nil {

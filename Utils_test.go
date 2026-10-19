@@ -53,3 +53,18 @@ func TestValidMessageID(t *tst.T) {
 		}
 	}
 }
+
+// logQuote escapes what a client could use to fake log lines or send terminal escapes.
+func TestLogQuote(t *tst.T) {
+	for in, want := range map[string]string{
+		"/jobs":             `"/jobs"`,
+		"/x\nFAKE LOG LINE": `"/x\nFAKE LOG LINE"`,
+		"a\r\nb":            `"a\r\nb"`,
+		"name\x1b[31m.nzb":  `"name\x1b[31m.nzb"`,
+		"ümlaut.nzb":        `"ümlaut.nzb"`,
+	} {
+		if got := logQuote(in); got != want || strings.ContainsAny(got, "\r\n\x1b") {
+			t.Errorf("logQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

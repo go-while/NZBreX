@@ -296,7 +296,7 @@ func recoverPanics(next http.Handler) http.Handler {
 				if p == http.ErrAbortHandler {
 					panic(p)
 				}
-				dlog(always, "ERROR Web: panic in %s %q: %v\n%s", r.Method, r.URL.Path, p, debug.Stack())
+				dlog(always, "ERROR Web: panic in %s %s: %v\n%s", r.Method, logQuote(r.URL.Path), p, debug.Stack())
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}
 		}()
@@ -323,7 +323,7 @@ func accessLog(next http.Handler) http.Handler {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
 		next.ServeHTTP(sw, r)
-		dlog(always, "Web: %s %s %q -> %d (%v)", peerIP(r), r.Method, r.URL.Path, sw.code, time.Since(start).Round(time.Microsecond))
+		dlog(always, "Web: %s %s %s -> %d (%v)", peerIP(r), r.Method, logQuote(r.URL.Path), sw.code, time.Since(start).Round(time.Microsecond))
 	})
 }
 
@@ -441,12 +441,12 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// saved under a unique name: two uploads of foo.nzb used to overwrite each other
 	dst, err := saveUpload(file)
 	if err != nil {
-		dlog(always, "ERROR Web: saving upload %q: %v", file.Filename, err)
+		dlog(always, "ERROR Web: saving upload %s: %v", logQuote(file.Filename), err)
 		writeJSON(w, http.StatusInternalServerError, H{"error": "Failed to save file"})
 		return
 	}
 
-	dlog(always, "Web: Uploaded NZB file: %q (size: %d bytes)", file.Filename, file.Size)
+	dlog(always, "Web: Uploaded NZB file: %s (size: %d bytes)", logQuote(file.Filename), file.Size)
 
 	jobID, err := jobQueue.AddJob(dst, file.Filename)
 	if err != nil {

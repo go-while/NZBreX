@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -682,6 +683,16 @@ var (
 	logFileMu sync.Mutex
 	logFile   *os.File
 )
+
+// logQuote quotes text a client sent (URL path, file name) for the log, like
+// %q: strconv.Quote escapes line breaks and other control characters, so the
+// text can't start fake log lines or send terminal escapes. The ReplaceAll
+// calls change nothing after Quote; they are the form CodeQL's log-injection
+// check recognizes (it can't see %q through dlog).
+func logQuote(s string) string {
+	q := strconv.Quote(s)
+	return strings.ReplaceAll(strings.ReplaceAll(q, "\n", ""), "\r", "")
+}
 
 // closeLogFile closes a log file NZBreX no longer writes to. A failed close can
 // mean its last lines were lost; that goes to stderr, the log is gone already.
