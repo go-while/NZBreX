@@ -106,7 +106,7 @@ jobs:
         run: cd rapidyenc && ${{ matrix.lib }}
       - name: Test (native)
         if: matrix.native
-        run: go test -tags rapidyenc ./rapidyenc/
+        run: GOEXPERIMENT=simd go test -tags rapidyenc ./rapidyenc/ # as shipped: build-release.sh sets it too
       - name: Build and pack
         env:
           CC: ${{ matrix.cc }}

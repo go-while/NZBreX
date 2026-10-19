@@ -23,6 +23,17 @@ The tool uses the NNTP commands:
 - **ARTICLE** for downloading
 - **IHAVE** or **POST** for uploading
 
+NZBreX runs in one of these modes:
+
+| Mode | Start with | |
+|---|---|---|
+| One NZB | `-nzb file.nzb` | check, download, re-upload, then exit |
+| Directory | `-nzbdir /path` | process every NZB that appears in a directory |
+| Web interface | `-web` | upload NZBs in the browser and run them as a queue, see [Web interface](#web-interface--web) |
+| NNTP proxy | `-proxytcp` / `-proxytls` | serve articles from your providers to a newsreader, see [NNTP proxy](#nntp-proxy--proxytcp---proxytls) |
+
+Only one mode per process.
+
 ---
 
 ## Multiplexing / Grouping Provider Accounts
@@ -197,10 +208,71 @@ Run with the following arguments:
 - `-debugmemlim` debug MEMLIMIT (default: false)
 - `-debugconnpool` debug ConnPool (default: false)
 - `-debugrapidyenc` debug rapidyenc (default: false)
+- `-debugworker` debug the download/upload workers (default: false)
+- `-debugBUG` very spammy extra debug lines (default: false)
+- `-testrapidyenc` decode the rapidyenc test files on startup and exit (default: false)
 - `-logappend` append to logfile instead of rotating/overwriting (default: false)
 - `-logdir` set log directory (default: logs)
 - `-logold` rotate log files to .N, 0 disables rotation (default: 0)
 - `-zzz-shr-testmode` only for test compilation on self-hosted runners (default: false)
+
+---
+
+## Web interface (`-web`)
+
+`-web` starts a small web server instead of processing one NZB: upload NZB files (`.nzb`, `.nzb.gz`), queue them, start, stop or cancel jobs, and watch progress and provider statistics in the browser. Jobs run one at a time, oldest first, each with the flags NZBreX was started with (`-provider`, `-cd`, `-crc32`, `-checkonly`, ...).
+
+Local use, no login (open http://127.0.0.1:11911):
+
+```sh
+./NZBreX -web -provider provider.json -cd /cache
+```
+
+From other machines a login is required. Create a user once, then start with the same file:
+
+```sh
+./NZBreX -webpasswd webpasswd -webadduser 'webadmin01|a-long-password'   # or 'auto|auto' to generate both
+./NZBreX -web -webaddr ':11911' -webpasswd webpasswd -webssl -webssl-crt fullchain.pem -webssl-key privkey.pem -provider provider.json -cd /cache
+```
+
+- `-web` [true|false] start the web server (default: false)
+- `-webaddr` listen address (default: `127.0.0.1:11911`; `:11911` listens on all addresses)
+- `-webpasswd` passwd file with the web users. Without it the server only starts on a loopback address.
+- `-webadduser` `'username|password'` (both at least 10 characters) or `'auto|auto'`: add a user to `-webpasswd` and exit. A running server picks up new users without a restart.
+- `-webssl` [true|false] serve HTTPS (TLS 1.2+) with `-webssl-crt` and `-webssl-key` (default: `fullchain.pem`, `privkey.pem`)
+- `-webhosts` host names the server answers to, comma separated, e.g. `nzbrex.example.org` when it runs behind a reverse proxy. `localhost`, `127.0.0.1`, `::1` and the `-webaddr` host are always allowed.
+
+After 10 failed logins within 10 minutes, a client address is blocked for 10 minutes. Web users are separate from proxy users.
+Per-job settings are not supported yet. Details, the JSON API and the security notes are in [WEB_JOB_QUEUE.md](WEB_JOB_QUEUE.md).
+
+---
+
+## NNTP proxy (`-proxytcp` / `-proxytls`)
+
+With `-proxytcp` or `-proxytls`, NZBreX is a read-only NNTP server: a newsreader or downloader connects to it with a proxy user, and NZBreX fetches each article from the providers in `provider.json`. Your provider accounts stay on this machine; clients only get proxy users you create, with their own connection limits and expiry dates.
+
+How it answers:
+
+- **By message-id** (`ARTICLE`, `BODY`, `HEAD`, `STAT <id>`): asks the providers in `provider.json` order and returns the first hit. Providers with `NoDownload` are skipped, and so are the other accounts of a `Group` once one of them did not have the article. Misses are remembered for a while.
+- **With `-crc32`:** an article whose yEnc data is damaged is fetched from the next provider instead.
+- **Group commands** (`GROUP`, `LIST`, `OVER`/`XOVER`, `HDR`/`XHDR`, `NEXT`, `LAST`, articles by number): only go to providers with `"Newsreader": true`.
+- Articles are passed on unchanged. Posting is not supported.
+
+Start:
+
+```sh
+./NZBreX -proxyadduser 'reader0001|a-long-password|4|30d|nopost'   # adds a user to .proxypasswd and exits
+./NZBreX -provider provider.json -proxytcp 1119                     # plain TCP
+./NZBreX -provider provider.json -proxytls 1563 -tlscrt fullchain.pem -tlskey privkey.pem
+```
+
+- `-proxytcp` port for plain NNTP, e.g. `1119` (default: 0 = off). Listens on all addresses.
+- `-proxytls` port for NNTP over TLS (TLS 1.2+), e.g. `1563` (default: 0 = off). Both can run at once.
+- `-tlscrt` / `-tlskey` certificate and key for `-proxytls` (default: `fullchain.pem`, `privkey.pem`)
+- `-proxypasswdfile` file with the proxy users (default: `.proxypasswd`). It is re-read about once a minute, so new users work without a restart.
+- `-proxyadduser` `'username|password|maxconns|expires|nopost'`: add a user and exit. Username and password need at least 10 characters. `maxconns` limits the user's connections, and 0 means no limit. `expires` is a duration (`30d`, `12h`, `45m`) or a Unix time; proxy users always expire. `'auto|auto|...'` generates username and password and prints them.
+
+Clients have 60 s to log in and are disconnected after 5 minutes without a command. Without users nobody can log in. The proxy can't run in the same process as `-web`, `-nzb` or `-nzbdir`.
 
 ---
 
@@ -209,6 +281,7 @@ Run with the following arguments:
 - `Enabled`: true|false, enables/disables this provider
 - `NoDownload`: true|false, disables downloads from provider
 - `NoUpload`: true|false, disables upload to provider
+- `Newsreader`: true|false, the account allows group commands (`GROUP`, `LIST`, `OVER`, ...); the NNTP proxy sends those, and articles by number, only to such providers
 - `Group`: string, group providers for deduplication
 - `Name`: string, provider name (for debug/output)
 - `Host`: string, server hostname or IP
