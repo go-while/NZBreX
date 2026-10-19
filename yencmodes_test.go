@@ -39,6 +39,12 @@ func (memConn) SetWriteDeadline(time.Time) error { return nil }
 // 7), 128-byte lines, dot-stuffed for NNTP, with the final dot. damaged changes
 // one data byte after encoding, so the pcrc32 no longer matches.
 func yencModesArticle(size int, damaged bool) []byte {
+	return yencModesArticleDots(size, damaged, true)
+}
+
+// yencModesArticleDots: with escapeDots false, a '.' at the start of a line is
+// not yEnc-escaped (allowed: the encoder relies on NNTP dot-stuffing).
+func yencModesArticleDots(size int, damaged, escapeDots bool) []byte {
 	r := rand.New(rand.NewPCG(7, 8))
 	data := make([]byte, size)
 	for i := range data {
@@ -60,7 +66,7 @@ func yencModesArticle(size int, damaged bool) []byte {
 	for i, c := range data {
 		o := c + 42
 		last := i == len(data)-1 || len(line) >= 127
-		if o == 0 || o == '\n' || o == '\r' || o == '=' || (o == '\t' || o == ' ') && (len(line) == 0 || last) || o == '.' && len(line) == 0 {
+		if o == 0 || o == '\n' || o == '\r' || o == '=' || (o == '\t' || o == ' ') && (len(line) == 0 || last) || escapeDots && o == '.' && len(line) == 0 {
 			line = append(line, '=', o+64)
 		} else {
 			line = append(line, o)
@@ -138,7 +144,8 @@ func TestYencModesAgree(t *gotesting.T) {
 		name string
 		art  []byte
 		bad  bool
-	}{{"intact", good, false}, {"damaged", damaged, true}, {"cut off", cut, true}, {"plain text", plain, false}}
+	}{{"intact", good, false}, {"damaged", damaged, true}, {"cut off", cut, true}, {"plain text", plain, false},
+		{"leading dots", yencModesArticleDots(750_000, false, false), false}}
 	for _, m := range yencModes() {
 		if m.mode == 0 {
 			continue
