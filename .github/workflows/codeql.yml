@@ -1,136 +1,67 @@
-name: "CodeQL Advanced"
+name: CodeQL
+
+# Code scanning for the Go code, rapidyenc's C code (the submodule, built for
+# the -tags rapidyenc variant) and the workflow files. Results go to the
+# repository's Security tab. Runs when main changes, once a week (new queries
+# find new things in old code), and by hand.
 
 on:
-  #push:
-  #  branches:
-  #    - main
-  #    - testing
-  #  tags:
-  #    - testing
-  #release:
-  #  types: [published]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 5 * * 1" # Mondays 05:30 UTC
   workflow_dispatch:
-  #repository_dispatch:
-  #pull_request:
-  #  branches:
-  #    - main
-  #    - testing
-  #schedule:
-  #  - cron: '30 05 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.runner_name }}-${{ matrix.language }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
-      security-events: write
-      packages: read
-      actions: read
       contents: read
-
+      security-events: write # upload the results
+      actions: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          # GitHub hosted runners only
           - language: go
             build-mode: autobuild
-            runner: ubuntu-22.04
-            runner_name: "GH-ubuntu-22.04"
-            ram: 16
-            cache: true
-
-          - language: go
-            build-mode: autobuild
-            runner: ubuntu-24.04
-            runner_name: "GH-ubuntu-24.04"
-            ram: 16
-            cache: true
-
-          # C/C++ analysis for rapidyenc
+            queries: security-extended,security-and-quality
           - language: c-cpp
             build-mode: manual
-            runner: ubuntu-latest
-            runner_name: "GH-ubuntu-latest"
-            ram: 16
-            cache: true
-
-          # Actions analysis
+            queries: security-extended
           - language: actions
             build-mode: none
-            runner: ubuntu-latest
-            runner_name: "GH-ubuntu-latest"
-            ram: 16
-            cache: true
-
-
+            queries: security-extended
     steps:
-    - name: Show actor
-      run: echo "Triggered by ${{ github.actor }}"
-
-    # Block unallowed push users
-    - name: Block unallowed push user
-      if: github.event_name == 'push' && github.actor != 'go-while'
-      run: |
-        echo "Push not allowed for user ${{ github.actor }}"
-        exit 1
-
-    # Block unallowed PR users
-    - name: Block unallowed PR user
-      if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'go-while'
-      run: |
-        echo "Pull request not allowed for user ${{ github.event.pull_request.user.login }}"
-        exit 1
-
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        submodules: true
-
-    - name: Install build dependencies
-      if: matrix.language == 'c-cpp'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake ca-certificates curl git dpkg-dev wget
-
-    - name: Set up Go
-      if: matrix.language == 'go'
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: 'go.mod'
-        cache: ${{ matrix.cache }}
-
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
-        queries: ${{ matrix.language == 'c-cpp' && 'security-extended' || 'security-extended,security-and-quality' }}
-        ram: ${{ matrix.ram }}
-
-    - name: Autobuild
-      if: matrix.language == 'go' && matrix.build-mode == 'autobuild'
-      # Run the autobuild step only for Go jobs
-      uses: github/codeql-action/autobuild@v3
-
-    - name: Build (manual, for C/C++)
-      if: matrix.language == 'c-cpp' && matrix.build-mode != 'autobuild'
-      # Run the build step only for C/C++ jobs
-      timeout-minutes: 10
-      run: |
-        cd rapidyenc
-        if [ ! -e rapidyenc ]; then
-          ./clone_rapidyenc.sh
-          if [ ! -e rapidyenc/.git ]; then
-            echo "rapidyenc/ src not found, exiting"
-            exit 1
-          fi
-        else
-          echo "rapidyenc/ src exists, skipping clone"
-        fi
-        ./build_rapidyenc_linux-amd64.sh
-
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
+      - uses: actions/checkout@v7
+        with:
+          submodules: ${{ matrix.language == 'c-cpp' }}
+      - uses: actions/setup-go@v7
+        if: matrix.language == 'go'
+        with:
+          go-version-file: go.mod
+      - name: Install build tools
+        if: matrix.language == 'c-cpp'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: ${{ matrix.queries }}
+      - uses: github/codeql-action/autobuild@v4
+        if: matrix.build-mode == 'autobuild'
+      - name: Build the rapidyenc library
+        if: matrix.language == 'c-cpp'
+        run: cd rapidyenc && ./build_rapidyenc_linux-amd64.sh
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
