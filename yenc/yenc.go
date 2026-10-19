@@ -221,7 +221,14 @@ func (d *Decoder) run() (badcrc bool, err error) {
 		}
 
 		// validate part
-		if err := d.Part.Validate(d.SegId); err != nil || d.Part.BadCRC {
+		// a CRC mismatch is BadCRC with err == nil: check it first, the err branch
+		// below used to return (false, nil) for it and the caller saw no parts
+		err := d.Part.Validate(d.SegId)
+		if d.Part.BadCRC {
+			d.Part = nil
+			return true, nil
+		}
+		if err != nil {
 			/*
 			 * d.Part='&yenc.Part{
 			 * 		Number:18,
@@ -238,11 +245,6 @@ func (d *Decoder) run() (badcrc bool, err error) {
 			return false, err
 		}
 		//log.Printf("yenc.Decoder.run: process #4 d.Part.Number=%d", d.Part.Number)
-		if d.Part.BadCRC {
-			d.Part = nil
-			return true, nil
-		}
-
 		// add part to list
 		d.Parts = append(d.Parts, d.Part)
 
