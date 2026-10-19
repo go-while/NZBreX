@@ -157,7 +157,7 @@ func (c *Cache) GoCacheWriter(cid int) {
 		}
 		n := c.CacheWriter(item)
 		wrote_bytes += uint64(n)
-		// Memory slot already released by GoDownsRoutine before Add2Cache
+		afterCacheWrite(item) // gives the mem slot back if the worker left that to us
 	}
 } // end func c.GoCacheWriter
 

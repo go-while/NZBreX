@@ -9,6 +9,19 @@ package rapidyenc
 #cgo linux,amd64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_amd64.a -lstdc++
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/librapidyenc_linux_arm64.a -lstdc++
 #include "rapidyenc.h"
+
+// rapidyenc_decode_incremental with the pointer arithmetic done in C: src and
+// dest are passed as Go pointers, so cgo keeps them in place for the call.
+// (From mnightingale/rapidyenc ed81518: the Go side used to hand C the
+// addresses as uintptr values, which the cgo pointer rules don't cover.)
+static RapidYencDecoderEnd rapidyenc_decode_incremental_go(const void* src, void* dest, size_t src_length, size_t* n_src, size_t* n_dest, RapidYencDecoderState* state) {
+	const void* in_ptr = src;
+	void* out_ptr = dest;
+	RapidYencDecoderEnd ended = rapidyenc_decode_incremental(&in_ptr, &out_ptr, src_length, state);
+	*n_src = (uintptr_t)in_ptr - (uintptr_t)src;
+	*n_dest = (uintptr_t)out_ptr - (uintptr_t)dest;
+	return ended;
+}
 */
 import "C"
 import (
@@ -63,18 +76,14 @@ func DecodeIncremental(dst, src []byte, state *State) (nDst, nSrc int, end End, 
 		return 0, 0, 0, errDestinationTooSmall
 	}
 
-	srcPointer := uintptr(unsafe.Pointer(&src[0]))
-	dstPointer := uintptr(unsafe.Pointer(&dst[0]))
-
-	result := End(C.rapidyenc_decode_incremental(
-		(*unsafe.Pointer)(unsafe.Pointer(&srcPointer)),
-		(*unsafe.Pointer)(unsafe.Pointer(&dstPointer)),
+	var cnSrc, cnDst C.size_t
+	result := End(C.rapidyenc_decode_incremental_go(
+		unsafe.Pointer(&src[0]),
+		unsafe.Pointer(&dst[0]),
 		C.size_t(len(src)),
+		&cnSrc,
+		&cnDst,
 		(*C.RapidYencDecoderState)(unsafe.Pointer(state)),
 	))
-
-	nSrc = int(srcPointer - uintptr(unsafe.Pointer(&src[0])))
-	nDst = int(dstPointer - uintptr(unsafe.Pointer(&dst[0])))
-
-	return nDst, nSrc, result, nil
+	return int(cnDst), int(cnSrc), result, nil
 }

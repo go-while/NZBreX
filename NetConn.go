@@ -1,7 +1,7 @@
 package main
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -337,8 +337,6 @@ func CMD_POST(connitem *ConnItem, item *segmentChanItem) (int, string, uint64, e
 // the number of bytes read (rxb), the content as a slice of strings, and any error encountered.
 // The function supports parsing headers, handling continued lines, and cleaning headers based on the configuration.
 // It also supports yenc decoding if enabled in the configuration.
-// errReadAborted closes the rapidyenc pipe when readDotLines returns early.
-var errReadAborted = errors.New("readDotLines aborted")
 
 // WARNING: TODO! Be careful when reading X/OVER or X/HDR on large groups because you may run out of memory!
 func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (code int, rxb int, content []string, err error) {
@@ -360,8 +358,8 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 	}
 	var decoder *yenc.Decoder
 	var parseHeader, ignoreNextContinuedLine, gotYencHeader, gotMultipart, brokenYenc bool // = false, false, false, false
-	var sawYbegin bool                                                                     // mode 4: a "=ybegin " body line was seen, so the article is yEnc
-	var notYenc bool                                                                       // mode 4: rapidyenc failed on an article without =ybegin
+	var sawYbegin bool                                                                     // a "=ybegin " body line was seen, so the article is yEnc
+	var notYenc bool                                                                       // no =ybegin: plain text, nothing to check
 	if command == cmdARTICLE || command == cmdHEAD {
 		parseHeader = true
 	}
@@ -372,49 +370,17 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 	var counter *Counter_uint64           // counter for async yenc decoding, if enabled in case 3
 	var releaseDecoder chan struct{}      // channel to release the decoder after processing in case 3
 	var rydecoder *rapidyenc.Decoder      // pointer to RapidYenc decoder, if enabled in case 4
-	var pipeReader *io.PipeReader
-	var pipeWriter *io.PipeWriter
 	var decodedData []byte
-	var ryDoneChan chan error // channel to signal when RapidYenc decoding is done
+	var ybuf *[]byte // case 4: the body as received (CRLF lines, dot-stuffed), decoded in one pass at the end
 
 	switch cfg.opt.YencTest {
 	case 4:
-		// use rapidyenc to decode the body lines
-		pipeReader, pipeWriter = io.Pipe()
-		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc AcquireDecoderWithReader for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
-		rydecoder = rapidyenc.AcquireDecoderWithReader(pipeReader)
-		if rydecoder == nil {
-			connitem.c.CloseConn(connitem, nil)
-			return 0, 0, nil, fmt.Errorf("error readDotLines: failed to acquire rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
-		}
-		rydecoder.SetSegmentId(&item.segment.ID)  // set the segment ID for the decoder
-		defer rapidyenc.ReleaseDecoder(rydecoder) // release the decoder after processing
-		dlog(cfg.opt.DebugRapidYenc, "readDotLines: using rapidyenc decoder for seg.Id='%s' @ '%s'", item.segment.ID, connitem.c.provider.Name)
-		ryDoneChan = make(chan error, 1)
-		// we will read the decoded data from the decoder in a separate goroutine
-		// this allows us to decode the data asynchronously while we are reading lines from the textproto.Conn
-		go func(segId *string, decoded *[]byte, done chan error) {
-			start := time.Now()
-			decodedBuf := make([]byte, cfg.opt.RapidYencBufSize)
-			total := 0
-			var result error
-			for {
-				n, err := rydecoder.Read(decodedBuf)
-				if n > 0 {
-					*decoded = append(*decoded, decodedBuf[:n]...)
-					total += n
-				}
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					result = err
-					break
-				}
-			}
-			dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc decoder done for seg.Id='%s' @ '%s' decoded=%d bufsize=%d total=%d took=(%d µs)", *segId, connitem.c.provider.Name, len(*decoded), len(decodedBuf), total, time.Since(start).Microseconds())
-			done <- result // last: after this the caller may release the decoder
-		}(&item.segment.ID, &decodedData, ryDoneChan)
+		// Mode 4 collects the body and decodes it in one pass after the final dot.
+		// It used to write every line into an io.Pipe read by a decoder goroutine:
+		// two copies and a goroutine handoff per line, about 17 ms CPU per 750 KB
+		// article for a decoder that needs well under 1 ms.
+		ybuf = getYencBuf(item.segment.Bytes)
+		defer putYencBuf(ybuf)
 
 	case 3:
 		// yenc test 3 means we parse yenc lines directly to the decoder as we read them from the textproto.Conn,
@@ -478,17 +444,12 @@ func readDotLines(connitem *ConnItem, item *segmentChanItem, command string) (co
 	} // end case 3
 
 	// An early return (read error, max size, write error, ...) used to leave the async
-	// decoder goroutine blocked forever: case 4 on the pipe that was never closed (and the
-	// deferred ReleaseDecoder handed the decoder back while it still read from it),
-	// case 3 on decodeBodyChan. The success path below closes them itself (finished).
+	// decoder goroutine blocked forever (case 3 on decodeBodyChan; case 4 had a pipe
+	// then and decodes after the final dot now). The success path closes it itself.
 	finished := false
 	defer func() {
 		if finished {
 			return
-		}
-		if pipeWriter != nil {
-			pipeWriter.CloseWithError(errReadAborted)
-			<-ryDoneChan // the reader goroutine has stopped: ReleaseDecoder (deferred before) is safe now
 		}
 		if decodeBodyChan != nil {
 			close(decodeBodyChan)
@@ -588,27 +549,27 @@ readlines:
 			}
 
 			if cfg.opt.YencCRC && !brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
+				if !sawYbegin && strings.HasPrefix(line, "=ybegin ") {
+					sawYbegin = true
+				}
 				switch cfg.opt.YencTest {
 				case 1:
-					// case 1 needs double the memory
-					ydec = append(ydec, line...) // as []byte (with(out) crlf?) via an io.reader
+					// case 1 needs double the memory. The decoder reads lines up to '\n':
+					// without it the whole body was one line and nothing was ever decoded.
+					ydec = append(ydec, line...)
+					ydec = append(ydec, '\n')
 				case 2:
 					// case 2
 					ydat = append(ydat, &line) // as []*string line per line needs less mem allocs
 				case 4:
-					// rapidyenc test 4
-					if !sawYbegin && strings.HasPrefix(line, "=ybegin ") {
-						sawYbegin = true
+					// rapidyenc test 4: the decoder expects the NNTP stream and removes
+					// dot-stuffing itself, so the dot taken off above goes back on (without
+					// it, a line an encoder left to NNTP stuffing lost its dot: a false bad CRC)
+					if len(line) > 0 && line[0] == '.' {
+						*ybuf = append(*ybuf, '.')
 					}
-					//ydec = append(ydec, line+CRLF...) // append the line to the byte buffer
-					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write bodyline=%d size=(%d bytes) @ '%s'", i, len(line), connitem.c.provider.Name)
-					if _, err := pipeWriter.Write([]byte(line + CRLF)); err != nil {
-						pipeWriter.CloseWithError(err)
-						connitem.c.CloseConn(connitem, nil)
-						dlog(always, "ERROR readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
-						return 0, rxb, nil, fmt.Errorf("error readDotLines: rapidyenc pw.Write failed @ '%s' err='%v'", connitem.c.provider.Name, err)
-					}
-					dlog(cfg.opt.DebugRapidYenc && cfg.opt.BUG, "readDotLines: rapidyenc pw.Write done line=%d seg.Id='%s' @ '%s'", i, item.segment.ID, connitem.c.provider.Name)
+					*ybuf = append(*ybuf, line...)
+					*ybuf = append(*ybuf, '\r', '\n')
 				case 3:
 					// case 3
 					// parse yenc lines directly and asynchronously
@@ -696,15 +657,16 @@ readlines:
 
 	} // end for readlines
 
-	finished = true // from here on the pipe / decodeBodyChan are closed below
-	// case 4: we are done reading lines, close the pipe writer from rapidyenc decoder
-	if pipeWriter != nil {
-		if _, err := pipeWriter.Write([]byte(DOT + CRLF)); err != nil { // write the final dot to the pipe
-			dlog(always, "ERROR readDotLines: pipeWriter.Write failed: err='%v'", err)
-			brokenYenc = true
-		}
-		pipeWriter.Close() // <-- THIS IS CRUCIAL!
-		err = <-ryDoneChan // wait for decoder to finish
+	finished = true // from here on decodeBodyChan is closed below
+	if ybuf != nil && cfg.opt.YencCRC && !brokenYenc && (command == cmdARTICLE || command == cmdBODY) {
+		// case 4: decode the whole body now
+		*ybuf = append(*ybuf, '.', '\r', '\n')
+		start := time.Now()
+		rydecoder = rapidyenc.AcquireDecoderWithReader(bytes.NewReader(*ybuf))
+		rydecoder.SetSegmentId(&item.segment.ID)
+		defer rapidyenc.ReleaseDecoder(rydecoder)
+		decodedData, err = readAllDecoded(rydecoder, len(*ybuf))
+		dlog(cfg.opt.DebugRapidYenc, "readDotLines: rapidyenc decoded seg.Id='%s' @ '%s' in=%d out=%d took=(%d µs) err='%v'", item.segment.ID, connitem.c.provider.Name, len(*ybuf), len(decodedData), time.Since(start).Microseconds(), err)
 
 		if err != nil && !sawYbegin {
 			// not a yEnc article (plain text): nothing to check, deliver it as it is
@@ -718,6 +680,8 @@ readlines:
 		}
 	} else if async && decodeBodyChan != nil { // case 3:
 		close(decodeBodyChan) // close the channel to signal we are done with reading lines
+	} else if (cfg.opt.YencTest == 1 || cfg.opt.YencTest == 2) && !sawYbegin {
+		notYenc = true // plain text: nothing to check, deliver it as it is (as mode 4 does)
 	}
 	dlog(cfg.opt.Debug, "readDotLines: seg.Id='%s' rxb=%d content=(%d lines) took=(%d µs) what='%s'", item.segment.ID, rxb, len(content), time.Since(startReadLines).Microseconds(), command)
 
@@ -746,32 +710,38 @@ readlines:
 			getCoreLimiter()
 			decoder := yenc.NewDecoder(nil, ydec, nil, 1)
 			decoder.SegId = &item.segment.ID
-			if yPart, badcrc, err := decoder.Decode(); err != nil { // chrisfarms/yenc
-				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(ydec), err)
-				isBadCrc = badcrc
-			} else {
-				dlog(always, "YencCRC OK mode=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, item.segment.ID, len(yPart.Body), yPart.Number, yPart.Crc32)
-				isBadCrc = badcrc
-			}
+			yPart, badcrc, err := decoder.Decode() // chrisfarms/yenc
 			returnCoreLimiter()
+			isBadCrc = badcrc
+			switch {
+			case badcrc:
+			case err != nil || yPart == nil:
+				// a yEnc article that doesn't decode (cut off, broken header) is broken, as in mode 4
+				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydec=(%d bytes) err='%v'", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(ydec), err)
+				brokenYenc = true
+			default:
+				dlog(cfg.opt.Debug, "YencCRC OK mode=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, item.segment.ID, len(yPart.Body), yPart.Number, yPart.Crc32)
+				if cfg.opt.YencWrite && cacheON {
+					cache.WriteYenc(item, yPart) // mode 1 never wrote -yencout parts
+				}
+			}
 
 		case 2:
 
 			getCoreLimiter()
 			decoder := yenc.NewDecoder(nil, nil, ydat, 1)
 			decoder.SegId = &item.segment.ID
-			if yPart, badcrc, err := decoder.DecodeSlice(); err != nil { // go-while/yenc#testing-branch
-				returnCoreLimiter()
-				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydat=(%d lines) err='%v' badcrc=%t", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(ydat), err, badcrc)
-			} else {
-				returnCoreLimiter()
-				if yPart != nil {
-					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, yenc.SimdMode, item.segment.ID, len(yPart.Body), yPart.Number, yPart.Crc32)
-				} else {
-					dlog(always, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart is nil", cfg.opt.YencTest, yenc.SimdMode, item.segment.ID)
-					// we got a nil yPart, so we do not write it to the cache
-					break
-				}
+			yPart, badcrc, err := decoder.DecodeSlice() // go-while/yenc#testing-branch
+			returnCoreLimiter()
+			// isBadCrc was never set in mode 2: damaged articles passed as good
+			isBadCrc = badcrc
+			switch {
+			case badcrc:
+			case err != nil || yPart == nil:
+				dlog(always, "ERROR yenc.Decode mode=%d seg.Id='%s' @ '%s' ydat=(%d lines) err='%v'", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(ydat), err)
+				brokenYenc = true
+			default:
+				dlog(cfg.opt.Debug, "YencCRC OK yenctest=%d simd=%d seg.Id='%s' yPart.Body=%d Number=%d crc32=%x'", cfg.opt.YencTest, yenc.SimdMode, item.segment.ID, len(yPart.Body), yPart.Number, yPart.Crc32)
 				if cfg.opt.YencWrite && cacheON {
 					cache.WriteYenc(item, yPart)
 				} else {
@@ -836,13 +806,14 @@ readlines:
 				}
 			}
 
-			if brokenYenc || decoder.Part == nil {
-				break // the case 3
+			if brokenYenc || decoder.Part == nil || !gotYencHeader {
+				break // the case 3; no =ybegin: plain text, nothing to check
 			}
 			// validate the yenc part
 			dlog(cfg.opt.BUG, "readArticleDotLines:try Validate yenctest=%d YencCRC seg.Id='%s' @ '%s' decoder.Part.Body=%d", cfg.opt.YencTest, item.segment.ID, connitem.c.provider.Name, len(decoder.Part.Body))
 			if err := decoder.Part.Validate(&item.segment.ID); err != nil || decoder.Part.BadCRC {
 				isBadCrc = decoder.Part.BadCRC
+				brokenYenc = err != nil // e.g. no =yend: no CRC to compare; was accepted
 				/*
 				* d.Part='&yenc.Part{
 				* 		Number:18,
@@ -901,6 +872,7 @@ readlines:
 				if err := decoder.Part.Validate(&item.segment.ID); err != nil || decoder.Part.BadCRC {
 					returnAsyncCoreLimiter()
 					isBadCrc = decoder.Part.BadCRC
+					brokenYenc = err != nil // content is cleared below: never deliver it as good
 					/*
 					* d.Part='&yenc.Part{
 					* 		Number:18,

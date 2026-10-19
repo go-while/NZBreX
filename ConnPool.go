@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"net/textproto"
 	"os"
@@ -129,7 +128,17 @@ type ConnPool struct {
 	// Closed once by KillConnPool; the proxy's pools are never killed, so it is not the session's.
 	poolStop     chan struct{}
 	poolStopOnce sync.Once
+	// dialSem limits the connections being set up at once (dial, TLS, auth) to
+	// connDialParallel, so a provider doesn't get MaxConns handshakes in one burst.
+	dialSem chan struct{}
 }
+
+// connDialParallel is how many connections to one provider are set up at once.
+// The workers used to start one after another with a random pause of up to
+// 50 ms x MaxConns each: 25 ms x MaxConns² on average before a session could
+// start (10 s at MaxConns 20, a minute at 50), paid again by every NZB of a
+// -nzbdir or web queue run.
+const connDialParallel = 8
 
 // errSessionStopped is returned by waits that gave up because the session stopped.
 var errSessionStopped = errors.New("session stopped")
@@ -197,6 +206,7 @@ func NewConnPool(s *SESSION, provider *Provider, workerWGconnReady *sync.WaitGro
 		s:        s, // session pointer to the session which created this ConnPool
 		sessStop: s.stopChan,
 		poolStop: make(chan struct{}),
+		dialSem:  make(chan struct{}, min(max(provider.MaxConns, 1), connDialParallel)),
 	}
 	if !cfg.opt.CheckOnly {
 		go Speedmeter(s.nzbSize, provider.ConnPool, nil, workerWGconnReady) // start speed meter for this ConnPool / Provider
@@ -262,7 +272,14 @@ func KillConnPool(provider *Provider) {
 //   - directly after connecting if no auth is needed
 //   - after successful auth
 func (c *ConnPool) connect() (connitem *ConnItem, err error) {
-	time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond) // random sleep to avoid all threads connecting at the same time
+	if c.dialSem != nil {
+		select {
+		case c.dialSem <- struct{}{}:
+			defer func() { <-c.dialSem }()
+		case <-c.sessStop: // nil for the proxy: never fires
+			return nil, fmt.Errorf("connect '%s': %w", c.provider.Name, errSessionStopped)
+		}
+	}
 	var conn net.Conn
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultConnectTimeout)

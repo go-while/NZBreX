@@ -200,48 +200,49 @@ type segmentChanItem struct {
 	// When adding new fields, please keep the order.
 	// Then you can easily find the fields you have to add in the initialization code.
 	//mux         sync.RWMutex
-	mux         *loggedrwmutex.LoggedSyncRWMutex // mutex to protect the segmentChanItem struct
-	s           *SESSION                         // links to where it belongs
-	segment     *nzbparser.NzbSegment            // segment/article to download
-	file        *nzbparser.NzbFile               // file to which the segment belongs
-	hashedId    string                           // hashed segment id, used for cache filename
-	nzbhashname *string                          // pointer to the nzb hash name, used for cache directory
-	readChan    chan int                         // to notify, cache has loaded the file to item.lines
-	checkChan   chan bool                        // to notify if item exists in cache
-	missingOn   map[int]bool                     // [provider.id]bool
-	availableOn map[int]bool                     // [provider.id]bool
-	ignoreDlOn  map[int]bool                     // [provider.id]bool
-	ignoreUlOn  map[int]bool                     // [provider.id]bool
-	unwantedOn  map[int]bool                     // [provider.id]bool
-	uploadedTo  map[int]bool                     // [provider.id]bool
-	retryOn     map[int]bool                     // [provider.id]bool
-	errorOn     map[int]bool                     // [provider.id]bool // not in use ... ?!
-	dmcaOn      map[int]bool                     // [provider.id]bool
-	article     []string                         // contains the downloaded segment/article
-	head        []string                         // contains the head
-	body        []string                         // contains the body
-	flaginDL    bool                             // if true, item is in download
-	flagisDL    bool                             // if true, item has been downloaded
-	flaginUP    bool                             // if true, item is in upload
-	flagisUP    bool                             // if true, item has been uploaded
-	flaginDLMEM bool                             // if true, item is in download memory and waits for the quaken
-	flaginUPMEM bool                             // if true, item is in upload memory and waits for the quaken
-	flaginYenc  bool                             // if true, item is in writing to yenc cache
-	flagisYenc  bool                             // if true, item has been written to yenc cache
-	flagCache   bool                             // if true, item is cached
-	memlocked   int                              // 1 while the item holds a mem slot; only MemLimiter sets it, under its mux
-	checkedOn   int                              // counts up if item has been checked on a provider
-	pushedDL    int                              // a counter for debugging
-	pushedUP    int                              // a counter for debugging
-	size        int                              // size of the segment / full article in bytes (used with readDotLines(item,connitem,"ARTICLE"))
-	headsize    int                              // size of the head in bytes (used with readDotLines(item,connitem,"HEAD"))
-	bodysize    int                              // size of the body in bytes (used with readDotLines(item,connitem,"BODY"))
-	dlcnt       int                              // download count, used for retrying
-	badcrc      int                              // number of bad crc checks, used for retrying
-	fails       int                              // number of fails, used for retrying
-	retryIn     int64                            // retry in seconds, used for retrying
-	rxb         uint64                           // total bytes received for this item, used for statistics
-	txb         uint64                           // total bytes transferred for this item, used for statistics
+	mux              *loggedrwmutex.LoggedSyncRWMutex // mutex to protect the segmentChanItem struct
+	s                *SESSION                         // links to where it belongs
+	segment          *nzbparser.NzbSegment            // segment/article to download
+	file             *nzbparser.NzbFile               // file to which the segment belongs
+	hashedId         string                           // hashed segment id, used for cache filename
+	nzbhashname      *string                          // pointer to the nzb hash name, used for cache directory
+	readChan         chan int                         // to notify, cache has loaded the file to item.lines
+	checkChan        chan bool                        // to notify if item exists in cache
+	missingOn        map[int]bool                     // [provider.id]bool
+	availableOn      map[int]bool                     // [provider.id]bool
+	ignoreDlOn       map[int]bool                     // [provider.id]bool
+	ignoreUlOn       map[int]bool                     // [provider.id]bool
+	unwantedOn       map[int]bool                     // [provider.id]bool
+	uploadedTo       map[int]bool                     // [provider.id]bool
+	retryOn          map[int]bool                     // [provider.id]bool
+	errorOn          map[int]bool                     // [provider.id]bool // not in use ... ?!
+	dmcaOn           map[int]bool                     // [provider.id]bool
+	article          []string                         // contains the downloaded segment/article
+	head             []string                         // contains the head
+	body             []string                         // contains the body
+	flaginDL         bool                             // if true, item is in download
+	flagisDL         bool                             // if true, item has been downloaded
+	flaginUP         bool                             // if true, item is in upload
+	flagisUP         bool                             // if true, item has been uploaded
+	flaginDLMEM      bool                             // if true, item is in download memory and waits for the quaken
+	flaginUPMEM      bool                             // if true, item is in upload memory and waits for the quaken
+	flaginYenc       bool                             // if true, item is in writing to yenc cache
+	flagisYenc       bool                             // if true, item has been written to yenc cache
+	flagCache        bool                             // if true, item is cached
+	retireWhenCached bool                             // downloaded with nowhere to upload it: the cache writer gives its mem slot back
+	memlocked        int                              // 1 while the item holds a mem slot; only MemLimiter sets it, under its mux
+	checkedOn        int                              // counts up if item has been checked on a provider
+	pushedDL         int                              // a counter for debugging
+	pushedUP         int                              // a counter for debugging
+	size             int                              // size of the segment / full article in bytes (used with readDotLines(item,connitem,"ARTICLE"))
+	headsize         int                              // size of the head in bytes (used with readDotLines(item,connitem,"HEAD"))
+	bodysize         int                              // size of the body in bytes (used with readDotLines(item,connitem,"BODY"))
+	dlcnt            int                              // download count, used for retrying
+	badcrc           int                              // number of bad crc checks, used for retrying
+	fails            int                              // number of fails, used for retrying
+	retryIn          int64                            // retry in seconds, used for retrying
+	rxb              uint64                           // total bytes received for this item, used for statistics
+	txb              uint64                           // total bytes transferred for this item, used for statistics
 } // end segmentChanItem struct
 
 // fileStatistic is used to store statistics about a file

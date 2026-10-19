@@ -280,7 +280,7 @@ func ParseFlags() {
 	if cfg.opt.YencCRC {
 
 		if cfg.opt.YencTest <= 0 || cfg.opt.YencTest > 4 {
-			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1-4 (default: 2)", cfg.opt.YencTest)
+			dlog(always, "ERROR: you can not use -crc32 with -yenctest=%d because it must be 1-4 (default: 4)", cfg.opt.YencTest)
 			os.Exit(1)
 		}
 
