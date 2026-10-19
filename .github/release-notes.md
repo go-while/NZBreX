@@ -8,7 +8,7 @@
 | macOS | `NZBreX_@TAG@_darwin-arm64_purego.tar.gz` (Intel: `darwin-amd64`) |
 | FreeBSD | `NZBreX_@TAG@_freebsd-amd64_purego.tar.gz` |
 
-**purego** is the default and fine for everyone. The **rapidyenc** files use rapidyenc's C decoder for `-yenctest=4`, which is faster on paper; decoding is far faster than any download either way. They exist for Linux amd64/arm64, Windows amd64 and macOS arm64; the Linux ones need glibc 2.35 or newer.
+**purego** is the default and fine for everyone. Its yEnc decoder (go-yenc-simd) is as fast as rapidyenc's C code on x86-64 CPUs with AVX2, and faster with AVX-512. On ARM (Apple Silicon, arm64 Linux) it has no SIMD yet, so there the **rapidyenc** files, which decode with rapidyenc's C code for `-yenctest=4`, are faster. Decoding is far faster than any download either way; `NZBreX -benchmark` shows the numbers for your machine. The rapidyenc files exist for Linux amd64/arm64, Windows amd64 and macOS arm64; the Linux ones need glibc 2.35 or newer.
 
 Each archive contains the binary, `README.md`, `LICENSE`, `cleanHeaders.txt` and the provider samples.
 
