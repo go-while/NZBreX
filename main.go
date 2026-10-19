@@ -48,14 +48,16 @@ var (
 	GCounter        *Counter_uint64                  // a global counter
 
 	// flags
-	booted        time.Time // not a flag
-	version       bool      // flag
-	runProf       bool      // flag
-	webProf       string    // flag
-	nzbfile       string    // flag
-	testmode      bool      // flag: used to test compilation
-	testrapidyenc bool      // flag: used to test rapidyenc decoder
-	proxy         bool      // flag: used to enable proxy server
+	booted        time.Time     // not a flag
+	version       bool          // flag
+	benchmark     bool          // flag
+	benchTime     time.Duration // flag
+	runProf       bool          // flag
+	webProf       string        // flag
+	nzbfile       string        // flag
+	testmode      bool          // flag: used to test compilation
+	testrapidyenc bool          // flag: used to test rapidyenc decoder
+	proxy         bool          // flag: used to enable proxy server
 )
 
 func init() {
