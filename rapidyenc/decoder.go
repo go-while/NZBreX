@@ -186,7 +186,8 @@ func (d *Decoder) ExpectedCrc() uint32 {
 // and returns the transformed bytes in the provided byte slice p.
 // It returns the number of bytes read and any error encountered during the process.
 func (d *Decoder) Read(p []byte) (int, error) {
-	n, err := 0, error(nil)
+	var n int
+	var err error
 	for {
 		// Defensive: clamp d.dst0 and d.dst1 to valid range BEFORE using them
 		d.clampDst()

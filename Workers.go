@@ -1079,6 +1079,9 @@ forever:
 			if item.fails >= 3 {
 				fails++
 			}
+			if len(item.dmcaOn) > 0 {
+				dmca++ // a provider answered 451 (DMCA) for it
+			}
 
 			if len(item.availableOn) > 0 {
 				segm++ // counts overall availability of segments
