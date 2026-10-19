@@ -270,7 +270,7 @@ func (p *PROCESSOR) LaunchSession(s *SESSION, nzbfilepath string, waitSession *s
 						make(map[int]bool, len(s.providerList)),
 						make(map[int]bool, len(s.providerList)),
 						[]string{}, []string{}, []string{}, // []string fields
-						false, false, false, false, false, false, false, false, false, // bool fields
+						false, false, false, false, false, false, false, false, false, false, // bool fields
 						0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // int fields
 					// "<id>" on the wire. The id goes into NNTP command lines as is, so it
 					// must be a valid message-id: anything else is skipped, not sent.

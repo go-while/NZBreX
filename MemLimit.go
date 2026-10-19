@@ -156,10 +156,20 @@ func (m *MemLimiter) MemLockWait(item *segmentChanItem, who string, stop <-chan 
 // uploaded, written to cache, or retired. Calling it for an item that holds no
 // slot (or calling it twice) is logged and does nothing.
 func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
+	m.memReturn(who, item, false)
+}
+
+// MemReturnIfHeld is MemReturn for paths that may both retire an item (the
+// download worker, the cache writer, the divider): no log if the slot is gone.
+func (m *MemLimiter) MemReturnIfHeld(who string, item *segmentChanItem) {
+	m.memReturn(who, item, true)
+}
+
+func (m *MemLimiter) memReturn(who string, item *segmentChanItem, quiet bool) {
 	m.mux.Lock()
 	if !m.memdata[item] {
 		m.mux.Unlock()
-		dlog(always, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.ID, who)
+		dlog(!quiet, "MemReturn called on non-memlocked item seg.Id='%s' who='%s'", item.segment.ID, who)
 		return // not memlocked, nothing to do
 	}
 	delete(m.memdata, item)
@@ -177,4 +187,4 @@ func (m *MemLimiter) MemReturn(who string, item *segmentChanItem) {
 		dlog(always, "BUG: MemReturn: slot chan is full seg.Id='%s' who='%s'", item.segment.ID, who)
 	}
 	dlog(cfg.opt.DebugMemlim, "MemReturned seg.Id='%s' who='%s'", item.segment.ID, who)
-} // end func memlim.MemReturn
+} // end func memlim.memReturn

@@ -426,7 +426,7 @@ func (s *SESSION) GoWorker(wid int, provider *Provider, waitWorker *sync.WaitGro
 				}
 				switch code {
 				case 220:
-					// pass
+					s.retireAfterDownload(item)
 
 				case 920: // 920 is a special code for GoDownsRoutine to indicate that the item has been read from cache
 					mode = "cache read"
@@ -706,6 +706,10 @@ func (s *SESSION) hasUploadTarget(item *segmentChanItem) bool {
 // retireNoUploadTarget returns the mem slot of an item that will never be uploaded,
 // and drops its article when nothing else needs it (cache written or off, no yenc output).
 func (s *SESSION) retireNoUploadTarget(item *segmentChanItem) {
+	retireItem("DV:noUploadTarget", item)
+} // end func retireNoUploadTarget
+
+func retireItem(who string, item *segmentChanItem) {
 	item.mux.Lock()
 	locked := item.memlocked > 0
 	if locked && !cfg.opt.YencWrite && !item.flaginYenc && (!cacheON || item.flagCache) {
@@ -713,9 +717,46 @@ func (s *SESSION) retireNoUploadTarget(item *segmentChanItem) {
 	}
 	item.mux.Unlock()
 	if locked {
-		memlim.MemReturn("DV:noUploadTarget", item)
+		memlim.MemReturnIfHeld(who, item) // the worker, the cache writer and the divider may race here
 	}
-} // end func retireNoUploadTarget
+}
+
+// retireAfterDownload gives the mem slot of a downloaded item back as soon as
+// nothing needs its article in memory: no provider will take an upload of it
+// (-dlall, -dlmissing, only NoUpload providers) and it is on disk (or the cache
+// is off). Until now only the divider's rounds did that, every 2 s: 2 slots per
+// connection, so download-only runs managed ~8 articles/s (5.5 MB/s locally,
+// the server gave 60 MB/s). If the cache write is still pending, the cache
+// writer retires it (afterCacheWrite); the item lock makes it exactly one of them.
+func (s *SESSION) retireAfterDownload(item *segmentChanItem) {
+	allowUp := !cfg.opt.CheckOnly && GCounter.GetValue("postProviders") > 0
+	item.mux.Lock()
+	if allowUp && s.hasUploadTarget(item) {
+		item.mux.Unlock()
+		return // the upload returns the slot
+	}
+	now := !cacheON || item.flagCache
+	if !now {
+		item.retireWhenCached = true
+	}
+	item.mux.Unlock()
+	if now {
+		retireItem("DR:noUploadTarget", item)
+	}
+}
+
+// afterCacheWrite is called by the cache writer after each item: see retireAfterDownload.
+func afterCacheWrite(item *segmentChanItem) {
+	item.mux.Lock()
+	retire := item.retireWhenCached && item.flagCache
+	if retire {
+		item.retireWhenCached = false
+	}
+	item.mux.Unlock()
+	if retire {
+		retireItem("CW:noUploadTarget", item)
+	}
+}
 
 // releaseMemSlots returns the mem slots still held by this session's items.
 // memlim is global: a slot leaked by one session would be lost for every later one.
