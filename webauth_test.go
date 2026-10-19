@@ -178,7 +178,7 @@ func TestSaveUploadUniqueAndNoSymlinkFollow(t *gotesting.T) {
 	os.Symlink(target, filepath.Join(webUploadDir, uploadName("x.nzb")))
 	webUploadSeq.Store(next - 1) // the save reuses that name
 	fh := multipartFile(t, "x.nzb", "data")
-	if _, err := saveUpload(fh); err == nil {
+	if _, _, err := saveUpload(fh); err == nil {
 		t.Fatal("save over a planted symlink succeeded")
 	}
 	if got, _ := os.ReadFile(target); string(got) != "keep" {

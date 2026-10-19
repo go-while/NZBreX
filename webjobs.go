@@ -450,6 +450,6 @@ func removeUpload(path string) {
 		return
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		dlog(always, "WARN: removing upload '%s': %v", path, err)
+		dlog(always, "WARN: removing upload %s: %v", logQuote(path), err)
 	}
 }
