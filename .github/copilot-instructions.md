@@ -13,7 +13,7 @@ Always reference these instructions first and fallback to search or bash command
   # For cross-compilation (optional):
   apt-get install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu mingw-w64 gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 g++-aarch64-linux-gnu
   ```
-- Go 1.27.2 or later is required (as specified in go.mod)
+- Go 1.27.3 or later is required (as specified in go.mod)
 - CMake 3.31+ is required for building rapidyenc
 
 ### Bootstrap, Build, and Test the Repository
