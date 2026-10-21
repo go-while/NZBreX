@@ -1,6 +1,6 @@
 module github.com/go-while/NZBreX
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83
