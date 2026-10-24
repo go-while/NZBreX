@@ -195,15 +195,15 @@ func serveScript(t *gotesting.T, reply func(line string, w net.Conn)) string {
 	return ln.Addr().String()
 }
 
-func shortIdle(t *gotesting.T) {
+func shortIdle(t *gotesting.T, d time.Duration) {
 	old := connIdleTimeout
-	connIdleTimeout = 300 * time.Millisecond
+	connIdleTimeout = d
 	t.Cleanup(func() { connIdleTimeout = old })
 }
 
 // A server that stops answering mid-session no longer blocks the caller forever.
 func TestIdleTimeoutEndsSilentCommand(t *gotesting.T) {
-	shortIdle(t)
+	shortIdle(t, 300*time.Millisecond)
 	addr := serveScript(t, func(string, net.Conn) {}) // never answers
 	c := testPool(t, addr)
 	ci, err := c.connect()
@@ -227,11 +227,13 @@ func TestIdleTimeoutEndsSilentCommand(t *gotesting.T) {
 }
 
 // The timeout is per read: a slow but steady article is not cut off.
+// The idle timeout is 10x the gap between lines: with 300 ms it failed on a
+// busy single-CPU VM (load 45) whenever one 100 ms sleep overran by 200 ms.
 func TestIdleTimeoutKeepsSlowTransfer(t *gotesting.T) {
-	shortIdle(t)
+	shortIdle(t, time.Second)
 	addr := serveScript(t, func(_ string, w net.Conn) {
 		io.WriteString(w, "222 0 <a@b> body\r\n")
-		for i := 0; i < 30; i++ { // 3 s in total, 10x the idle timeout
+		for i := 0; i < 30; i++ { // 3 s in total, 3x the idle timeout
 			time.Sleep(100 * time.Millisecond)
 			fmt.Fprintf(w, "line %d\r\n", i)
 		}
