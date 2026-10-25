@@ -86,7 +86,8 @@ Only one mode per process.
 
 ## Installation
 
-1. **Download pre-built binaries** from the [Releases](../../releases) page, or
+1. **Download pre-built binaries** from the [Releases](../../releases) page
+   (the release notes say which file to take), or
 2. **Compile from source** (see Build Instructions below)
 3. Configure `provider.json` with your Usenet provider details.
 4. Run the program from the command line:
@@ -114,6 +115,8 @@ go build .
 No C compiler, no cgo. Cross-compiles to any target, e.g.
 `CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build .` or `GOOS=darwin GOARCH=arm64`.
 Built on Linux with `CGO_ENABLED=0`, the binary is static (runs on glibc and musl/Alpine).
+The `purego` release files are built this way: on Alpine take those, the
+`rapidyenc` Linux files need glibc 2.34 or newer and libstdc++.
 
 For go-yenc-simd's AVX2/AVX-512 code on amd64, build with
 `GOEXPERIMENT=simd go build .` (Go 1.27; an experiment, outside the Go 1
@@ -121,6 +124,11 @@ compatibility promise). Without it the decoder still works, in plain Go.
 
 #### With rapidyenc's C decoder
 Needs a C/C++ compiler and cmake; the rapidyenc library is built first.
+This also works on musl (Alpine: `apk add cmake g++ make linux-headers`).
+Tested from source with both variants on AlmaLinux 9/10, Alpine 3.22–3.24,
+Arch, CentOS Stream 9/10, Debian 13, Gentoo, openEuler 25.03, openSUSE Leap
+15.6/16.0, Rocky 9/10 and Ubuntu 24.04–26.04 (amd64). With gcc older than 8
+(Leap 15.6 ships gcc 7) rapidyenc builds without its AVX-512 VBMI2 kernel.
 
 ```sh
 # Linux

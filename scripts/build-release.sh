@@ -81,13 +81,18 @@ if [ "${DEB:-0}" = 1 ] && [ "$goos" = linux ]; then
 	mkdir -p "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/doc/nzbrex"
 	cp "$stage/$name/$bin" "$root/usr/bin/NZBreX"
 	cp README.md LICENSE cleanHeaders.txt provider.sample.json provider.ygg.json "$root/usr/share/doc/nzbrex/"
+	# purego is static; rapidyenc links glibc (symbols up to GLIBC_2.34) and libstdc++
+	depends=""
+	if [ "$variant" = rapidyenc ]; then
+		depends="Depends: libc6 (>= 2.34), libstdc++6"$'\n'
+	fi
 	cat >"$root/DEBIAN/control" <<EOF
 Package: nzbrex
 Version: $debversion
 Section: net
 Priority: optional
 Architecture: $goarch
-Maintainer: ${DEB_MAINTAINER:-go-while <nzbrex@usenet-server.com>}
+${depends}Maintainer: ${DEB_MAINTAINER:-go-while <nzbrex@usenet-server.com>}
 Homepage: https://github.com/go-while/NZBreX
 Description: re-upload Usenet articles missing from providers
  NZBreX checks the articles of an NZB on your providers and re-uploads the
