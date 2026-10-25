@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/go-while/go-cpu-mem-profiler v0.0.0-20240612221627-856954a5fc83
 	github.com/go-while/go-loggedrwmutex v0.0.0-20250601032232-b0aa20cdcb2c
-	github.com/go-while/go-yenc-simd v0.1.1
+	github.com/go-while/go-yenc-simd v0.1.2
 	github.com/javi11/nzbparser v0.5.5
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/crypto v0.58.0
